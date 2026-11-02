@@ -251,6 +251,64 @@ module.exports = function goalsRoutes(db) {
     res.json({ weekStart: start, weekEnd: addDaysStr(start, 6), today, weekPoints, weekDone, weekExpected, goals });
   });
 
+  // 月视图：整月逐日格子
+  r.get('/goals/month', mw.requireUser, (req, res) => {
+    const cfg = getPoints(db);
+    const month = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : todayStr().slice(0, 7);
+    const today = todayStr();
+    const rows = db
+      .prepare(`SELECT * FROM goals WHERE owner_id = ? AND status IN ('active','achieved','abandoned')
+                ORDER BY id DESC`)
+      .all(req.user.id);
+    let monthPoints = 0;
+    let monthDone = 0;
+    let monthExpected = 0;
+    const daysInMonth = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate();
+    const goals = rows.map((g) => {
+      const dates = creditedDatesFor(db, g.id);
+      const cells = [];
+      let gDone = 0;
+      for (let d = 1; d <= daysInMonth; d++) {
+        const date = `${month}-${String(d).padStart(2, '0')}`;
+        const ci = db
+          .prepare(`SELECT * FROM check_ins WHERE goal_id = ? AND check_date = ? AND status = 'credited'`)
+          .get(g.id, date);
+        let state;
+        if (ci) {
+          state = 'done';
+          gDone += 1;
+        } else if (date > today) {
+          state = 'future';
+        } else if (!dueOn(g, date)) {
+          state = g.freq_mode === 'weekly' ? 'blank' : 'off';
+        } else if (date < today) {
+          state = 'missed';
+        } else {
+          state = 'todo';
+        }
+        cells.push({ date, state, points: ci ? Number(ci.points) : 0 });
+      }
+      const expected = g.freq_mode === 'weekly'
+        ? Number(g.freq_n) || 1
+        : cells.filter((c) => c.state !== 'off' && c.state !== 'blank' && c.state !== 'future').length;
+      monthPoints += cells.reduce((s, c) => s + (c.points || 0), 0);
+      monthDone += gDone;
+      monthExpected += expected;
+      return {
+        id: g.id,
+        title: g.title,
+        emoji: g.emoji,
+        status: g.status,
+        perCheckinPoints: calcPoints(g, g.duration_min, inWindowNow(g), cfg),
+        streak: g.streak_count,
+        monthCount: gDone,
+        monthPoints: cells.reduce((s, c) => s + (c.points || 0), 0),
+        cells,
+      };
+    });
+    res.json({ month, today, monthPoints, monthDone, monthExpected, goals });
+  });
+
   // 创建目标
   r.post('/goals', mw.requireUser, (req, res) => {
     const errors = validateGoalBody(req.body);
