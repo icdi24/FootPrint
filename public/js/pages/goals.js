@@ -1,6 +1,7 @@
 // 目标页：周/月视图网格（模仿参考图）+ 新建/编辑/详情弹层 + FAB。
 const GoalsPage = {
   weekStart: null,
+  monthAnchor: null,
   viewMode: 'week',
 
   async render(root) {
@@ -22,32 +23,41 @@ const GoalsPage = {
   },
 
   async draw(root) {
-    const start = this.weekStart;
-    const data = await api.get(`/api/goals/week?start=${start}`);
-    const [y, m, d] = start.split('-').map(Number);
+    const isWeek = this.viewMode === 'week';
+    let data;
+    if (isWeek) {
+      data = await api.get(`/api/goals/week?start=${this.weekStart}`);
+    } else {
+      if (!this.monthAnchor) this.monthAnchor = this.weekStart.slice(0, 7);
+      data = await api.get(`/api/goals/month?month=${this.monthAnchor}`);
+    }
+    const [y, m, d] = this.weekStart.split('-').map(Number);
     const today = data.today;
-    const weekLabel = `${m}月第${this._weekIndex(new Date(y, m - 1, d))}周`;
+    const navLabel = isWeek ? `${m}月第${this._weekIndex(new Date(y, m - 1, d))}周` : `${Number(this.monthAnchor.slice(5, 7))}月`;
+    const pts = isWeek ? data.weekPoints : data.monthPoints;
+    const done = isWeek ? data.weekDone : data.monthDone;
+    const expected = isWeek ? data.weekExpected : data.monthExpected;
 
     root.innerHTML = `
       <header class="page-head goals-head">
         <div class="seg" id="seg">
-          <button data-v="week" class="${this.viewMode === 'week' ? 'on' : ''}">周</button>
-          <button data-v="month" class="${this.viewMode === 'month' ? 'on' : ''}">月</button>
+          <button data-v="week" class="${isWeek ? 'on' : ''}">周</button>
+          <button data-v="month" class="${!isWeek ? 'on' : ''}">月</button>
         </div>
         <div class="week-nav">
           <button class="nav-btn" id="prev">${window.icon('left')}</button>
-          <span class="week-label" id="week-label">${weekLabel}</span>
+          <span class="week-label" id="week-label">${navLabel}</span>
           <button class="nav-btn" id="next">${window.icon('right')}</button>
         </div>
       </header>
 
       <section class="grid-card">
         <div class="grid-stats">
-          <div class="gs-item"><div class="gs-val">${UI.fmtNum(data.weekPoints)}</div><div class="gs-label">${this.viewMode === 'week' ? '周得分' : '月得分'}</div></div>
-          <div class="gs-item"><div class="gs-val">${data.weekDone}<span class="gs-dim">/${data.weekExpected}</span></div><div class="gs-label">已完成</div></div>
+          <div class="gs-item"><div class="gs-val">${UI.fmtNum(pts)}</div><div class="gs-label">${isWeek ? '周得分' : '月得分'}</div></div>
+          <div class="gs-item"><div class="gs-val">${done}<span class="gs-dim">/${expected}</span></div><div class="gs-label">打卡人次</div></div>
           <div class="gs-item"><div class="gs-val">${data.goals.length}</div><div class="gs-label">进行中目标</div></div>
         </div>
-        ${this.viewMode === 'week' ? this.weekGrid(data, today) : this.monthList(data, today)}
+        ${isWeek ? this.weekGrid(data, today) : this.monthList(data, today)}
       </section>
 
       <button class="fab" id="add-goal" aria-label="新建目标">${window.icon('plus')}</button>
@@ -61,11 +71,13 @@ const GoalsPage = {
       this.draw(root);
     });
     root.querySelector('#prev').addEventListener('click', () => {
-      this.weekStart = this._shift(this.weekStart, -7);
+      if (this.viewMode === 'week') this.weekStart = this._shift(this.weekStart, -7);
+      else this.monthAnchor = this._shiftMonth(this.monthAnchor, -1);
       this.draw(root);
     });
     root.querySelector('#next').addEventListener('click', () => {
-      this.weekStart = this._shift(this.weekStart, 7);
+      if (this.viewMode === 'week') this.weekStart = this._shift(this.weekStart, 7);
+      else this.monthAnchor = this._shiftMonth(this.monthAnchor, 1);
       this.draw(root);
     });
     root.querySelector('#add-goal').addEventListener('click', () => {
@@ -86,7 +98,7 @@ const GoalsPage = {
     });
 
     // 点目标名 → 详情
-    root.querySelectorAll('.grid-row .g-name').forEach((el) => {
+    root.querySelectorAll('.grid-row .g-name, .month-row .g-name').forEach((el) => {
       el.addEventListener('click', () => {
         const goal = data.goals.find((g) => g.id === Number(el.dataset.id));
         if (goal) GoalForm.openDetail(goal, { onChanged: () => this.draw(root) });
@@ -104,6 +116,12 @@ const GoalsPage = {
     return d.toISOString().slice(0, 10);
   },
 
+  _shiftMonth(s, n) {
+    const [y, m] = s.split('-').map(Number);
+    const d = new Date(Date.UTC(y, m - 1 + n, 1));
+    return d.toISOString().slice(0, 7);
+  },
+
   _weekIndex(d) {
     const first = new Date(d.getFullYear(), d.getMonth(), 1);
     const firstMondayOffset = first.getDay() === 0 ? -6 : 1 - first.getDay();
@@ -117,6 +135,7 @@ const GoalsPage = {
 
   weekGrid(data, today) {
     const WDS = ['一', '二', '三', '四', '五', '六', '日'];
+    const todayIdx = new Date(today + 'T00:00:00Z').getUTCDay() === 0 ? 6 : new Date(today + 'T00:00:00Z').getUTCDay() - 1;
     if (!data.goals.length) {
       return `
         <div class="grid-empty">
@@ -140,7 +159,7 @@ const GoalsPage = {
       <div class="grid-table">
         <div class="grid-head">
           <div>名称</div><div>分数</div>
-          ${WDS.map((w, i) => `<div class="${i === 5 || i === 6 ? 'wknd' : ''}">${w}</div>`).join('')}
+          ${WDS.map((w, i) => `<div class="${i === todayIdx ? 'today-col' : ''}${i === 5 || i === 6 ? ' wknd' : ''}">${w}</div>`).join('')}
         </div>
         ${rows}
       </div>
@@ -162,29 +181,33 @@ const GoalsPage = {
   },
 
   monthList(data, today) {
-    // 简化月视图：按目标列本月打卡数 + 本月得分
+    // 月视图：整月逐日小格 + 本月次数与得分
     if (!data.goals.length) {
       return `<div class="grid-empty"><div class="empty-emoji">🌱</div><div>还没有目标，点右下角 + 建一个</div></div>`;
     }
-    const monthStart = today.slice(0, 8) + '01';
     return `
       <div class="month-list">
-        ${data.goals.map((g) => {
-          const doneCells = g.cells.filter((c) => c.state === 'done');
-          return `
+        ${data.goals.map((g) => `
           <div class="month-row" data-goal="${g.id}">
-            <div class="g-name" data-id="${g.id}">
-              <span class="g-emoji">${g.emoji}</span>
-              <span class="g-title">${UI.esc(g.title)}</span>
+            <div class="month-top">
+              <div class="g-name" data-id="${g.id}">
+                <span class="g-emoji">${g.emoji}</span>
+                <div class="g-name-text">
+                  <div class="g-title">${UI.esc(g.title)}</div>
+                </div>
+              </div>
+              <div class="month-num">${g.monthCount} 次 · ${UI.fmtNum(g.monthPoints)} 分</div>
             </div>
             <div class="month-cells">
-              ${g.cells.map((c) => `<span class="m-cell ${c.state === 'done' ? 'on' : ''}" title="${UI.fmtDateShort(c.date)}"></span>`).join('')}
+              ${g.cells.map((c) => `<span class="m-cell ${c.state}" title="${UI.fmtDateShort(c.date)}${c.points ? ' +' + c.points : ''}"></span>`).join('')}
             </div>
-            <div class="month-num">${doneCells.length} 次 · ${UI.fmtNum(doneCells.reduce((s, c) => s + (c.points || 0), 0))} 分</div>
-          </div>`;
-        }).join('')}
+          </div>`).join('')}
       </div>
-      <p class="month-note">月视图从 ${UI.fmtDate(monthStart)} 起统计</p>`;
+      <div class="grid-legend">
+        <span><i class="lg done"></i>已打</span>
+        <span><i class="lg miss"></i>漏了</span>
+        <span><i class="lg today"></i>今天</span>
+      </div>`;
   },
 
   async cellDetail(root, goal, date) {
@@ -281,12 +304,12 @@ const GoalForm = {
         </div>
       </div>
       <div class="gf-row">
-        <label class="gf-label">开始日期</label>
-        <input id="gf-start" type="date" value="${g.start_date || new Date().toISOString().slice(0, 10)}"/>
-      </div>
-      <div class="gf-row">
-        <label class="gf-label">结束日期（留空 = 长期）</label>
-        <input id="gf-end" type="date" value="${g.end_date || ''}"/>
+        <label class="gf-label">起止日期（结束留空 = 长期）</label>
+        <div class="gf-inline">
+          <input id="gf-start" type="date" value="${g.start_date || new Date().toISOString().slice(0, 10)}"/>
+          <span>–</span>
+          <input id="gf-end" type="date" value="${g.end_date || ''}"/>
+        </div>
       </div>
       <div class="gf-row">
         <label class="gf-label">写清「做到什么算数」（可选）</label>

@@ -66,6 +66,7 @@ const MePage = {
 
       <section class="sec">
         <button class="logout-btn" id="logout">${window.icon('exit')} 退出登录</button>
+        <button class="logout-all-btn" id="logout-all">登出全部设备</button>
       </section>
 
       <p class="about-line">脚印 V0.1 · 只属于你们两个人</p>
@@ -78,6 +79,13 @@ const MePage = {
       const yes = await UI.confirm('退出登录？下次要用口令再进来。', { okLabel: '退出' });
       if (!yes) return;
       try { await api.post('/api/logout'); } catch (e) { /* 忽略 */ }
+      App.showAuth();
+    });
+    const logoutAll = root.querySelector('#logout-all');
+    if (logoutAll) logoutAll.addEventListener('click', async () => {
+      const yes = await UI.confirm('把其他设备也一起登出？', { okLabel: '全部登出' });
+      if (!yes) return;
+      try { await api.post('/api/me/logout-all'); } catch (e) { /* 忽略 */ }
       App.showAuth();
     });
     this.loadLedger(root);

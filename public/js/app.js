@@ -91,7 +91,10 @@ const App = (() => {
         document.getElementById('auth-screen').classList.remove('hidden');
         return;
       }
-    } catch (e) { /* 服务未启动，AuthPage 会提示 */ }
+    } catch (e) {
+      // 服务没起来也先显示登录页，避免整屏空白
+      showAuth();
+    }
     try {
       const me = await api.get('/api/me');
       state.me = me.user;
