@@ -1,0 +1,20 @@
+{
+  "name": "footprint",
+  "version": "0.1.0",
+  "private": true,
+  "description": "脚印 · 双人共享监督打卡与积分系统（V0.1）",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "reset-password": "node scripts/reset-password.js",
+    "restore": "node scripts/restore.js"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "bcryptjs": "^2.4.3",
+    "express": "^4.21.2"
+  }
+}

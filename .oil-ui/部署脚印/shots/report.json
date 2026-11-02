@@ -1,0 +1,44 @@
+[
+  {
+    "file": "page-setup1.png",
+    "state": null,
+    "size": "390x844",
+    "zoom": 1,
+    "group": "setup1",
+    "animationWaitMs": 0,
+    "issues": [],
+    "lint": [
+      {
+        "rule": "emojiIcon",
+        "label": "表情符号当图标",
+        "count": 9,
+        "examples": [
+          "div.logo-paw「🐾」",
+          "button.on「🐱」",
+          "button「🐻」"
+        ]
+      }
+    ]
+  },
+  {
+    "file": "page-setup2.png",
+    "state": null,
+    "size": "390x844",
+    "zoom": 1,
+    "group": "setup2",
+    "animationWaitMs": 0,
+    "issues": [],
+    "lint": [
+      {
+        "rule": "emojiIcon",
+        "label": "表情符号当图标",
+        "count": 9,
+        "examples": [
+          "div.logo-paw「🐾」",
+          "button「🐱」",
+          "button.on「🐻」"
+        ]
+      }
+    ]
+  }
+]
