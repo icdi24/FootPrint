@@ -3,7 +3,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { todayStr, nowIso, addDaysStr, isoWeekday, mondayOf, hhmm } = require('../tz');
-const { getPoints, setPoints, calcPoints } = require('../points');
+const { getPoints, setPoints, effectivePoints } = require('../points');
 const { balanceOf } = require('../db');
 const { statsFor } = require('../stats');
 const backup = require('../backup');
@@ -86,10 +86,11 @@ module.exports = function opsRoutes(db, dataDir) {
             weekdays: g.weekdays,
             window_start: g.window_start,
             window_end: g.window_end,
+            custom_points: g.custom_points,
           },
           dueToday,
           checked: checked ? { id: checked.id, points: Number(checked.points), durationMin: Number(checked.duration_min), evidenceText: checked.evidence_text } : null,
-          pointsNow: calcPoints(g, g.duration_min, inWindowNow(g), cfg),
+          pointsNow: effectivePoints(g, g.duration_min, inWindowNow(g), cfg),
           weekly: g.freq_mode === 'weekly' ? { done: weekDone, need: Number(g.freq_n) || 1 } : null,
           streak: g.streak_count,
         });

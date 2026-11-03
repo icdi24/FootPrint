@@ -1,7 +1,7 @@
 // 目标 CRUD、周网格、打卡、撤销、驳回。
 const express = require('express');
 const { todayStr, nowIso, addDaysStr, isoWeekday, mondayOf, hhmm } = require('../tz');
-const { getPoints, calcPoints, valueRatio } = require('../points');
+const { getPoints, calcPoints, effectivePoints, hasCustomPoints, valueRatio } = require('../points');
 const { computeStreak } = require('../streak');
 const { ledgerAdd, balanceOf, tx } = require('../db');
 const log = require('../log');
@@ -33,8 +33,9 @@ function goalRow(goal, cfg) {
   const inWin = inWindowNow(goal);
   return {
     ...goal,
-    perCheckinPoints: calcPoints(goal, goal.duration_min, inWin, cfg),
-    ratio: Math.round(valueRatio(goal, cfg) * 100) / 100,
+    perCheckinPoints: effectivePoints(goal, goal.duration_min, inWin, cfg),
+    customPoints: hasCustomPoints(goal) ? Number(goal.custom_points) : null,
+    ratio: hasCustomPoints(goal) ? null : Math.round(valueRatio(goal, cfg) * 100) / 100,
     nextMilestone: nextMilestoneFor(goal.streak_count, cfg),
   };
 }
@@ -142,6 +143,11 @@ function validateGoalBody(body, partial = false) {
     errors.push('打卡窗口需同时填开始与结束');
   }
   if (b.emoji !== undefined && String(b.emoji).length > 8) errors.push('图标太长了');
+  // 自定义固定积分（null/'' = 用公式自动算）
+  if (b.custom_points !== undefined && b.custom_points !== null && b.custom_points !== '') {
+    const cp = Number(b.custom_points);
+    if (!Number.isInteger(cp) || cp < 1 || cp > 9999) errors.push('自定义积分需为 1–9999 的整数');
+  }
   // 小目标（stage）专属字段
   if (b.type === 'stage') {
     if (b.accept_criteria !== undefined && String(b.accept_criteria).length > 500) errors.push('验收标准不能超过 500 字');
@@ -173,11 +179,12 @@ module.exports = function goalsRoutes(db) {
         difficulty: Math.max(1, Math.min(5, Number(b.difficulty) || 3)),
         window_start: b.window_start || null,
         window_end: b.window_end || null,
+        custom_points: Number(b.custom_points) > 0 ? Number(b.custom_points) : null,
       };
       const inWin = inWindowNow(goal);
       res.json({
-        points: calcPoints(goal, goal.duration_min, inWin, cfg),
-        ratio: Math.round(valueRatio(goal, cfg) * 100) / 100,
+        points: effectivePoints(goal, goal.duration_min, inWin, cfg),
+        ratio: hasCustomPoints(goal) ? null : Math.round(valueRatio(goal, cfg) * 100) / 100,
         inWindow: inWin,
       });
     } catch (e) { next(e); }
@@ -265,7 +272,8 @@ module.exports = function goalsRoutes(db) {
           freq_mode: g.freq_mode,
           freq_n: g.freq_n,
           weekdays: g.weekdays,
-          perCheckinPoints: calcPoints(g, g.duration_min, inWindowNow(g), cfg),
+          perCheckinPoints: effectivePoints(g, g.duration_min, inWindowNow(g), cfg),
+          custom_points: g.custom_points,
           streak: g.streak_count,
           weeklyProgress,
           cells,
@@ -327,7 +335,8 @@ module.exports = function goalsRoutes(db) {
           emoji: g.emoji,
           status: g.status,
           type: g.type,
-          perCheckinPoints: calcPoints(g, g.duration_min, inWindowNow(g), cfg),
+          perCheckinPoints: effectivePoints(g, g.duration_min, inWindowNow(g), cfg),
+          custom_points: g.custom_points,
           streak: g.streak_count,
           monthCount: gDone,
           monthPoints: cells.reduce((s, c) => s + (c.points || 0), 0),
@@ -350,14 +359,18 @@ module.exports = function goalsRoutes(db) {
       // 小目标：预估总时长 + 难度算总积分，封顶 1200（需求 5.4）
       const difficulty = Number(b.difficulty) || 3;
       const estTotalMin = type === 'stage' ? (Number(b.est_total_min) || 600) : null;
-      const totalPoints = type === 'stage'
+      // 自定义积分：非空则固定给这个分（日常=单次固定分；小目标=总积分）
+      const customPoints = (b.custom_points !== undefined && b.custom_points !== null && b.custom_points !== '')
+        ? Number(b.custom_points) : null;
+      const autoTotal = type === 'stage'
         ? Math.min(Math.round(estTotalMin * cfg.unit * (cfg.difficulty[difficulty] || 1.5)), 1200)
         : null;
+      const totalPoints = type === 'stage' ? (customPoints != null ? customPoints : autoTotal) : null;
       const info = await db.run(
         `INSERT INTO goals (owner_id, type, title, emoji, description, freq_mode, freq_n, weekdays,
           window_start, window_end, duration_min, difficulty, start_date, end_date, status,
-          est_total_min, accept_criteria, total_points, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+          est_total_min, accept_criteria, total_points, custom_points, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
         [
           req.user.id,
           type,
@@ -377,6 +390,7 @@ module.exports = function goalsRoutes(db) {
           estTotalMin,
           type === 'stage' ? String(b.accept_criteria || '').trim() : null,
           totalPoints,
+          customPoints,
           nowIso(),
           nowIso(),
         ]
@@ -413,12 +427,29 @@ module.exports = function goalsRoutes(db) {
       const b = req.body;
       const difficulty = b.difficulty !== undefined ? Number(b.difficulty) : g.difficulty;
       const duration = b.duration_min !== undefined ? Number(b.duration_min) : g.duration_min;
-      if ((difficulty !== g.difficulty || duration !== g.duration_min) && g.status === 'active') {
-        log.log('goal_change', `${req.user.nickname} 修改目标「${g.title}」时长/难度 ${g.duration_min}→${duration} / ${g.difficulty}→${difficulty}`);
+      // 自定义积分：显式传 null/'' = 清除（回到自动）
+      let customPoints = g.custom_points;
+      if (b.custom_points !== undefined) {
+        customPoints = (b.custom_points === null || b.custom_points === '') ? null : Number(b.custom_points);
+      }
+      // 小目标：重算 total_points（自定义优先，否则按预估时长+难度）
+      let totalPoints = g.total_points;
+      if (g.type === 'stage') {
+        const est = b.est_total_min !== undefined ? Number(b.est_total_min) : Number(g.est_total_min) || 600;
+        const cfgNow = await getPoints(db);
+        if (customPoints != null) {
+          totalPoints = customPoints;
+        } else if (b.est_total_min !== undefined || b.difficulty !== undefined) {
+          totalPoints = Math.min(Math.round(est * cfgNow.unit * (cfgNow.difficulty[difficulty] || 1.5)), 1200);
+        }
+      }
+      if ((difficulty !== g.difficulty || duration !== g.duration_min || customPoints !== g.custom_points) && g.status === 'active') {
+        log.log('goal_change', `${req.user.nickname} 修改目标「${g.title}」积分相关字段`);
       }
       await db.run(
         `UPDATE goals SET title=?, emoji=?, description=?, freq_mode=?, freq_n=?, weekdays=?,
-         window_start=?, window_end=?, duration_min=?, difficulty=?, start_date=?, end_date=?, updated_at=? WHERE id=?`,
+         window_start=?, window_end=?, duration_min=?, difficulty=?, start_date=?, end_date=?,
+         custom_points=?, total_points=?, updated_at=? WHERE id=?`,
         [
           (b.title !== undefined ? String(b.title).trim() : g.title),
           (b.emoji !== undefined ? b.emoji : g.emoji),
@@ -432,6 +463,8 @@ module.exports = function goalsRoutes(db) {
           difficulty,
           (b.start_date !== undefined ? b.start_date : g.start_date),
           (b.end_date !== undefined ? (b.end_date || null) : g.end_date),
+          customPoints,
+          totalPoints,
           nowIso(),
           g.id,
         ]
@@ -487,7 +520,7 @@ module.exports = function goalsRoutes(db) {
 
       const cfg = await getPoints(db);
       const inWin = inWindowNow(g);
-      const points = calcPoints(g, duration, inWin, cfg);
+      const points = effectivePoints(g, duration, inWin, cfg);
 
       const result = await tx(db, async (c) => {
         const info = await c.run(

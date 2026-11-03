@@ -124,6 +124,18 @@ function calcPoints(goal, durationMin, inWindow, cfg) {
   return Math.min(Math.round(B * D * F * T), cfg.maxPer);
 }
 
+// 目标自定义固定分是否生效（正整数则覆盖公式）
+function hasCustomPoints(goal) {
+  const v = Number(goal.custom_points);
+  return Number.isInteger(v) && v > 0;
+}
+
+// 单次打卡应得积分：有自定义固定分就用固定分，否则按公式算。
+function effectivePoints(goal, durationMin, inWindow, cfg) {
+  if (hasCustomPoints(goal)) return Number(goal.custom_points);
+  return calcPoints(goal, durationMin, inWindow, cfg);
+}
+
 // 性价比 = 单次积分 ÷ (时长 × 难度系数)；只反映频率与时段加成（需求 5.3）
 function valueRatio(goal, cfg) {
   const B = Math.min(goal.duration_min * cfg.unit, cfg.cap);
@@ -133,4 +145,4 @@ function valueRatio(goal, cfg) {
   return (B * D * F * T) / (goal.duration_min * D);
 }
 
-module.exports = { DEFAULT_POINTS, ensureSettings, getPoints, setPoints, calcPoints, freqFactor, valueRatio };
+module.exports = { DEFAULT_POINTS, ensureSettings, getPoints, setPoints, calcPoints, effectivePoints, hasCustomPoints, freqFactor, valueRatio };

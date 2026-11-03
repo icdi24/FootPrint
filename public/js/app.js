@@ -11,6 +11,8 @@ const App = (() => {
     milestones: [],
   };
   window.__calcClient = (goal, duration, inWin) => {
+    const cp = Number(goal.custom_points);
+    if (Number.isInteger(cp) && cp > 0) return cp;
     const cfg = state.pointsCfg || window.__DEFAULT_CFG;
     const B = Math.min(duration * cfg.unit, cfg.cap);
     const D = cfg.difficulty[goal.difficulty] || 1.5;

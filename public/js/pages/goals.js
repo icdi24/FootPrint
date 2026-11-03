@@ -99,7 +99,7 @@ const GoalsPage = {
 
     // 点格子：今天未打 → 打卡；已打 → 详情/撤销
     root.querySelectorAll('.cell[data-state="todo"], .cell[data-state="done"]').forEach((cell) => {
-      cell.addEventListener('click', () => {
+      const open = () => {
         const goal = data.goals.find((g) => g.id === Number(cell.dataset.goal));
         if (!goal) return;
         if (cell.dataset.state === 'todo') {
@@ -107,14 +107,26 @@ const GoalsPage = {
         } else if (cell.dataset.state === 'done') {
           this.cellDetail(root, goal, cell.dataset.date);
         }
+      };
+      cell.setAttribute('role', 'button');
+      cell.setAttribute('tabindex', '0');
+      cell.addEventListener('click', open);
+      cell.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
       });
     });
 
     // 点目标名 → 详情
     root.querySelectorAll('.grid-row .g-name, .month-row .g-name').forEach((el) => {
-      el.addEventListener('click', () => {
+      const open = () => {
         const goal = data.goals.find((g) => g.id === Number(el.dataset.id));
         if (goal) GoalForm.openDetail(goal, { onChanged: () => this.draw(root) });
+      };
+      el.setAttribute('role', 'button');
+      el.setAttribute('tabindex', '0');
+      el.addEventListener('click', open);
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
       });
     });
 
@@ -532,6 +544,7 @@ const GoalForm = {
     const g = goal || {
       title: '', emoji: '🎯', description: '', freq_mode: 'daily', freq_n: 1, weekdays: '1,2,3,4,5',
       window_start: '', window_end: '', duration_min: 30, difficulty: 3, start_date: null, end_date: null,
+      custom_points: null,
     };
     const EMOJIS = ['🎯', '📚', '🏃', '🏋️', '🧘', '💤', '🎹', '🎨', '✍️', '🦷', '🍎', '🚴', '🧹', '📖', '🌅', '💧'];
     const diffHintMap = { 1: '几乎无门槛', 2: '稍微用点力', 3: '需要专门腾时间', 4: '比较难', 5: '需要长期投入' };
@@ -586,6 +599,21 @@ const GoalForm = {
       <div class="gf-row">
         <label class="gf-label">写清「做到什么算数」（可选）</label>
         <textarea id="gf-desc" rows="2" maxlength="200" placeholder="比如：每天 30 分钟，用 app 打卡">${UI.esc(g.description)}</textarea>
+      </div>
+      <div class="gf-row">
+        <label class="gf-label">每次积分</label>
+        <div class="freq-seg" id="gf-points-mode">
+          <button type="button" data-v="auto" class="${g.custom_points == null ? 'on' : ''}">自动算</button>
+          <button type="button" data-v="custom" class="${g.custom_points != null ? 'on' : ''}">自定义</button>
+        </div>
+        <div class="cp-extra ${g.custom_points != null ? '' : 'hidden'}" id="gf-cp-extra">
+          <div class="cp-presets" id="gf-cp-presets">
+            ${[5, 10, 15, 20].map((p) => `<button type="button" class="cp-pre ${Number(g.custom_points) === p ? 'on' : ''}" data-p="${p}">${p}</button>`).join('')}
+          </div>
+          <div class="gf-inline">
+            <input id="gf-custom-points" type="number" min="1" max="9999" placeholder="自定义分" value="${g.custom_points != null ? g.custom_points : ''}"/>
+          </div>
+        </div>
       </div>
       <div class="gf-preview" id="gf-preview"></div>
     `;
@@ -654,6 +682,42 @@ const GoalForm = {
     });
     drawFreqExtra();
 
+    // 积分方式：自动 / 自定义
+    body.querySelector('#gf-points-mode').addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      body.querySelectorAll('#gf-points-mode button').forEach((x) => x.classList.remove('on'));
+      b.classList.add('on');
+      const mode = b.dataset.v;
+      const extra = body.querySelector('#gf-cp-extra');
+      if (mode === 'custom') {
+        extra.classList.remove('hidden');
+        const inp = body.querySelector('#gf-custom-points');
+        if (!inp.value) inp.value = 10;
+        syncCpPresets();
+      } else {
+        extra.classList.add('hidden');
+      }
+      preview();
+    });
+    function syncCpPresets() {
+      const val = Number(body.querySelector('#gf-custom-points').value);
+      body.querySelectorAll('#gf-cp-presets .cp-pre').forEach((btn) => {
+        btn.classList.toggle('on', Number(btn.dataset.p) === val);
+      });
+    }
+    body.querySelector('#gf-cp-presets').addEventListener('click', (e) => {
+      const b = e.target.closest('.cp-pre');
+      if (!b) return;
+      body.querySelector('#gf-custom-points').value = b.dataset.p;
+      syncCpPresets();
+      preview();
+    });
+    body.querySelector('#gf-custom-points').addEventListener('input', () => {
+      syncCpPresets();
+      preview();
+    });
+
     function cur() {
       const mode = body.querySelector('#gf-freq .on').dataset.v;
       let weekdays = '';
@@ -661,6 +725,9 @@ const GoalForm = {
         weekdays = [...body.querySelectorAll('#gf-wd button.on')].map((b) => b.dataset.d).join(',');
       }
       const nBtn = body.querySelector('#gf-n .on');
+      const pointsMode = body.querySelector('#gf-points-mode .on').dataset.v;
+      const cpRaw = body.querySelector('#gf-custom-points').value;
+      const cp = pointsMode === 'custom' && cpRaw !== '' ? Number(cpRaw) : null;
       return {
         freq_mode: mode,
         freq_n: nBtn ? Number(nBtn.dataset.n) : 1,
@@ -669,6 +736,7 @@ const GoalForm = {
         difficulty: Number(body.querySelector('#gf-difficulty').value) || 3,
         window_start: body.querySelector('#gf-ws').value || null,
         window_end: body.querySelector('#gf-we').value || null,
+        custom_points: (cp != null && Number.isInteger(cp) && cp > 0) ? cp : null,
       };
     }
 
@@ -676,8 +744,19 @@ const GoalForm = {
       const c = cur();
       const inWin = window.__inWindowCheck({ window_start: c.window_start, window_end: c.window_end });
       const pts = window.__calcClient({ ...c, freq_n: c.freq_n }, c.duration_min, inWin);
-      const ratio = pts / (c.duration_min * (window.__DEFAULT_CFG.difficulty[c.difficulty] || 1.5));
       const el = body.querySelector('#gf-preview');
+      if (c.custom_points != null) {
+        el.innerHTML = `
+          <div class="pv-left">
+            <div class="pv-label">每次固定</div>
+            <div class="pv-val">+${UI.fmtNum(pts)} 分</div>
+          </div>
+          <div class="pv-right">
+            <span class="pv-tag ok">自定义固定分</span>
+          </div>`;
+        return;
+      }
+      const ratio = pts / (c.duration_min * (window.__DEFAULT_CFG.difficulty[c.difficulty] || 1.5));
       let warn = '';
       if (ratio > 0.85) warn = `<span class="pv-warn high">⚠ 偏高，对方看得见，容易被质疑</span>`;
       else if (ratio < 0.35) warn = `<span class="pv-warn low">累活给低价，要不要把时长或难度再核一下</span>`;
@@ -765,7 +844,7 @@ const GoalForm = {
           <div class="gd-emoji">${g.emoji}</div>
           <div class="gd-info">
             <div class="gd-title">${UI.esc(g.title)}</div>
-            <div class="gd-meta">${freqText(g)} · 每次约 +${UI.fmtNum(g.perCheckinPoints)} 分</div>
+            <div class="gd-meta">${freqText(g)} · ${g.customPoints != null ? `每次固定 +${UI.fmtNum(g.customPoints)} 分` : `每次约 +${UI.fmtNum(g.perCheckinPoints)} 分`}</div>
           </div>
           <div class="gd-streak">${window.icon('flame')}<b>${g.streak_count}</b><span>天</span></div>
         </div>
@@ -778,7 +857,7 @@ const GoalForm = {
         <div class="gd-stats">
           <div><b>${ms.length}</b><span>本月打卡</span></div>
           <div><b>${g.streak_best}</b><span>最长连续</span></div>
-          <div><b>${g.ratio}</b><span>性价比</span></div>
+          <div><b>${g.customPoints != null ? '自定义' : g.ratio}</b><span>性价比</span></div>
         </div>
         <div class="gd-list-title">本月记录</div>
         <div class="gd-list">
@@ -832,7 +911,7 @@ const StageGoalForm = {
     const editing = !!goal;
     const g = goal || {
       title: '', emoji: '🏁', description: '', accept_criteria: '', est_total_min: 600,
-      difficulty: 3, start_date: null, end_date: null, status: 'draft',
+      difficulty: 3, start_date: null, end_date: null, status: 'draft', custom_points: null,
     };
     const EMOJIS = ['🏁', '🎓', '📖', '🏃', '🎸', '💪', '✈️', '🏠', '💍', '📷', '🎨', '🥇', '🧗', '🏊', '🚵', '🌱'];
     const DIFF_COEF = { 1: 1.0, 2: 1.2, 3: 1.5, 4: 1.8, 5: 2.2 };
@@ -864,6 +943,21 @@ const StageGoalForm = {
         <div class="gf-diff-hint" id="sf-diff-hint">${diffHintMap[g.difficulty] || ''}</div>
       </div>
       <div class="gf-row">
+        <label class="gf-label">达成积分</label>
+        <div class="freq-seg" id="sf-points-mode">
+          <button type="button" data-v="auto" class="${g.custom_points == null ? 'on' : ''}">自动算</button>
+          <button type="button" data-v="custom" class="${g.custom_points != null ? 'on' : ''}">自定义</button>
+        </div>
+        <div class="cp-extra ${g.custom_points != null ? '' : 'hidden'}" id="sf-cp-extra">
+          <div class="cp-presets" id="sf-cp-presets">
+            ${[100, 200, 500, 800].map((p) => `<button type="button" class="cp-pre ${Number(g.custom_points) === p ? 'on' : ''}" data-p="${p}">${p}</button>`).join('')}
+          </div>
+          <div class="gf-inline">
+            <input id="sf-custom-points" type="number" min="1" max="9999" placeholder="自定义总积分" value="${g.custom_points != null ? g.custom_points : ''}"/>
+          </div>
+        </div>
+      </div>
+      <div class="gf-row">
         <label class="gf-label">起止日期（结束留空 = 长期）</label>
         <div class="gf-inline">
           <input id="sf-start" type="date" value="${g.start_date || new Date().toISOString().slice(0, 10)}"/>
@@ -879,26 +973,68 @@ const StageGoalForm = {
     `;
 
     function cur() {
+      const pointsMode = body.querySelector('#sf-points-mode .on').dataset.v;
+      const cpRaw = body.querySelector('#sf-custom-points').value;
+      const cp = pointsMode === 'custom' && cpRaw !== '' ? Number(cpRaw) : null;
       return {
         est_total_min: Number(body.querySelector('#sf-est').value) || 600,
         difficulty: Number(body.querySelector('#sf-difficulty').value) || 3,
+        custom_points: (cp != null && Number.isInteger(cp) && cp > 0) ? cp : null,
       };
     }
     function totalPoints() {
       const c = cur();
+      if (c.custom_points != null) return c.custom_points;
       const coef = DIFF_COEF[c.difficulty] || 1.5;
       return Math.min(Math.round(c.est_total_min * 0.5 * coef), 1200);
     }
     function preview() {
+      const c = cur();
+      const tag = c.custom_points != null
+        ? '<span class="pv-tag ok">自定义固定分</span>'
+        : `<span class="pv-tag ok">约 ${UI.fmtNum(c.est_total_min)} 分钟投入</span>`;
       body.querySelector('#sf-preview').innerHTML = `
         <div class="pv-left">
           <div class="pv-label">达成后预计入账</div>
           <div class="pv-val">+${UI.fmtNum(totalPoints())} 分</div>
         </div>
         <div class="pv-right">
-          <span class="pv-tag ok">约 ${UI.fmtNum(cur().est_total_min)} 分钟投入</span>
+          ${tag}
         </div>`;
     }
+    body.querySelector('#sf-points-mode').addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      body.querySelectorAll('#sf-points-mode button').forEach((x) => x.classList.remove('on'));
+      b.classList.add('on');
+      const extra = body.querySelector('#sf-cp-extra');
+      if (b.dataset.v === 'custom') {
+        extra.classList.remove('hidden');
+        const inp = body.querySelector('#sf-custom-points');
+        if (!inp.value) inp.value = 200;
+        sfSyncPresets();
+      } else {
+        extra.classList.add('hidden');
+      }
+      preview();
+    });
+    function sfSyncPresets() {
+      const val = Number(body.querySelector('#sf-custom-points').value);
+      body.querySelectorAll('#sf-cp-presets .cp-pre').forEach((btn) => {
+        btn.classList.toggle('on', Number(btn.dataset.p) === val);
+      });
+    }
+    body.querySelector('#sf-cp-presets').addEventListener('click', (e) => {
+      const b = e.target.closest('.cp-pre');
+      if (!b) return;
+      body.querySelector('#sf-custom-points').value = b.dataset.p;
+      sfSyncPresets();
+      preview();
+    });
+    body.querySelector('#sf-custom-points').addEventListener('input', () => {
+      sfSyncPresets();
+      preview();
+    });
     body.querySelector('#sf-difficulty').addEventListener('input', (e) => {
       body.querySelector('#sf-diff-val').textContent = e.target.value;
       body.querySelector('#sf-diff-hint').textContent = diffHintMap[Number(e.target.value)] || '';
@@ -945,6 +1081,7 @@ const StageGoalForm = {
             accept_criteria: criteria,
             est_total_min: Number(body.querySelector('#sf-est').value) || 600,
             difficulty: Number(body.querySelector('#sf-difficulty').value) || 3,
+            custom_points: cur().custom_points,
             start_date: start || undefined,
             end_date: end || null,
           };

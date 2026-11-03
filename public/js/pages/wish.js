@@ -60,10 +60,18 @@ const WishPage = {
       });
     });
     root.querySelectorAll('.wish-card').forEach((card) => {
-      card.addEventListener('click', (e) => {
+      const open = (e) => {
         if (e.target.closest('.btn-redeem')) return;
         const item = data.items.find((x) => x.id === Number(card.dataset.id));
         if (item) WishForm.open({ item, onSaved: () => this.draw(root) });
+      };
+      card.setAttribute('role', 'button');
+      card.setAttribute('tabindex', '0');
+      card.addEventListener('click', open);
+      card.addEventListener('keydown', (e) => {
+        if ((e.key === 'Enter' || e.key === ' ') && !e.target.closest('.btn-redeem')) {
+          e.preventDefault(); open(e);
+        }
       });
     });
     root.querySelectorAll('[data-red-act]').forEach((btn) => {

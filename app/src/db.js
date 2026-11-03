@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS goals (
   est_total_min INTEGER,
   accept_criteria TEXT,
   total_points INTEGER,
+  custom_points INTEGER,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -146,6 +147,8 @@ async function openDb(connString) {
   const pool = new Pool({ connectionString: connString, max: 10 });
   // 建表
   await pool.query(SCHEMA);
+  // 迁移：老库补 custom_points 字段（幂等）
+  await pool.query('ALTER TABLE goals ADD COLUMN IF NOT EXISTS custom_points INTEGER');
   return makeDb(pool);
 }
 

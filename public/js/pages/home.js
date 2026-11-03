@@ -113,9 +113,15 @@ const HomePage = {
     if (toPartner) toPartner.addEventListener('click', () => App.showTab('partner'));
 
     root.querySelectorAll('.home-stage-list .stage-card').forEach((card) => {
-      card.addEventListener('click', () => {
+      const go = () => {
         GoalsPage.goalType = 'stage';
         App.showTab('goals');
+      };
+      card.setAttribute('role', 'button');
+      card.setAttribute('tabindex', '0');
+      card.addEventListener('click', go);
+      card.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
       });
     });
 
