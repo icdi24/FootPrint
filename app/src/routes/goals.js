@@ -1,6 +1,6 @@
 // 目标 CRUD、周网格、打卡、撤销、驳回。
 const express = require('express');
-const { todayStr, nowIso, addDaysStr, isoWeekday, mondayOf, hhmm, dateDiffDays } = require('../tz');
+const { todayStr, nowIso, addDaysStr, isoWeekday, mondayOf, hhmm } = require('../tz');
 const { getPoints, calcPoints, valueRatio } = require('../points');
 const { computeStreak } = require('../streak');
 const { ledgerAdd, balanceOf, tx } = require('../db');
@@ -52,15 +52,16 @@ function inWindowNow(goal) {
   return now >= goal.window_start && now < goal.window_end;
 }
 
-function creditedDatesFor(db, goalId) {
-  const rows = db
-    .prepare(`SELECT check_date FROM check_ins WHERE goal_id = ? AND status = 'credited'`)
-    .all(goalId);
+async function creditedDatesFor(db, goalId) {
+  const rows = await db.all(
+    `SELECT check_date FROM check_ins WHERE goal_id = ? AND status = 'credited'`,
+    [goalId]
+  );
   return new Set(rows.map((r) => r.check_date));
 }
 
 // 打卡后更新连续链与里程碑（在事务内调用）
-function updateStreakAndMilestones(db, goal, cfg, creditedDates) {
+async function updateStreakAndMilestones(db, goal, cfg, creditedDates) {
   const before = Number(goal.streak_count) || 0;
   const after = computeStreak(goal, creditedDates);
   const bonuses = [];
@@ -68,11 +69,10 @@ function updateStreakAndMilestones(db, goal, cfg, creditedDates) {
     for (const m of cfg.milestones) {
       const n = Number(m.n);
       if (before < n && n <= after) {
-        const dup = db.prepare('SELECT 1 FROM goal_milestones WHERE goal_id = ? AND threshold = ?').get(goal.id, n);
+        const dup = await db.get('SELECT 1 FROM goal_milestones WHERE goal_id = ? AND threshold = ?', [goal.id, n]);
         if (!dup) {
-          db.prepare('INSERT INTO goal_milestones (goal_id, threshold, awarded_at) VALUES (?, ?, ?)')
-            .run(goal.id, n, nowIso());
-          const led = ledgerAdd(db, {
+          await db.run('INSERT INTO goal_milestones (goal_id, threshold, awarded_at) VALUES (?, ?, ?)', [goal.id, n, nowIso()]);
+          const led = await ledgerAdd(db, {
             userId: goal.owner_id,
             delta: Number(m.p),
             type: 'streak_bonus',
@@ -85,22 +85,22 @@ function updateStreakAndMilestones(db, goal, cfg, creditedDates) {
       }
     }
   }
-  db.prepare('UPDATE goals SET streak_count = ?, streak_best = MAX(streak_best, ?), updated_at = ? WHERE id = ?')
-    .run(after, after, nowIso(), goal.id);
+  await db.run('UPDATE goals SET streak_count = ?, streak_best = GREATEST(streak_best, ?), updated_at = ? WHERE id = ?',
+    [after, after, nowIso(), goal.id]);
   return { before, after, bonuses };
 }
 
 // 撤销/驳回后重算连续链；归零即清里程碑（重新排队）
-function recomputeStreakAfterRemoval(db, goalId) {
-  const goal = db.prepare('SELECT * FROM goals WHERE id = ?').get(goalId);
+async function recomputeStreakAfterRemoval(db, goalId) {
+  const goal = await db.get('SELECT * FROM goals WHERE id = ?', [goalId]);
   if (!goal) return;
-  const dates = creditedDatesFor(db, goalId);
+  const dates = await creditedDatesFor(db, goalId);
   const after = computeStreak(goal, dates);
   if (after === 0) {
-    db.prepare('DELETE FROM goal_milestones WHERE goal_id = ?').run(goalId);
+    await db.run('DELETE FROM goal_milestones WHERE goal_id = ?', [goalId]);
   }
-  db.prepare('UPDATE goals SET streak_count = ?, streak_best = MAX(streak_best, ?), updated_at = ? WHERE id = ?')
-    .run(after, after, nowIso(), goalId);
+  await db.run('UPDATE goals SET streak_count = ?, streak_best = GREATEST(streak_best, ?), updated_at = ? WHERE id = ?',
+    [after, after, nowIso(), goalId]);
 }
 
 function validateGoalBody(body, partial = false) {
@@ -142,6 +142,17 @@ function validateGoalBody(body, partial = false) {
     errors.push('打卡窗口需同时填开始与结束');
   }
   if (b.emoji !== undefined && String(b.emoji).length > 8) errors.push('图标太长了');
+  // 小目标（stage）专属字段
+  if (b.type === 'stage') {
+    if (b.accept_criteria !== undefined && String(b.accept_criteria).length > 500) errors.push('验收标准不能超过 500 字');
+    if (!partial && !(b.accept_criteria && String(b.accept_criteria).trim())) {
+      errors.push('小目标必须写清验收标准');
+    }
+    if (b.est_total_min !== undefined) {
+      const m = Number(b.est_total_min);
+      if (!Number.isInteger(m) || m < 1 || m > 100000) errors.push('预估总时长需为 1–100000 分钟');
+    }
+  }
   return errors;
 }
 
@@ -150,377 +161,532 @@ module.exports = function goalsRoutes(db) {
   const mw = require('../middleware').makeMiddleware(db);
 
   // 分数预览
-  r.post('/points/preview', mw.requireUser, (req, res) => {
-    const cfg = getPoints(db);
-    const b = req.body || {};
-    const goal = {
-      freq_mode: FREQ_MODES.includes(b.freq_mode) ? b.freq_mode : 'daily',
-      freq_n: Number(b.freq_n) || 1,
-      weekdays: b.weekdays || '',
-      duration_min: Math.max(1, Math.min(1440, Number(b.duration_min) || 30)),
-      difficulty: Math.max(1, Math.min(5, Number(b.difficulty) || 3)),
-      window_start: b.window_start || null,
-      window_end: b.window_end || null,
-    };
-    const inWin = inWindowNow(goal);
-    res.json({
-      points: calcPoints(goal, goal.duration_min, inWin, cfg),
-      ratio: Math.round(valueRatio(goal, cfg) * 100) / 100,
-      inWindow: inWin,
-    });
+  r.post('/points/preview', mw.requireUser, async (req, res, next) => {
+    try {
+      const cfg = await getPoints(db);
+      const b = req.body || {};
+      const goal = {
+        freq_mode: FREQ_MODES.includes(b.freq_mode) ? b.freq_mode : 'daily',
+        freq_n: Number(b.freq_n) || 1,
+        weekdays: b.weekdays || '',
+        duration_min: Math.max(1, Math.min(1440, Number(b.duration_min) || 30)),
+        difficulty: Math.max(1, Math.min(5, Number(b.difficulty) || 3)),
+        window_start: b.window_start || null,
+        window_end: b.window_end || null,
+      };
+      const inWin = inWindowNow(goal);
+      res.json({
+        points: calcPoints(goal, goal.duration_min, inWin, cfg),
+        ratio: Math.round(valueRatio(goal, cfg) * 100) / 100,
+        inWindow: inWin,
+      });
+    } catch (e) { next(e); }
   });
 
   // 我的目标列表
-  r.get('/goals', mw.requireUser, (req, res) => {
-    const cfg = getPoints(db);
-    const rows = db
-      .prepare(`SELECT * FROM goals WHERE owner_id = ? AND status != 'archived'
-                ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END, id DESC`)
-      .all(req.user.id);
-    const monthStart = todayStr().slice(0, 8) + '01';
-    const monthCount = db
-      .prepare(`SELECT goal_id, COUNT(*) AS c FROM check_ins
-                WHERE user_id = ? AND status = 'credited' AND check_date >= ? GROUP BY goal_id`)
-      .all(req.user.id, monthStart);
-    const countMap = new Map(monthCount.map((x) => [x.goal_id, Number(x.c)]));
-    res.json({
-      goals: rows.map((g) => ({ ...goalRow(g, cfg), monthCount: countMap.get(g.id) || 0 })),
-    });
+  r.get('/goals', mw.requireUser, async (req, res, next) => {
+    try {
+      const cfg = await getPoints(db);
+      const type = req.query.type;
+      const typeFilter = type === 'daily' || type === 'stage' ? `AND type = '${type}'` : '';
+      const rows = await db.all(
+        `SELECT * FROM goals WHERE owner_id = ? AND status != 'archived' ${typeFilter}
+         ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END, id DESC`,
+        [req.user.id]
+      );
+      const monthStart = todayStr().slice(0, 8) + '01';
+      const monthCount = await db.all(
+        `SELECT goal_id, COUNT(*) AS c FROM check_ins
+         WHERE user_id = ? AND status = 'credited' AND check_date >= ? GROUP BY goal_id`,
+        [req.user.id, monthStart]
+      );
+      const countMap = new Map(monthCount.map((x) => [x.goal_id, Number(x.c)]));
+      res.json({
+        goals: rows.map((g) => ({ ...goalRow(g, cfg), monthCount: countMap.get(g.id) || 0 })),
+      });
+    } catch (e) { next(e); }
   });
 
   // 周网格（参考 UI 示例的核心视图）
-  r.get('/goals/week', mw.requireUser, (req, res) => {
-    const cfg = getPoints(db);
-    let start = req.query.start;
-    if (!isValidDate(start)) start = mondayOf(todayStr());
-    start = mondayOf(start);
-    const today = todayStr();
-    const rows = db
-      .prepare(`SELECT * FROM goals WHERE owner_id = ? AND status IN ('active','achieved','abandoned')
-                ORDER BY id DESC`)
-      .all(req.user.id);
-    let weekPoints = 0;
-    let weekDone = 0;
-    let weekExpected = 0;
-    const goals = rows.map((g) => {
-      const dates = creditedDatesFor(db, g.id);
-      const cells = [];
-      let gDone = 0;
-      for (let i = 0; i < 7; i++) {
-        const date = addDaysStr(start, i);
-        const ci = db
-          .prepare(`SELECT * FROM check_ins WHERE goal_id = ? AND check_date = ? AND status = 'credited'`)
-          .get(g.id, date);
-        let state;
-        if (ci) {
-          state = 'done';
-          gDone += 1;
-        } else if (date > today) {
-          state = 'future';
-        } else if (!dueOn(g, date)) {
-          state = g.freq_mode === 'weekly' ? 'blank' : 'off';
-        } else if (date < today) {
-          state = 'missed';
-        } else {
-          state = 'todo';
+  r.get('/goals/week', mw.requireUser, async (req, res, next) => {
+    try {
+      const cfg = await getPoints(db);
+      let start = req.query.start;
+      if (!isValidDate(start)) start = mondayOf(todayStr());
+      start = mondayOf(start);
+      const today = todayStr();
+      const rows = await db.all(
+        `SELECT * FROM goals WHERE owner_id = ? AND type = 'daily' AND status IN ('active','achieved','abandoned')
+         ORDER BY id DESC`,
+        [req.user.id]
+      );
+      let weekPoints = 0;
+      let weekDone = 0;
+      let weekExpected = 0;
+      const goals = [];
+      for (const g of rows) {
+        const cells = [];
+        let gDone = 0;
+        for (let i = 0; i < 7; i++) {
+          const date = addDaysStr(start, i);
+          const ci = await db.get(
+            `SELECT * FROM check_ins WHERE goal_id = ? AND check_date = ? AND status = 'credited'`,
+            [g.id, date]
+          );
+          let state;
+          if (ci) {
+            state = 'done';
+            gDone += 1;
+          } else if (date > today) {
+            state = 'future';
+          } else if (!dueOn(g, date)) {
+            state = g.freq_mode === 'weekly' ? 'blank' : 'off';
+          } else if (date < today) {
+            state = 'missed';
+          } else {
+            state = 'todo';
+          }
+          cells.push({ date, wd: isoWeekday(date), state, points: ci ? Number(ci.points) : 0, makeup: ci ? !!ci.is_makeup : false });
         }
-        cells.push({ date, wd: isoWeekday(date), state, points: ci ? Number(ci.points) : 0, makeup: ci ? !!ci.is_makeup : false });
+        const doneCount = cells.filter((c) => c.state === 'done').length;
+        const expected = g.freq_mode === 'weekly' ? Number(g.freq_n) || 1 : cells.filter((c) => c.state !== 'off' && c.state !== 'blank' && c.state !== 'future').length;
+        weekPoints += cells.reduce((s, c) => s + (c.points || 0), 0);
+        weekDone += doneCount;
+        weekExpected += expected;
+        const weeklyProgress = g.freq_mode === 'weekly'
+          ? { done: cells.filter((c) => c.state === 'done').length, need: Number(g.freq_n) || 1 }
+          : null;
+        goals.push({
+          id: g.id,
+          title: g.title,
+          emoji: g.emoji,
+          status: g.status,
+          type: g.type,
+          freq_mode: g.freq_mode,
+          freq_n: g.freq_n,
+          weekdays: g.weekdays,
+          perCheckinPoints: calcPoints(g, g.duration_min, inWindowNow(g), cfg),
+          streak: g.streak_count,
+          weeklyProgress,
+          cells,
+        });
       }
-      const doneCount = cells.filter((c) => c.state === 'done').length;
-      const expected = g.freq_mode === 'weekly' ? Number(g.freq_n) || 1 : cells.filter((c) => c.state !== 'off' && c.state !== 'blank' && c.state !== 'future').length;
-      weekPoints += cells.reduce((s, c) => s + (c.points || 0), 0);
-      weekDone += doneCount;
-      weekExpected += expected;
-      const weeklyProgress = g.freq_mode === 'weekly'
-        ? { done: cells.filter((c) => c.state === 'done').length, need: Number(g.freq_n) || 1 }
-        : null;
-      return {
-        id: g.id,
-        title: g.title,
-        emoji: g.emoji,
-        status: g.status,
-        freq_mode: g.freq_mode,
-        freq_n: g.freq_n,
-        weekdays: g.weekdays,
-        perCheckinPoints: calcPoints(g, g.duration_min, inWindowNow(g), cfg),
-        streak: g.streak_count,
-        weeklyProgress,
-        cells,
-      };
-    });
-    res.json({ weekStart: start, weekEnd: addDaysStr(start, 6), today, weekPoints, weekDone, weekExpected, goals });
+      res.json({ weekStart: start, weekEnd: addDaysStr(start, 6), today, weekPoints, weekDone, weekExpected, goals });
+    } catch (e) { next(e); }
   });
 
   // 月视图：整月逐日格子
-  r.get('/goals/month', mw.requireUser, (req, res) => {
-    const cfg = getPoints(db);
-    const month = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : todayStr().slice(0, 7);
-    const today = todayStr();
-    const rows = db
-      .prepare(`SELECT * FROM goals WHERE owner_id = ? AND status IN ('active','achieved','abandoned')
-                ORDER BY id DESC`)
-      .all(req.user.id);
-    let monthPoints = 0;
-    let monthDone = 0;
-    let monthExpected = 0;
-    const daysInMonth = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate();
-    const goals = rows.map((g) => {
-      const dates = creditedDatesFor(db, g.id);
-      const cells = [];
-      let gDone = 0;
-      for (let d = 1; d <= daysInMonth; d++) {
-        const date = `${month}-${String(d).padStart(2, '0')}`;
-        const ci = db
-          .prepare(`SELECT * FROM check_ins WHERE goal_id = ? AND check_date = ? AND status = 'credited'`)
-          .get(g.id, date);
-        let state;
-        if (ci) {
-          state = 'done';
-          gDone += 1;
-        } else if (date > today) {
-          state = 'future';
-        } else if (!dueOn(g, date)) {
-          state = g.freq_mode === 'weekly' ? 'blank' : 'off';
-        } else if (date < today) {
-          state = 'missed';
-        } else {
-          state = 'todo';
+  r.get('/goals/month', mw.requireUser, async (req, res, next) => {
+    try {
+      const cfg = await getPoints(db);
+      const month = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : todayStr().slice(0, 7);
+      const today = todayStr();
+      const rows = await db.all(
+        `SELECT * FROM goals WHERE owner_id = ? AND type = 'daily' AND status IN ('active','achieved','abandoned')
+         ORDER BY id DESC`,
+        [req.user.id]
+      );
+      let monthPoints = 0;
+      let monthDone = 0;
+      let monthExpected = 0;
+      const daysInMonth = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate();
+      const goals = [];
+      for (const g of rows) {
+        const cells = [];
+        let gDone = 0;
+        for (let d = 1; d <= daysInMonth; d++) {
+          const date = `${month}-${String(d).padStart(2, '0')}`;
+          const ci = await db.get(
+            `SELECT * FROM check_ins WHERE goal_id = ? AND check_date = ? AND status = 'credited'`,
+            [g.id, date]
+          );
+          let state;
+          if (ci) {
+            state = 'done';
+            gDone += 1;
+          } else if (date > today) {
+            state = 'future';
+          } else if (!dueOn(g, date)) {
+            state = g.freq_mode === 'weekly' ? 'blank' : 'off';
+          } else if (date < today) {
+            state = 'missed';
+          } else {
+            state = 'todo';
+          }
+          cells.push({ date, state, points: ci ? Number(ci.points) : 0 });
         }
-        cells.push({ date, state, points: ci ? Number(ci.points) : 0 });
+        const expected = g.freq_mode === 'weekly'
+          ? Number(g.freq_n) || 1
+          : cells.filter((c) => c.state !== 'off' && c.state !== 'blank' && c.state !== 'future').length;
+        monthPoints += cells.reduce((s, c) => s + (c.points || 0), 0);
+        monthDone += gDone;
+        monthExpected += expected;
+        goals.push({
+          id: g.id,
+          title: g.title,
+          emoji: g.emoji,
+          status: g.status,
+          type: g.type,
+          perCheckinPoints: calcPoints(g, g.duration_min, inWindowNow(g), cfg),
+          streak: g.streak_count,
+          monthCount: gDone,
+          monthPoints: cells.reduce((s, c) => s + (c.points || 0), 0),
+          cells,
+        });
       }
-      const expected = g.freq_mode === 'weekly'
-        ? Number(g.freq_n) || 1
-        : cells.filter((c) => c.state !== 'off' && c.state !== 'blank' && c.state !== 'future').length;
-      monthPoints += cells.reduce((s, c) => s + (c.points || 0), 0);
-      monthDone += gDone;
-      monthExpected += expected;
-      return {
-        id: g.id,
-        title: g.title,
-        emoji: g.emoji,
-        status: g.status,
-        perCheckinPoints: calcPoints(g, g.duration_min, inWindowNow(g), cfg),
-        streak: g.streak_count,
-        monthCount: gDone,
-        monthPoints: cells.reduce((s, c) => s + (c.points || 0), 0),
-        cells,
-      };
-    });
-    res.json({ month, today, monthPoints, monthDone, monthExpected, goals });
+      res.json({ month, today, monthPoints, monthDone, monthExpected, goals });
+    } catch (e) { next(e); }
   });
 
   // 创建目标
-  r.post('/goals', mw.requireUser, (req, res) => {
-    const errors = validateGoalBody(req.body);
-    if (errors.length) return res.status(400).json({ error: errors[0] });
-    const b = req.body;
-    const cfg = getPoints(db);
-    const status = b.active === false ? 'draft' : 'active';
-    const info = db
-      .prepare(`INSERT INTO goals (owner_id, title, emoji, description, freq_mode, freq_n, weekdays,
-                  window_start, window_end, duration_min, difficulty, start_date, end_date, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(
-        req.user.id,
-        b.title.trim(),
-        b.emoji || '🎯',
-        String(b.description || '').trim(),
-        b.freq_mode || 'daily',
-        Number(b.freq_n) || 1,
-        b.freq_mode === 'weekdays' ? String(b.weekdays) : '',
-        b.window_start || null,
-        b.window_end || null,
-        Number(b.duration_min) || 30,
-        Number(b.difficulty) || 3,
-        b.start_date || todayStr(),
-        b.end_date || null,
-        status,
-        nowIso(),
-        nowIso()
+  r.post('/goals', mw.requireUser, async (req, res, next) => {
+    try {
+      const errors = validateGoalBody(req.body);
+      if (errors.length) return res.status(400).json({ error: errors[0] });
+      const b = req.body;
+      const cfg = await getPoints(db);
+      const status = b.active === false ? 'draft' : 'active';
+      const type = b.type === 'stage' ? 'stage' : 'daily';
+      // 小目标：预估总时长 + 难度算总积分，封顶 1200（需求 5.4）
+      const difficulty = Number(b.difficulty) || 3;
+      const estTotalMin = type === 'stage' ? (Number(b.est_total_min) || 600) : null;
+      const totalPoints = type === 'stage'
+        ? Math.min(Math.round(estTotalMin * cfg.unit * (cfg.difficulty[difficulty] || 1.5)), 1200)
+        : null;
+      const info = await db.run(
+        `INSERT INTO goals (owner_id, type, title, emoji, description, freq_mode, freq_n, weekdays,
+          window_start, window_end, duration_min, difficulty, start_date, end_date, status,
+          est_total_min, accept_criteria, total_points, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+        [
+          req.user.id,
+          type,
+          b.title.trim(),
+          b.emoji || '🎯',
+          String(b.description || '').trim(),
+          type === 'stage' ? 'daily' : (b.freq_mode || 'daily'), // stage 无频率，占位 daily
+          Number(b.freq_n) || 1,
+          b.freq_mode === 'weekdays' ? String(b.weekdays) : '',
+          type === 'stage' ? null : (b.window_start || null),
+          type === 'stage' ? null : (b.window_end || null),
+          Number(b.duration_min) || 30,
+          difficulty,
+          b.start_date || todayStr(),
+          b.end_date || null,
+          status,
+          estTotalMin,
+          type === 'stage' ? String(b.accept_criteria || '').trim() : null,
+          totalPoints,
+          nowIso(),
+          nowIso(),
+        ]
       );
-    const goal = db.prepare('SELECT * FROM goals WHERE id = ?').get(Number(info.lastInsertRowid));
-    log.log('goal_create', `${req.user.nickname} 建目标「${goal.title}」`);
-    res.json({ goal: goalRow(goal, cfg) });
+      const goal = await db.get('SELECT * FROM goals WHERE id = ?', [Number(info.id)]);
+      log.log('goal_create', `${req.user.nickname} 建目标「${goal.title}」(${type})`);
+      res.json({ goal: goalRow(goal, cfg) });
+    } catch (e) { next(e); }
   });
 
   // 目标详情
-  r.get('/goals/:id', mw.requireUser, mw.loadGoal, (req, res) => {
-    const cfg = getPoints(db);
-    const monthStart = todayStr().slice(0, 8) + '01';
-    const month = db
-      .prepare(`SELECT * FROM check_ins WHERE goal_id = ? AND check_date >= ?
-                ORDER BY check_date DESC, id DESC`)
-      .all(req.goal.id, monthStart);
-    res.json({ goal: goalRow(req.goal, cfg), monthCheckins: month });
+  r.get('/goals/:id', mw.requireUser, mw.loadGoal, async (req, res, next) => {
+    try {
+      const cfg = await getPoints(db);
+      const monthStart = todayStr().slice(0, 8) + '01';
+      const month = await db.all(
+        `SELECT * FROM check_ins WHERE goal_id = ? AND check_date >= ?
+         ORDER BY check_date DESC, id DESC`,
+        [req.goal.id, monthStart]
+      );
+      res.json({ goal: goalRow(req.goal, cfg), monthCheckins: month });
+    } catch (e) { next(e); }
   });
 
   // 编辑目标
-  r.put('/goals/:id', mw.requireUser, mw.requireGoalOwner, (req, res) => {
-    const g = req.goal;
-    if (['achieved', 'abandoned', 'archived'].includes(g.status)) {
-      return res.status(400).json({ error: '该状态的目标不能编辑' });
-    }
-    const errors = validateGoalBody(req.body, true);
-    if (errors.length) return res.status(400).json({ error: errors[0] });
-    const b = req.body;
-    const difficulty = b.difficulty !== undefined ? Number(b.difficulty) : g.difficulty;
-    const duration = b.duration_min !== undefined ? Number(b.duration_min) : g.duration_min;
-    if ((difficulty !== g.difficulty || duration !== g.duration_min) && g.status === 'active') {
-      log.log('goal_change', `${req.user.nickname} 修改目标「${g.title}」时长/难度 ${g.duration_min}→${duration} / ${g.difficulty}→${difficulty}`);
-    }
-    db.prepare(`UPDATE goals SET title=?, emoji=?, description=?, freq_mode=?, freq_n=?, weekdays=?,
-                window_start=?, window_end=?, duration_min=?, difficulty=?, start_date=?, end_date=?, updated_at=? WHERE id=?`)
-      .run(
-        (b.title !== undefined ? String(b.title).trim() : g.title),
-        (b.emoji !== undefined ? b.emoji : g.emoji),
-        (b.description !== undefined ? String(b.description).trim() : g.description),
-        (b.freq_mode !== undefined ? b.freq_mode : g.freq_mode),
-        (b.freq_n !== undefined ? Number(b.freq_n) : g.freq_n),
-        (b.freq_mode === 'weekdays'
-          ? String(b.weekdays || g.weekdays || '')
-          : b.freq_mode !== undefined ? '' : g.weekdays),
-        (b.window_start !== undefined ? (b.window_start || null) : g.window_start),
-        (b.window_end !== undefined ? (b.window_end || null) : g.window_end),
-        duration,
-        difficulty,
-        (b.start_date !== undefined ? b.start_date : g.start_date),
-        (b.end_date !== undefined ? (b.end_date || null) : g.end_date),
-        nowIso(),
-        g.id
+  r.put('/goals/:id', mw.requireUser, mw.requireGoalOwner, async (req, res, next) => {
+    try {
+      const g = req.goal;
+      if (['achieved', 'abandoned', 'archived'].includes(g.status)) {
+        return res.status(400).json({ error: '该状态的目标不能编辑' });
+      }
+      const errors = validateGoalBody(req.body, true);
+      if (errors.length) return res.status(400).json({ error: errors[0] });
+      const b = req.body;
+      const difficulty = b.difficulty !== undefined ? Number(b.difficulty) : g.difficulty;
+      const duration = b.duration_min !== undefined ? Number(b.duration_min) : g.duration_min;
+      if ((difficulty !== g.difficulty || duration !== g.duration_min) && g.status === 'active') {
+        log.log('goal_change', `${req.user.nickname} 修改目标「${g.title}」时长/难度 ${g.duration_min}→${duration} / ${g.difficulty}→${difficulty}`);
+      }
+      await db.run(
+        `UPDATE goals SET title=?, emoji=?, description=?, freq_mode=?, freq_n=?, weekdays=?,
+         window_start=?, window_end=?, duration_min=?, difficulty=?, start_date=?, end_date=?, updated_at=? WHERE id=?`,
+        [
+          (b.title !== undefined ? String(b.title).trim() : g.title),
+          (b.emoji !== undefined ? b.emoji : g.emoji),
+          (b.description !== undefined ? String(b.description).trim() : g.description),
+          (b.freq_mode !== undefined ? b.freq_mode : g.freq_mode),
+          (b.freq_n !== undefined ? Number(b.freq_n) : g.freq_n),
+          (b.freq_mode === 'weekdays' ? String(b.weekdays || g.weekdays || '') : b.freq_mode !== undefined ? '' : g.weekdays),
+          (b.window_start !== undefined ? (b.window_start || null) : g.window_start),
+          (b.window_end !== undefined ? (b.window_end || null) : g.window_end),
+          duration,
+          difficulty,
+          (b.start_date !== undefined ? b.start_date : g.start_date),
+          (b.end_date !== undefined ? (b.end_date || null) : g.end_date),
+          nowIso(),
+          g.id,
+        ]
       );
-    const goal = db.prepare('SELECT * FROM goals WHERE id = ?').get(g.id);
-    res.json({ goal: goalRow(goal, getPoints(db)) });
+      const goal = await db.get('SELECT * FROM goals WHERE id = ?', [g.id]);
+      res.json({ goal: goalRow(goal, await getPoints(db)) });
+    } catch (e) { next(e); }
   });
 
   // 开始（草稿→进行中）
-  r.post('/goals/:id/start', mw.requireUser, mw.requireGoalOwner, (req, res) => {
-    if (req.goal.status !== 'draft') return res.status(400).json({ error: '只有草稿可以开始' });
-    db.prepare(`UPDATE goals SET status='active', updated_at=? WHERE id=?`).run(nowIso(), req.goal.id);
-    res.json({ ok: true });
+  r.post('/goals/:id/start', mw.requireUser, mw.requireGoalOwner, async (req, res, next) => {
+    try {
+      if (req.goal.status !== 'draft') return res.status(400).json({ error: '只有草稿可以开始' });
+      await db.run(`UPDATE goals SET status='active', updated_at=? WHERE id=?`, [nowIso(), req.goal.id]);
+      res.json({ ok: true });
+    } catch (e) { next(e); }
   });
 
   // 放弃（保留记录，不物理删除）
-  r.post('/goals/:id/abandon', mw.requireUser, mw.requireGoalOwner, (req, res) => {
-    if (!['active', 'draft'].includes(req.goal.status)) return res.status(400).json({ error: '当前状态不能放弃' });
-    db.prepare(`UPDATE goals SET status='abandoned', updated_at=? WHERE id=?`).run(nowIso(), req.goal.id);
-    log.log('goal_abandon', `${req.user.nickname} 放弃目标「${req.goal.title}」`);
-    res.json({ ok: true });
+  r.post('/goals/:id/abandon', mw.requireUser, mw.requireGoalOwner, async (req, res, next) => {
+    try {
+      if (!['active', 'draft'].includes(req.goal.status)) return res.status(400).json({ error: '当前状态不能放弃' });
+      await db.run(`UPDATE goals SET status='abandoned', updated_at=? WHERE id=?`, [nowIso(), req.goal.id]);
+      log.log('goal_abandon', `${req.user.nickname} 放弃目标「${req.goal.title}」`);
+      res.json({ ok: true });
+    } catch (e) { next(e); }
   });
 
   // 打卡（自评即入账）
-  r.post('/goals/:id/checkin', mw.requireUser, mw.requireGoalOwner, (req, res) => {
-    const g = req.goal;
-    if (g.status !== 'active') return res.status(400).json({ error: '只有进行中的目标能打卡' });
-    const today = todayStr();
-    const dup = db
-      .prepare(`SELECT * FROM check_ins WHERE goal_id = ? AND check_date = ? AND status = 'credited'`)
-      .get(g.id, today);
-    if (dup) return res.status(409).json({ error: '今天已经打过卡了' });
+  r.post('/goals/:id/checkin', mw.requireUser, mw.requireGoalOwner, async (req, res, next) => {
+    try {
+      const g = req.goal;
+      if (g.status !== 'active') return res.status(400).json({ error: '只有进行中的目标能打卡' });
+      if (g.type === 'stage') return res.status(400).json({ error: '小目标不能打卡，请提交验收' });
+      const today = todayStr();
+      const dup = await db.get(
+        `SELECT * FROM check_ins WHERE goal_id = ? AND check_date = ? AND status = 'credited'`,
+        [g.id, today]
+      );
+      if (dup) return res.status(409).json({ error: '今天已经打过卡了' });
 
-    const b = req.body || {};
-    let duration = Number(b.duration_min);
-    if (!Number.isFinite(duration)) duration = Number(g.duration_min);
-    duration = Math.max(1, Math.min(1440, Math.round(duration)));
-    const evidenceText = String(b.evidence_text || '').trim().slice(0, 500);
-    let evidenceId = null;
-    if (b.evidence_id) {
-      const up = db.prepare('SELECT * FROM uploads WHERE id = ? AND user_id = ?').get(Number(b.evidence_id), req.user.id);
-      if (!up) return res.status(400).json({ error: '证据图片无效' });
-      evidenceId = Number(b.evidence_id);
-    }
+      const b = req.body || {};
+      let duration = Number(b.duration_min);
+      if (!Number.isFinite(duration)) duration = Number(g.duration_min);
+      duration = Math.max(1, Math.min(1440, Math.round(duration)));
+      const evidenceText = String(b.evidence_text || '').trim().slice(0, 500);
+      let evidenceId = null;
+      if (b.evidence_id) {
+        const up = await db.get('SELECT * FROM uploads WHERE id = ? AND user_id = ?', [Number(b.evidence_id), req.user.id]);
+        if (!up) return res.status(400).json({ error: '证据图片无效' });
+        evidenceId = Number(b.evidence_id);
+      }
 
-    const cfg = getPoints(db);
-    const inWin = inWindowNow(g);
-    const points = calcPoints(g, duration, inWin, cfg);
+      const cfg = await getPoints(db);
+      const inWin = inWindowNow(g);
+      const points = calcPoints(g, duration, inWin, cfg);
 
-    const result = tx(db, () => {
-      const info = db
-        .prepare(`INSERT INTO check_ins (goal_id, user_id, check_date, duration_min, in_window, points, is_makeup, evidence_text, evidence_id, status, created_at)
-                  VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 'credited', ?)`)
-        .run(g.id, req.user.id, today, duration, inWin ? 1 : 0, points, evidenceText, evidenceId, nowIso());
-      const ciId = Number(info.lastInsertRowid);
-      const led = ledgerAdd(db, {
-        userId: req.user.id,
-        delta: points,
-        type: 'checkin',
-        refType: 'check_in',
-        refId: ciId,
-        note: `「${g.title}」${duration} 分钟`,
+      const result = await tx(db, async (c) => {
+        const info = await c.run(
+          `INSERT INTO check_ins (goal_id, user_id, check_date, duration_min, in_window, points, is_makeup, evidence_text, evidence_id, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 'credited', ?) RETURNING id`,
+          [g.id, req.user.id, today, duration, inWin ? 1 : 0, points, evidenceText, evidenceId, nowIso()]
+        );
+        const ciId = Number(info.id);
+        const led = await ledgerAdd(c, {
+          userId: req.user.id,
+          delta: points,
+          type: 'checkin',
+          refType: 'check_in',
+          refId: ciId,
+          note: `「${g.title}」${duration} 分钟`,
+        });
+        const freshGoal = await c.get('SELECT * FROM goals WHERE id = ?', [g.id]);
+        const streak = await updateStreakAndMilestones(c, freshGoal, cfg, await creditedDatesFor(c, g.id));
+        return { ciId, led, streak };
       });
-      const freshGoal = db.prepare('SELECT * FROM goals WHERE id = ?').get(g.id);
-      const streak = updateStreakAndMilestones(db, freshGoal, cfg, creditedDatesFor(db, g.id));
-      return { ciId, led, streak };
-    });
-    log.log('checkin', `${req.user.nickname} 打卡「${g.title}」+${points} 分`);
-    res.json({
-      checkin: db.prepare('SELECT * FROM check_ins WHERE id = ?').get(result.ciId),
-      points,
-      bonuses: result.streak.bonuses,
-      streak: result.streak.after,
-      balance: result.led.balanceAfter,
-    });
+      log.log('checkin', `${req.user.nickname} 打卡「${g.title}」+${points} 分`);
+      res.json({
+        checkin: await db.get('SELECT * FROM check_ins WHERE id = ?', [result.ciId]),
+        points,
+        bonuses: result.streak.bonuses,
+        streak: result.streak.after,
+        balance: result.led.balanceAfter,
+      });
+    } catch (e) { next(e); }
   });
 
   // 撤销（24h 内本人）
-  r.post('/checkins/:id/revoke', mw.requireUser, (req, res) => {
-    const ci = db.prepare('SELECT * FROM check_ins WHERE id = ?').get(Number(req.params.id) || 0);
-    if (!ci) return res.status(404).json({ error: '打卡记录不存在' });
-    if (ci.user_id !== req.user.id) return res.status(403).json({ error: '只能撤销自己的打卡' });
-    if (ci.status !== 'credited') return res.status(400).json({ error: '这条打卡已失效' });
-    const hours = (Date.now() - new Date(ci.created_at).getTime()) / 3600000;
-    if (hours > 24) return res.status(400).json({ error: '超过 24 小时不能撤销，只能由对方驳回或双方手动修正' });
-    tx(db, () => {
-      db.prepare(`UPDATE check_ins SET status='revoked' WHERE id=?`).run(ci.id);
-      ledgerAdd(db, {
-        userId: ci.user_id,
-        delta: -Number(ci.points),
-        type: 'checkin_revoke',
-        refType: 'check_in',
-        refId: ci.id,
-        note: '撤销打卡',
+  r.post('/checkins/:id/revoke', mw.requireUser, async (req, res, next) => {
+    try {
+      const ci = await db.get('SELECT * FROM check_ins WHERE id = ?', [Number(req.params.id) || 0]);
+      if (!ci) return res.status(404).json({ error: '打卡记录不存在' });
+      if (ci.user_id !== req.user.id) return res.status(403).json({ error: '只能撤销自己的打卡' });
+      if (ci.status !== 'credited') return res.status(400).json({ error: '这条打卡已失效' });
+      const hours = (Date.now() - new Date(ci.created_at).getTime()) / 3600000;
+      if (hours > 24) return res.status(400).json({ error: '超过 24 小时不能撤销，只能由对方驳回或双方手动修正' });
+      await tx(db, async (c) => {
+        await c.run(`UPDATE check_ins SET status='revoked' WHERE id=?`, [ci.id]);
+        await ledgerAdd(c, {
+          userId: ci.user_id,
+          delta: -Number(ci.points),
+          type: 'checkin_revoke',
+          refType: 'check_in',
+          refId: ci.id,
+          note: '撤销打卡',
+        });
+        await recomputeStreakAfterRemoval(c, ci.goal_id);
       });
-      recomputeStreakAfterRemoval(db, ci.goal_id);
-    });
-    log.log('checkin_revoke', `${req.user.nickname} 撤销打卡 #${ci.id}`);
-    res.json({ ok: true, balance: balanceOf(db, req.user.id) });
+      log.log('checkin_revoke', `${req.user.nickname} 撤销打卡 #${ci.id}`);
+      res.json({ ok: true, balance: await balanceOf(db, req.user.id) });
+    } catch (e) { next(e); }
   });
 
   // 驳回（对方）
-  r.post('/checkins/:id/reject', mw.requireUser, (req, res) => {
-    const ci = db.prepare('SELECT * FROM check_ins WHERE id = ?').get(Number(req.params.id) || 0);
-    if (!ci) return res.status(404).json({ error: '打卡记录不存在' });
-    const partner = mw.partnerOf(req.user.id);
-    if (!partner || ci.user_id !== partner.id) return res.status(403).json({ error: '只能驳回对方的打卡' });
-    if (ci.status !== 'credited') return res.status(400).json({ error: '这条打卡已失效' });
-    const reason = String((req.body && req.body.reason) || '').trim();
-    if (!reason || reason.length > 200) return res.status(400).json({ error: '请填写 1–200 字的驳回理由' });
-    tx(db, () => {
-      db.prepare(`UPDATE check_ins SET status='rejected', reason=? WHERE id=?`).run(reason, ci.id);
-      ledgerAdd(db, {
-        userId: ci.user_id,
-        delta: -Number(ci.points),
-        type: 'checkin_revoke',
-        refType: 'check_in',
-        refId: ci.id,
-        note: `对方驳回：${reason}`,
+  r.post('/checkins/:id/reject', mw.requireUser, async (req, res, next) => {
+    try {
+      const ci = await db.get('SELECT * FROM check_ins WHERE id = ?', [Number(req.params.id) || 0]);
+      if (!ci) return res.status(404).json({ error: '打卡记录不存在' });
+      const partner = await mw.partnerOf(req.user.id);
+      if (!partner || ci.user_id !== partner.id) return res.status(403).json({ error: '只能驳回对方的打卡' });
+      if (ci.status !== 'credited') return res.status(400).json({ error: '这条打卡已失效' });
+      const reason = String((req.body && req.body.reason) || '').trim();
+      if (!reason || reason.length > 200) return res.status(400).json({ error: '请填写 1–200 字的驳回理由' });
+      await tx(db, async (c) => {
+        await c.run(`UPDATE check_ins SET status='rejected', reason=? WHERE id=?`, [reason, ci.id]);
+        await ledgerAdd(c, {
+          userId: ci.user_id,
+          delta: -Number(ci.points),
+          type: 'checkin_revoke',
+          refType: 'check_in',
+          refId: ci.id,
+          note: `对方驳回：${reason}`,
+        });
+        await recomputeStreakAfterRemoval(c, ci.goal_id);
       });
-      recomputeStreakAfterRemoval(db, ci.goal_id);
-    });
-    log.log('checkin_reject', `${req.user.nickname} 驳回 ${partner.nickname} 的打卡 #${ci.id}`);
-    res.json({ ok: true });
+      log.log('checkin_reject', `${req.user.nickname} 驳回 ${partner.nickname} 的打卡 #${ci.id}`);
+      res.json({ ok: true });
+    } catch (e) { next(e); }
   });
 
   // 打卡流水查询（本人或搭档，双方数据互见）
-  r.get('/checkins', mw.requireUser, (req, res) => {
-    const goalId = Number(req.query.goal) || 0;
-    const partner = mw.partnerOf(req.user.id);
-    const rows = db
-      .prepare(`SELECT ci.*, g.title AS goal_title, g.emoji AS goal_emoji, g.owner_id AS goal_owner FROM check_ins ci
-                JOIN goals g ON g.id = ci.goal_id
-                WHERE (ci.user_id = ? OR ci.user_id = ?) ${goalId ? 'AND ci.goal_id = ?' : ''}
-                ORDER BY ci.id DESC LIMIT 100`)
-      .all(req.user.id, partner ? partner.id : -1, ...(goalId ? [goalId] : []));
-    res.json({ checkins: rows });
+  r.get('/checkins', mw.requireUser, async (req, res, next) => {
+    try {
+      const goalId = Number(req.query.goal) || 0;
+      const partner = await mw.partnerOf(req.user.id);
+      const rows = await db.all(
+        `SELECT ci.*, g.title AS goal_title, g.emoji AS goal_emoji, g.owner_id AS goal_owner FROM check_ins ci
+         JOIN goals g ON g.id = ci.goal_id
+         WHERE (ci.user_id = ? OR ci.user_id = ?) ${goalId ? 'AND ci.goal_id = ?' : ''}
+         ORDER BY ci.id DESC LIMIT 100`,
+        [req.user.id, partner ? partner.id : -1, ...(goalId ? [goalId] : [])]
+      );
+      res.json({ checkins: rows });
+    } catch (e) { next(e); }
+  });
+
+  // ===== 小目标（阶段目标）验收流程 =====
+
+  // 提交验收（本人，仅 stage 目标）
+  r.post('/goals/:id/submit', mw.requireUser, mw.requireGoalOwner, async (req, res, next) => {
+    try {
+      const g = req.goal;
+      if (g.type !== 'stage') return res.status(400).json({ error: '只有小目标需要验收' });
+      if (g.status !== 'active') return res.status(400).json({ error: '只有进行中的小目标能提交验收' });
+      const b = req.body || {};
+      const selfStatement = String(b.self_statement || '').trim();
+      if (selfStatement.length > 1000) return res.status(400).json({ error: '自述不能超过 1000 字' });
+      const evidenceText = String(b.evidence_text || '').trim().slice(0, 1000);
+      const evidenceIds = Array.isArray(b.evidence_ids) ? b.evidence_ids.slice(0, 3).map(Number) : [];
+      const partner = await mw.partnerOf(req.user.id);
+      if (!partner) return res.status(400).json({ error: '还没有搭档，无法验收' });
+
+      await tx(db, async (c) => {
+        const prev = await c.get(`SELECT * FROM verifications WHERE goal_id = ? ORDER BY id DESC LIMIT 1`, [g.id]);
+        const submitCount = prev ? Number(prev.submit_count) + 1 : 1;
+        await c.run(
+          `INSERT INTO verifications (goal_id, submitter_id, reviewer_id, submit_count, evidence_text, evidence_ids, self_statement, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+          [g.id, req.user.id, partner.id, submitCount, evidenceText, evidenceIds.join(','), selfStatement, nowIso()]
+        );
+        await c.run(`UPDATE goals SET status='reviewing', updated_at=? WHERE id=?`, [nowIso(), g.id]);
+      });
+      log.log('verify_submit', `${req.user.nickname} 提交验收「${g.title}」`);
+      res.json({ ok: true });
+    } catch (e) { next(e); }
+  });
+
+  // 待我验收列表（我是验收人的 pending）
+  r.get('/verifications/pending', mw.requireUser, async (req, res, next) => {
+    try {
+      const rows = await db.all(
+        `SELECT v.*, g.title AS goal_title, g.emoji AS goal_emoji, g.total_points, u.nickname AS submitter_nickname, u.avatar AS submitter_avatar
+         FROM verifications v
+         JOIN goals g ON g.id = v.goal_id
+         JOIN users u ON u.id = v.submitter_id
+         WHERE v.reviewer_id = ? AND v.status = 'pending'
+         ORDER BY v.id DESC`,
+        [req.user.id]
+      );
+      res.json({ verifications: rows });
+    } catch (e) { next(e); }
+  });
+
+  // 通过（对方 → 入账 stage_credit，逾期只发 90%）
+  r.post('/verifications/:id/approve', mw.requireUser, async (req, res, next) => {
+    try {
+      const v = await db.get('SELECT * FROM verifications WHERE id = ?', [Number(req.params.id) || 0]);
+      if (!v) return res.status(404).json({ error: '验收记录不存在' });
+      if (v.reviewer_id !== req.user.id) return res.status(403).json({ error: '只能验收自己的待办' });
+      if (v.status !== 'pending') return res.status(400).json({ error: '这条验收已处理' });
+      const g = await db.get('SELECT * FROM goals WHERE id = ?', [v.goal_id]);
+      if (!g) return res.status(404).json({ error: '目标不存在' });
+
+      const cfg = await getPoints(db);
+      let points = Number(g.total_points) || 0;
+      // 逾期完成只发 90%（需求 8.2）
+      const overdue = g.end_date && todayStr() > g.end_date;
+      if (overdue) points = Math.round(points * 0.9);
+
+      await tx(db, async (c) => {
+        await c.run(`UPDATE verifications SET status='approved', decided_at=? WHERE id=?`, [nowIso(), v.id]);
+        await c.run(`UPDATE goals SET status='achieved', updated_at=? WHERE id=?`, [nowIso(), g.id]);
+        if (points > 0) {
+          await ledgerAdd(c, {
+            userId: g.owner_id,
+            delta: points,
+            type: 'stage_credit',
+            refType: 'verification',
+            refId: v.id,
+            note: `小目标「${g.title}」${overdue ? '逾期完成（90%）' : '达成'}`,
+          });
+        }
+      });
+      log.log('verify_approve', `${req.user.nickname} 通过 ${g.title} 的验收 +${points} 分`);
+      res.json({ ok: true, points, overdue });
+    } catch (e) { next(e); }
+  });
+
+  // 驳回（对方 → 目标回 active）
+  r.post('/verifications/:id/reject', mw.requireUser, async (req, res, next) => {
+    try {
+      const v = await db.get('SELECT * FROM verifications WHERE id = ?', [Number(req.params.id) || 0]);
+      if (!v) return res.status(404).json({ error: '验收记录不存在' });
+      if (v.reviewer_id !== req.user.id) return res.status(403).json({ error: '只能处理自己的待办' });
+      if (v.status !== 'pending') return res.status(400).json({ error: '这条验收已处理' });
+      const reason = String((req.body && req.body.reason) || '').trim();
+      if (!reason || reason.length > 200) return res.status(400).json({ error: '请填写 1–200 字的驳回理由' });
+      const g = await db.get('SELECT * FROM goals WHERE id = ?', [v.goal_id]);
+      await tx(db, async (c) => {
+        await c.run(`UPDATE verifications SET status='rejected', reason=?, decided_at=? WHERE id=?`, [reason, nowIso(), v.id]);
+        await c.run(`UPDATE goals SET status='active', updated_at=? WHERE id=?`, [nowIso(), v.goal_id]);
+      });
+      log.log('verify_reject', `${req.user.nickname} 驳回「${g.title}」的验收：${reason}`);
+      res.json({ ok: true });
+    } catch (e) { next(e); }
   });
 
   return r;

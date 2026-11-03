@@ -1,4 +1,19 @@
 services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=footprint_dev_pw
+      - POSTGRES_DB=footprint
+    volumes:
+      - ./runtime/pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   footprint:
     build: .
     ports:
@@ -6,6 +21,10 @@ services:
     environment:
       - PORT=3000
       - DATA_DIR=/app/data
+      - DATABASE_URL=postgres://postgres:footprint_dev_pw@db:5432/footprint
     volumes:
       - ./runtime/data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped

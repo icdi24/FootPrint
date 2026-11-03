@@ -7,6 +7,7 @@ const { restoreFromJson } = require('../src/export');
 const logMod = require('../src/log');
 
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, '..', 'data');
+const DATABASE_URL = process.env.DATABASE_URL || 'postgres://postgres:footprint_dev_pw@localhost:5432/footprint';
 
 (async () => {
   const file = process.argv[2];
@@ -20,10 +21,10 @@ const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : pat
     process.exit(1);
   }
   const json = fs.readFileSync(file, 'utf8');
-  const db = openDb(DATA_DIR);
+  const db = await openDb(DATABASE_URL);
   logMod.init(path.join(DATA_DIR, 'logs'));
   try {
-    restoreFromJson(db, json, DATA_DIR);
+    await restoreFromJson(db, json, DATA_DIR);
     logMod.log('restore', `从 ${file} 恢复数据`);
     console.log('恢复完成。当前会话与积分系数设置保持不变，业务数据已替换。');
     process.exit(0);

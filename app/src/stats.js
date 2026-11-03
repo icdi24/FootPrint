@@ -34,11 +34,11 @@ function expectedCount(goal, from, to) {
   return Math.min(c * (Number(goal.freq_n) || 1), days);
 }
 
-function statsFor(db, userId) {
+async function statsFor(db, userId) {
   const monthStart = monthStartStr();
   const today = todayStr();
 
-  const ledgerRows = db.prepare('SELECT delta, type, created_at FROM point_ledger WHERE user_id = ?').all(userId);
+  const ledgerRows = await db.all('SELECT delta, type, created_at FROM point_ledger WHERE user_id = ?', [userId]);
   let balance = 0;
   let monthPoints = 0;
   for (const r of ledgerRows) {
@@ -48,32 +48,33 @@ function statsFor(db, userId) {
     }
   }
 
-  const checkins = db
-    .prepare(`SELECT * FROM check_ins WHERE user_id = ? AND status = 'credited' ORDER BY check_date DESC`)
-    .all(userId);
+  const checkins = await db.all(
+    `SELECT * FROM check_ins WHERE user_id = ? AND status = 'credited' ORDER BY check_date DESC`,
+    [userId]
+  );
 
   const monthCheckins = checkins.filter((c) => c.check_date >= monthStart && c.check_date <= today);
   const timeInvestMin = monthCheckins.reduce((s, c) => s + Number(c.duration_min), 0);
 
-  const goals = db
-    .prepare(`SELECT * FROM goals WHERE owner_id = ? AND status IN ('active','achieved','abandoned')`)
-    .all(userId);
+  const goals = await db.all(
+    `SELECT * FROM goals WHERE owner_id = ? AND type = 'daily' AND status IN ('active','achieved','abandoned')`,
+    [userId]
+  );
   let expected = 0;
   for (const g of goals) expected += expectedCount(g, monthStart, today);
   const achieved = monthCheckins.length;
   const completion = expected > 0 ? Math.round((achieved / expected) * 100) : null;
 
-  const bestRow = db.prepare('SELECT MAX(streak_best) AS b FROM goals WHERE owner_id = ?').get(userId);
+  const bestRow = await db.get('SELECT MAX(streak_best) AS b FROM goals WHERE owner_id = ? AND type = \'daily\'', [userId]);
   const bestStreak = Number(bestRow.b || 0);
 
-  const curRow = db
-    .prepare(`SELECT MAX(streak_count) AS c FROM goals WHERE owner_id = ? AND status = 'active'`)
-    .get(userId);
+  const curRow = await db.get(
+    `SELECT MAX(streak_count) AS c FROM goals WHERE owner_id = ? AND type = 'daily' AND status = 'active'`,
+    [userId]
+  );
   const currentStreak = Number(curRow.c || 0);
 
-  const rejected = db
-    .prepare(`SELECT COUNT(*) AS c FROM check_ins WHERE user_id = ? AND status = 'rejected'`)
-    .get(userId);
+  const rejected = await db.get(`SELECT COUNT(*) AS c FROM check_ins WHERE user_id = ? AND status = 'rejected'`, [userId]);
   const rejectedCount = Number(rejected.c);
 
   return {

@@ -48,31 +48,32 @@ function lockRemainingMs(nickname) {
   return 0;
 }
 
-function createSession(db, userId) {
+async function createSession(db, userId) {
   const token = crypto.randomBytes(32).toString('hex');
   const now = new Date();
   const expires = new Date(now.getTime() + SESSION_DAYS * 86400000);
-  db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(now.toISOString());
-  db.prepare('INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)')
-    .run(token, userId, now.toISOString(), expires.toISOString());
+  await db.run('DELETE FROM sessions WHERE expires_at < ?', [now.toISOString()]);
+  await db.run('INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)',
+    [token, userId, now.toISOString(), expires.toISOString()]);
   return { token, expiresAt: expires.toISOString() };
 }
 
-function destroySession(db, token) {
+async function destroySession(db, token) {
   if (!token) return;
-  db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+  await db.run('DELETE FROM sessions WHERE token = ?', [token]);
 }
 
-function destroyAllSessions(db, userId) {
-  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+async function destroyAllSessions(db, userId) {
+  await db.run('DELETE FROM sessions WHERE user_id = ?', [userId]);
 }
 
-function userByToken(db, token) {
+async function userByToken(db, token) {
   if (!token) return null;
-  const row = db
-    .prepare(`SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
-              WHERE s.token = ? AND s.expires_at > ?`)
-    .get(token, new Date().toISOString());
+  const row = await db.get(
+    `SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
+     WHERE s.token = ? AND s.expires_at > ?`,
+    [token, new Date().toISOString()]
+  );
   return row || null;
 }
 

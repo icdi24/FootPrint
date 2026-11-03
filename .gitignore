@@ -4,3 +4,6 @@ runtime/
 app/.smoke/
 npm-debug.log*
 *.log
+.pg/
+.pgdata/
+start-pg.bat

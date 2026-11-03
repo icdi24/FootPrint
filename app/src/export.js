@@ -7,16 +7,17 @@ const TABLES = [
   'check_ins',
   'point_ledger',
   'goal_milestones',
+  'verifications',
   'wish_items',
   'wish_history',
   'redemptions',
   'uploads',
 ];
 
-function dumpAll(db) {
+async function dumpAll(db) {
   const tables = {};
   for (const t of TABLES) {
-    tables[t] = db.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all();
+    tables[t] = await db.all(`SELECT * FROM ${t} ORDER BY id`);
   }
   return tables;
 }
@@ -38,8 +39,8 @@ function toCsv(rows) {
   return lines.join('\r\n');
 }
 
-function buildExportZip(db) {
-  const tables = dumpAll(db);
+async function buildExportZip(db) {
+  const tables = await dumpAll(db);
   const json = JSON.stringify(
     { app: 'footprint', version: 1, exportedAt: new Date().toISOString(), tables },
     null,
@@ -54,35 +55,30 @@ function buildExportZip(db) {
 }
 
 // 从导出 JSON 恢复：先备份当前库，再整表替换（事务内完成）。
-function restoreFromJson(db, jsonText, dataDir) {
+async function restoreFromJson(db, jsonText, dataDir) {
   const data = JSON.parse(jsonText);
   if (!data || data.app !== 'footprint' || !data.tables || typeof data.tables !== 'object') {
     throw new Error('不是脚印的导出文件（缺少 app/tables 标记）');
   }
   const { backupNow } = require('./backup');
-  backupNow(db, dataDir);
-  db.exec('BEGIN');
-  try {
+  await backupNow(db, dataDir);
+  const { tx } = require('./db');
+  await tx(db, async (c) => {
     // 先清空（跳过 settings/sessions，保留会话与当前系数配置）
     for (const t of [...TABLES].reverse()) {
-      db.exec(`DELETE FROM ${t}`);
+      await c.exec(`DELETE FROM ${t}`);
     }
     for (const t of TABLES) {
       const rows = data.tables[t];
       if (!Array.isArray(rows) || !rows.length) continue;
       const cols = Object.keys(rows[0]);
-      const sql = `INSERT INTO ${t} (${cols.map((c) => c).join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`;
-      const stmt = db.prepare(sql);
+      const sql = `INSERT INTO ${t} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`;
       for (const r of rows) {
-        stmt.run(...cols.map((c) => r[c]));
+        await c.run(sql, cols.map((k) => r[k]));
       }
     }
-    db.exec('COMMIT');
-  } catch (e) {
-    db.exec('ROLLBACK');
-    throw e;
-  }
+  });
   return true;
 }
 
-module.exports = { dumpAll, buildExportZip, restoreFromJson };
+module.exports = { dumpAll, buildExportZip, restoreFromJson, TABLES };

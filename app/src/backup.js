@@ -1,4 +1,4 @@
-// 自动快照：每日 03:00（上海）复制数据库文件，保留 30 天；启动时补当天。
+// 自动快照：每日 03:00（上海）做一次全量逻辑导出（JSON），保留 30 天；启动时补当天。
 const fs = require('fs');
 const path = require('path');
 
@@ -8,27 +8,24 @@ function backupsDir(dataDir) {
   return path.join(dataDir, 'backups');
 }
 
-function checkpoint(db) {
-  try {
-    db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
-  } catch (e) { /* 忽略 */ }
-}
-
-function backupNow(db, dataDir) {
+// 异步逻辑导出：复用 export 的全表 dump
+async function backupNow(db, dataDir) {
   const dir = backupsDir(dataDir);
   fs.mkdirSync(dir, { recursive: true });
-  checkpoint(db);
+  const { dumpAll } = require('./export');
+  const tables = await dumpAll(db);
   const d = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
-  const name = `app-${d}.db`;
-  fs.copyFileSync(path.join(dataDir, 'app.db'), path.join(dir, name));
+  const name = `app-${d}.json`;
+  const payload = JSON.stringify({ app: 'footprint', version: 1, exportedAt: new Date().toISOString(), tables }, null, 2);
+  fs.writeFileSync(path.join(dir, name), payload, 'utf8');
   prune(dir);
-  return { name, size: fs.statSync(path.join(dir, name)).size };
+  return { name, size: Buffer.byteLength(payload) };
 }
 
 function prune(dir) {
   const cutoff = new Date(Date.now() - KEEP_DAYS * 86400000);
   for (const f of fs.readdirSync(dir)) {
-    if (!/^app-\d{4}-\d{2}-\d{2}\.db$/.test(f)) continue;
+    if (!/^app-\d{4}-\d{2}-\d{2}\.json$/.test(f)) continue;
     const p = path.join(dir, f);
     try {
       if (fs.statSync(p).mtimeMs < cutoff.getTime()) fs.unlinkSync(p);
@@ -41,7 +38,7 @@ function listBackups(dataDir) {
   if (!fs.existsSync(dir)) return [];
   return fs
     .readdirSync(dir)
-    .filter((f) => /^app-\d{4}-\d{2}-\d{2}\.db$/.test(f))
+    .filter((f) => /^app-\d{4}-\d{2}-\d{2}\.json$/.test(f))
     .map((name) => {
       const p = path.join(dir, name);
       const st = fs.statSync(p);
@@ -52,17 +49,17 @@ function listBackups(dataDir) {
 
 function hasBackupToday(dataDir) {
   const d = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
-  return listBackups(dataDir).some((b) => b.name === `app-${d}.db`);
+  return listBackups(dataDir).some((b) => b.name === `app-${d}.json`);
 }
 
 function scheduleBackup(db, dataDir) {
-  const tick = () => {
+  const tick = async () => {
     try {
       const now = new Date(Date.now() + 8 * 3600 * 1000);
       const h = now.getUTCHours();
       const m = now.getUTCMinutes();
       if (h === 3 && m < 5 && !hasBackupToday(dataDir)) {
-        backupNow(db, dataDir);
+        await backupNow(db, dataDir);
       }
     } catch (e) { /* 忽略调度错误 */ }
   };

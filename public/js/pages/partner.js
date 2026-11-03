@@ -12,7 +12,7 @@ const PartnerPage = {
 
   async draw(root) {
     const data = await api.get('/api/partner');
-    const { partner, partnerStats, myStats, partnerGoals, partnerToday, today } = data;
+    const { partner, partnerStats, myStats, partnerGoals, partnerToday, today, pendingVerifications } = data;
 
     root.innerHTML = `
       <header class="page-head">
@@ -42,6 +42,14 @@ const PartnerPage = {
           ${compareCol(UI.esc(partner.nickname), partner, partnerStats, true)}
         </div>
       </section>
+
+      ${pendingVerifications && pendingVerifications.length ? `
+      <section class="sec">
+        <div class="sec-head"><h2>待我验收</h2><span class="sec-count warn">${pendingVerifications.length} 条</span></div>
+        <div class="vfy-list">
+          ${pendingVerifications.map((v) => verifyCard(v)).join('')}
+        </div>
+      </section>` : ''}
 
       <section class="sec">
         <div class="sec-head"><h2>${UI.esc(partner.nickname)} 今天的打卡</h2></div>
@@ -92,6 +100,67 @@ const PartnerPage = {
         const c = partnerToday.find((x) => x.id === Number(btn.dataset.id));
         if (c) this.rejectSheet(c, root);
       });
+    });
+
+    root.querySelectorAll('.vfy-approve').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const v = pendingVerifications.find((x) => x.id === Number(btn.dataset.id));
+        if (!v) return;
+        const yes = await UI.confirm(`通过「${UI.esc(v.goal_title)}」的验收吗？<br/>对方将入账 +${UI.fmtNum(Number(v.total_points) || 0)} 分。`, { okLabel: '通过' });
+        if (!yes) return;
+        try {
+          const r = await api.post(`/api/verifications/${v.id}/approve`);
+          UI.toast(r.overdue ? `已通过（逾期，入账 90%），+${UI.fmtNum(r.points)} 分` : `已通过，+${UI.fmtNum(r.points)} 分入账`, 'ok');
+          PartnerPage.draw(root);
+        } catch (e) {
+          UI.toast(e.message, 'err');
+        }
+      });
+    });
+    root.querySelectorAll('.vfy-reject').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = pendingVerifications.find((x) => x.id === Number(btn.dataset.id));
+        if (v) this.rejectVerifySheet(v, root);
+      });
+    });
+  },
+
+  async rejectVerifySheet(v, root) {
+    const body = document.createElement('div');
+    body.className = 'reject-body';
+    body.innerHTML = `
+      <div class="rb-item">
+        <span class="rb-emoji">${UI.esc(v.goal_emoji || '🎯')}</span>
+        <div>
+          <div class="rb-title">${UI.esc(v.goal_title)}</div>
+          <div class="rb-price">达成 +${UI.fmtNum(Number(v.total_points) || 0)} 分</div>
+        </div>
+      </div>
+      <label class="gf-label">为什么驳回？（对方会看到理由，目标会退回进行中）</label>
+      <textarea id="vfy-reason" rows="3" maxlength="200" placeholder="比如：还差关键一步，验收标准没完全满足"></textarea>
+    `;
+    UI.sheet({
+      title: '驳回这次验收',
+      body,
+      actions: [
+        { label: '再想想', onClick: (cl) => cl() },
+        {
+          label: '驳回',
+          kind: 'danger',
+          async onClick(close) {
+            const reason = body.querySelector('#vfy-reason').value.trim();
+            if (!reason) { UI.toast('写一句理由，对方才知道差在哪', 'warn'); return; }
+            try {
+              await api.post(`/api/verifications/${v.id}/reject`, { reason });
+              close();
+              UI.toast('已驳回，目标退回进行中', 'warn');
+              PartnerPage.draw(root);
+            } catch (e) {
+              UI.toast(e.message, 'err');
+            }
+          },
+        },
+      ],
     });
   },
 
@@ -169,4 +238,24 @@ function freqText(g) {
   if (g.freq_mode === 'weekly') return `每周 ${g.freq_n} 次`;
   const names = ['一', '二', '三', '四', '五', '六', '日'];
   return '周' + (g.weekdays || '').split(',').map((d) => names[Number(d) - 1]).join('·');
+}
+
+function verifyCard(v) {
+  return `
+    <div class="vfy-card">
+      <div class="vfy-head">
+        <span class="vfy-emoji">${UI.esc(v.goal_emoji || '🎯')}</span>
+        <div class="vfy-title-box">
+          <div class="vfy-title">${UI.esc(v.goal_title)}</div>
+          <div class="vfy-meta">${v.submitter_nickname ? `${UI.esc(v.submitter_nickname)} · ` : ''}${UI.fmtTimeIso(v.created_at)} · 达成 +${UI.fmtNum(Number(v.total_points) || 0)} 分</div>
+        </div>
+      </div>
+      ${v.accept_criteria ? `<div class="vfy-block"><span class="vfy-label">验收标准</span><div class="vfy-text">${UI.esc(v.accept_criteria)}</div></div>` : ''}
+      ${v.self_statement ? `<div class="vfy-block"><span class="vfy-label">自述</span><div class="vfy-text">${UI.esc(v.self_statement)}</div></div>` : ''}
+      ${v.evidence_text ? `<div class="vfy-block"><span class="vfy-label">证据</span><div class="vfy-text">${UI.esc(v.evidence_text)}</div></div>` : ''}
+      <div class="vfy-actions">
+        <button class="btn vfy-approve" data-id="${v.id}">${window.icon('check')} 通过</button>
+        <button class="btn outline danger vfy-reject" data-id="${v.id}">驳回</button>
+      </div>
+    </div>`;
 }

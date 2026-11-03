@@ -19,16 +19,15 @@ const DEFAULT_POINTS = {
 
 const SETTINGS_KEY = 'points';
 
-function ensureSettings(db) {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(SETTINGS_KEY);
+async function ensureSettings(db) {
+  const row = await db.get('SELECT value FROM settings WHERE key = ?', [SETTINGS_KEY]);
   if (!row) {
-    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)')
-      .run(SETTINGS_KEY, JSON.stringify(DEFAULT_POINTS));
+    await db.run('INSERT INTO settings (key, value) VALUES (?, ?)', [SETTINGS_KEY, JSON.stringify(DEFAULT_POINTS)]);
   }
 }
 
-function getPoints(db) {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(SETTINGS_KEY);
+async function getPoints(db) {
+  const row = await db.get('SELECT value FROM settings WHERE key = ?', [SETTINGS_KEY]);
   if (!row) return { ...DEFAULT_POINTS };
   try {
     const parsed = JSON.parse(row.value);
@@ -51,8 +50,8 @@ function isFiniteNum(v) {
 }
 
 // 校验并落库（部分更新）
-function setPoints(db, patch) {
-  const cur = getPoints(db);
+async function setPoints(db, patch) {
+  const cur = await getPoints(db);
   const next = JSON.parse(JSON.stringify(cur));
   const errors = [];
   if (patch.unit !== undefined) {
@@ -99,8 +98,10 @@ function setPoints(db, patch) {
     }
   }
   if (errors.length) return { ok: false, errors };
-  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
-    .run(SETTINGS_KEY, JSON.stringify(next));
+  await db.run(
+    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value',
+    [SETTINGS_KEY, JSON.stringify(next)]
+  );
   return { ok: true, cfg: next };
 }
 

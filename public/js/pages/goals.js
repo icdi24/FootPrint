@@ -3,6 +3,7 @@ const GoalsPage = {
   weekStart: null,
   monthAnchor: null,
   viewMode: 'week',
+  goalType: 'daily', // daily | stage
 
   async render(root) {
     if (!this.weekStart) this.weekStart = this._monday(new Date());
@@ -23,6 +24,9 @@ const GoalsPage = {
   },
 
   async draw(root) {
+    // 小目标视图走独立渲染
+    if (this.goalType === 'stage') { await this.drawStage(root); return; }
+
     const isWeek = this.viewMode === 'week';
     let data;
     if (isWeek) {
@@ -40,14 +44,17 @@ const GoalsPage = {
 
     root.innerHTML = `
       <header class="page-head goals-head">
-        <div class="seg" id="seg">
-          <button data-v="week" class="${isWeek ? 'on' : ''}">周</button>
-          <button data-v="month" class="${!isWeek ? 'on' : ''}">月</button>
-        </div>
-        <div class="week-nav">
-          <button class="nav-btn" id="prev">${window.icon('left')}</button>
-          <span class="week-label" id="week-label">${navLabel}</span>
-          <button class="nav-btn" id="next">${window.icon('right')}</button>
+        ${this._typeSeg('daily')}
+        <div class="week-nav sub-nav">
+          <div class="seg" id="seg">
+            <button data-v="week" class="${isWeek ? 'on' : ''}">周</button>
+            <button data-v="month" class="${!isWeek ? 'on' : ''}">月</button>
+          </div>
+          <div class="week-nav">
+            <button class="nav-btn" id="prev">${window.icon('left')}</button>
+            <span class="week-label" id="week-label">${navLabel}</span>
+            <button class="nav-btn" id="next">${window.icon('right')}</button>
+          </div>
         </div>
       </header>
 
@@ -64,6 +71,12 @@ const GoalsPage = {
       <div class="fab-hint" id="fab-hint">长按「完成」= 秒打卡</div>
     `;
 
+    root.querySelector('#type-seg').addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      this.goalType = b.dataset.t;
+      this.draw(root);
+    });
     root.querySelector('#seg').addEventListener('click', (e) => {
       const b = e.target.closest('button');
       if (!b) return;
@@ -131,6 +144,265 @@ const GoalsPage = {
       return Math.ceil((dayOfYear - (1 - firstMondayOffset)) / 7) || 1;
     }
     return Math.ceil((dayOfYear - firstMonday) / 7) + 1;
+  },
+
+  _typeSeg(active) {
+    return `<div class="type-seg seg" id="type-seg">
+      <button type="button" data-t="daily" class="${active === 'daily' ? 'on' : ''}">日常目标</button>
+      <button type="button" data-t="stage" class="${active === 'stage' ? 'on' : ''}">小目标</button>
+    </div>`;
+  },
+
+  async drawStage(root) {
+    let data;
+    try {
+      data = await api.get('/api/goals?type=stage');
+    } catch (e) {
+      root.innerHTML = `<div class="empty big"><div class="empty-emoji">😿</div><div>${UI.esc(e.message)}</div><button class="btn primary" id="retry">重试</button></div>`;
+      root.querySelector('#retry').addEventListener('click', () => GoalsPage.draw(root));
+      return;
+    }
+    const goals = data.goals || [];
+    root.innerHTML = `
+      <header class="page-head goals-head">
+        ${this._typeSeg('stage')}
+      </header>
+      <div class="stage-list">
+        ${goals.length ? goals.map((g) => this.stageCard(g)).join('') : `
+        <div class="empty">
+          <div class="empty-emoji">🌱</div>
+          <div class="empty-title">还没有小目标</div>
+          <div class="empty-sub">定一个阶段要够到的东西，做完请对方验收，一次入账一大笔积分</div>
+        </div>`}
+      </div>
+      <button class="fab" id="add-goal" aria-label="新建小目标">${window.icon('plus')}</button>
+    `;
+
+    root.querySelector('#type-seg').addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      this.goalType = b.dataset.t;
+      this.draw(root);
+    });
+    root.querySelector('#add-goal').addEventListener('click', () => {
+      StageGoalForm.open({ onSaved: () => this.draw(root) });
+    });
+
+    // 卡片点击 → 详情；按钮点击不冒泡进详情
+    root.querySelectorAll('.stage-card').forEach((card) => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return;
+        const goal = goals.find((g) => g.id === Number(card.dataset.id));
+        if (goal) this.stageDetail(root, goal);
+      });
+      const g = goals.find((x) => x.id === Number(card.dataset.id));
+      if (!g) return;
+      card.querySelector('[data-act="submit"]')?.addEventListener('click', () => this.submitSheet(root, g));
+      card.querySelector('[data-act="start"]')?.addEventListener('click', () => this.startStage(root, g));
+      card.querySelector('[data-act="edit"]')?.addEventListener('click', () => StageGoalForm.open({ goal: g, onSaved: () => this.draw(root) }));
+      card.querySelector('[data-act="abandon"]')?.addEventListener('click', () => this.abandonStage(root, g));
+    });
+  },
+
+  stageCard(g) {
+    const badge = STAGE_BADGE[g.status] || STAGE_BADGE.active;
+    const points = Number(g.total_points) || 0;
+    const crit = g.accept_criteria || '';
+    let foot = '';
+    if (g.status === 'active') {
+      foot = `
+        <div class="sc-actions">
+          <button class="sc-btn primary" data-act="submit">提交验收</button>
+          <button class="sc-btn ghost" data-act="edit">编辑</button>
+          <button class="sc-btn ghost danger" data-act="abandon">放弃</button>
+        </div>`;
+    } else if (g.status === 'reviewing') {
+      foot = `<div class="sc-wait">${window.icon('clock')} 等待对方验收…</div>`;
+    } else if (g.status === 'achieved') {
+      foot = `<div class="sc-credit">${window.icon('check')} +${UI.fmtNum(points)} 分已入账</div>`;
+    } else if (g.status === 'abandoned') {
+      foot = `<div class="sc-wait gray">已放弃</div>`;
+    } else if (g.status === 'draft') {
+      foot = `
+        <div class="sc-actions">
+          <button class="sc-btn primary" data-act="start">开始</button>
+          <button class="sc-btn ghost" data-act="edit">编辑</button>
+          <button class="sc-btn ghost danger" data-act="abandon">放弃</button>
+        </div>`;
+    }
+    return `
+      <div class="stage-card ${g.status === 'abandoned' ? 'is-abandoned' : ''}" data-id="${g.id}">
+        <div class="sc-head">
+          <span class="sc-emoji">${g.emoji || '🎯'}</span>
+          <div class="sc-title-box">
+            <div class="sc-title">${UI.esc(g.title)}</div>
+            <div class="sc-meta">${g.end_date ? `截止 ${UI.fmtDate(g.end_date)}` : '长期'} · 难度 ${g.difficulty || 3}</div>
+          </div>
+          <span class="sc-badge ${badge.cls}">${badge.label}</span>
+        </div>
+        ${crit ? `<div class="sc-crit">${window.icon('target')} ${UI.esc(crit)}</div>` : ''}
+        <div class="sc-points">${window.icon('coin')} 达成 +${UI.fmtNum(points)} 分</div>
+        ${foot}
+      </div>`;
+  },
+
+  abandonStage(root, g) {
+    UI.confirm(`确定放弃「${UI.esc(g.title)}」吗？<br/>放弃后不能再提交验收，记录保留。`, { danger: true, okLabel: '放弃' })
+      .then(async (yes) => {
+        if (!yes) return;
+        try {
+          await api.post(`/api/goals/${g.id}/abandon`);
+          UI.toast('已放弃', 'warn');
+          this.draw(root);
+        } catch (e) {
+          UI.toast(e.message, 'err');
+        }
+      });
+  },
+
+  // 草稿 → 进行中
+  async startStage(root, g) {
+    try {
+      await api.post(`/api/goals/${g.id}/start`);
+      UI.toast('已开始，加油 🌱', 'ok');
+      this.draw(root);
+    } catch (e) {
+      UI.toast(e.message, 'err');
+    }
+  },
+
+  // 小目标详情
+  async stageDetail(root, goal) {
+    try {
+      const data = await api.get(`/api/goals/${goal.id}`);
+      const g = data.goal;
+      const body = document.createElement('div');
+      body.className = 'stage-detail';
+      const badge = STAGE_BADGE[g.status] || STAGE_BADGE.active;
+      body.innerHTML = `
+        <div class="sd-head">
+          <div class="sd-emoji">${g.emoji || '🎯'}</div>
+          <div class="sd-info">
+            <div class="sd-title">${UI.esc(g.title)}</div>
+            <span class="sc-badge ${badge.cls}">${badge.label}</span>
+          </div>
+          <div class="sd-points">+${UI.fmtNum(Number(g.total_points) || 0)}<span>分</span></div>
+        </div>
+        ${g.accept_criteria ? `<div class="sd-block"><div class="sd-label">验收标准</div><div class="sd-crit">${UI.esc(g.accept_criteria)}</div></div>` : ''}
+        ${g.description ? `<div class="sd-block"><div class="sd-label">备注</div><p class="sd-desc">${UI.esc(g.description)}</p></div>` : ''}
+        <div class="sd-meta-row">
+          <span>预估 ${UI.fmtNum(Number(g.est_total_min) || 0)} 分钟</span>
+          <span>难度 ${g.difficulty || 3}</span>
+          ${g.start_date ? `<span>${UI.fmtDate(g.start_date)} 起</span>` : ''}
+          ${g.end_date ? `<span>${UI.fmtDate(g.end_date)} 截止</span>` : ''}
+        </div>
+      `;
+      const actions = [];
+      if (g.status === 'active') {
+        actions.push({ label: '提交验收', kind: 'primary', onClick: (close) => { close(); this.submitSheet(root, g); } });
+        actions.push({ label: '编辑', onClick: (close) => { close(); StageGoalForm.open({ goal: g, onSaved: () => this.draw(root) }); } });
+        actions.push({ label: '放弃', kind: 'danger', onClick: (close) => { close(); this.abandonStage(root, g); } });
+      } else if (g.status === 'draft') {
+        actions.push({ label: '开始', kind: 'primary', onClick: (close) => { close(); this.startStage(root, g); } });
+        actions.push({ label: '编辑', onClick: (close) => { close(); StageGoalForm.open({ goal: g, onSaved: () => this.draw(root) }); } });
+        actions.push({ label: '放弃', kind: 'danger', onClick: (close) => { close(); this.abandonStage(root, g); } });
+      } else {
+        actions.push({ label: '知道了', onClick: (close) => close() });
+      }
+      UI.sheet({ title: '小目标详情', body, actions });
+    } catch (e) {
+      UI.toast(e.message, 'err');
+    }
+  },
+
+  // 提交验收弹层
+  async submitSheet(root, g) {
+    let evidenceIds = [];
+    const body = document.createElement('div');
+    body.className = 'submit-body';
+    body.innerHTML = `
+      <div class="sb-goal">
+        <span class="sb-emoji">${g.emoji || '🎯'}</span>
+        <div>
+          <div class="sb-title">${UI.esc(g.title)}</div>
+          <div class="sb-crit">${UI.esc(g.accept_criteria || '')}</div>
+        </div>
+      </div>
+      <label class="gf-label">自述（说说你怎么做到的）</label>
+      <textarea id="sb-self" rows="3" maxlength="1000" placeholder="比如：这 8 周每天 1 小时，模拟考从 5.5 提到了 6.5"></textarea>
+      <label class="gf-label">证据文字（可选）</label>
+      <textarea id="sb-evidence" rows="2" maxlength="1000" placeholder="比如：成绩单编号、完成截图说明"></textarea>
+      <label class="gf-label">证据图片（可选，最多 3 张）</label>
+      <div class="sb-photos" id="sb-photos"></div>
+    `;
+    const photos = body.querySelector('#sb-photos');
+    function renderPhotos() {
+      photos.innerHTML = `
+        ${evidenceIds.map((id, i) => `
+          <div class="sb-thumb" style="background-image:url('/api/file/${id}')">
+            <button type="button" class="sb-rm" data-i="${i}">${window.icon('close')}</button>
+          </div>`).join('')}
+        ${evidenceIds.length < 3 ? `<button type="button" class="sb-add" id="sb-add">${window.icon('camera')} 加图</button>` : ''}
+      `;
+      photos.querySelector('#sb-add')?.addEventListener('click', addPhoto);
+      photos.querySelectorAll('.sb-rm').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          evidenceIds.splice(Number(btn.dataset.i), 1);
+          renderPhotos();
+        });
+      });
+    }
+    async function addPhoto() {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.addEventListener('change', async () => {
+        const f = input.files && input.files[0];
+        if (!f) return;
+        if (f.size > 10 * 1024 * 1024) { UI.toast('图片别超过 10MB', 'warn'); return; }
+        try {
+          const up = await api.upload(f, 'evidence');
+          evidenceIds.push(up.id);
+          renderPhotos();
+        } catch (e) {
+          UI.toast(e.message, 'err');
+        }
+      });
+      input.click();
+    }
+    renderPhotos();
+
+    let submitting = false;
+    UI.sheet({
+      title: '提交验收',
+      body,
+      actions: [
+        {
+          label: '提交',
+          kind: 'primary big',
+          async onClick(close) {
+            if (submitting) return;
+            const self = body.querySelector('#sb-self').value.trim();
+            const ev = body.querySelector('#sb-evidence').value.trim();
+            if (!self) { UI.toast('写几句自述，对方才知道你怎么做到的', 'warn'); return; }
+            submitting = true;
+            try {
+              await api.post(`/api/goals/${g.id}/submit`, {
+                self_statement: self,
+                evidence_text: ev,
+                evidence_ids: evidenceIds,
+              });
+              close();
+              UI.toast('已提交，等对方验收', 'ok');
+              this.draw(root);
+            } catch (e) {
+              submitting = false;
+              UI.toast(e.message, 'err');
+            }
+          },
+        },
+      ],
+    });
   },
 
   weekGrid(data, today) {
@@ -341,15 +613,32 @@ const GoalForm = {
         const sel = new Set((g.weekdays || '').split(',').map(Number).filter(Boolean));
         const names = ['一', '二', '三', '四', '五', '六', '日'];
         freqExtra.innerHTML = `
-          <span class="fe-label">每周</span>
+          <div class="wd-presets">
+            <button type="button" class="wd-pre" data-set="1,2,3,4,5">工作日</button>
+            <button type="button" class="wd-pre" data-set="6,7">周末</button>
+            <button type="button" class="wd-pre" data-set="1,2,3,4,5,6,7">每天</button>
+          </div>
           <div class="n-seg wd-seg" id="gf-wd">
             ${names.map((w, i) => `<button type="button" data-d="${i + 1}" class="${sel.has(i + 1) ? 'on' : ''}">${w}</button>`).join('')}
           </div>`;
+        function syncWd() {
+          freqExtra.querySelectorAll('#gf-wd button').forEach((b) => {
+            b.classList.toggle('on', sel.has(Number(b.dataset.d)));
+          });
+        }
         freqExtra.querySelector('#gf-wd').addEventListener('click', (e) => {
           const b = e.target.closest('button');
           if (!b) return;
           b.classList.toggle('on');
           preview();
+        });
+        freqExtra.querySelectorAll('.wd-pre').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            sel.clear();
+            btn.dataset.set.split(',').forEach((d) => sel.add(Number(d)));
+            syncWd();
+            preview();
+          });
         });
       } else {
         freqExtra.classList.add('hidden');
@@ -526,6 +815,153 @@ const GoalForm = {
     } catch (e) {
       UI.toast(e.message, 'err');
     }
+  },
+};
+
+const STAGE_BADGE = {
+  draft: { label: '草稿', cls: 'gray' },
+  active: { label: '进行中', cls: 'active' },
+  reviewing: { label: '待验收', cls: 'reviewing' },
+  achieved: { label: '已达成', cls: 'achieved' },
+  abandoned: { label: '已放弃', cls: 'abandoned' },
+};
+
+// 小目标新建 / 编辑表单
+const StageGoalForm = {
+  async open({ goal, onSaved }) {
+    const editing = !!goal;
+    const g = goal || {
+      title: '', emoji: '🏁', description: '', accept_criteria: '', est_total_min: 600,
+      difficulty: 3, start_date: null, end_date: null, status: 'draft',
+    };
+    const EMOJIS = ['🏁', '🎓', '📖', '🏃', '🎸', '💪', '✈️', '🏠', '💍', '📷', '🎨', '🥇', '🧗', '🏊', '🚵', '🌱'];
+    const DIFF_COEF = { 1: 1.0, 2: 1.2, 3: 1.5, 4: 1.8, 5: 2.2 };
+    const diffHintMap = { 1: '几乎无门槛', 2: '稍微用点力', 3: '需要专门腾时间', 4: '比较难', 5: '需要长期投入' };
+    const body = document.createElement('div');
+    body.className = 'goal-form';
+    body.innerHTML = `
+      <div class="gf-row gf-title-row">
+        <div class="emoji-pick" id="sf-emoji">
+          ${EMOJIS.map((e) => `<button type="button" data-e="${e}" class="${e === g.emoji ? 'on' : ''}">${e}</button>`).join('')}
+        </div>
+        <input id="sf-title" maxlength="30" placeholder="小目标名称，比如：考过雅思 6.5" value="${UI.esc(g.title)}"/>
+      </div>
+      <div class="gf-row">
+        <label class="gf-label">验收标准（必填，≤500 字）</label>
+        <textarea id="sf-criteria" rows="3" maxlength="500" placeholder="写成能被「是 / 否」回答的标准，比如：雅思模考 ≥6.5，附成绩单截图">${UI.esc(g.accept_criteria)}</textarea>
+      </div>
+      <div class="gf-row">
+        <label class="gf-label">预估总时长（分钟）</label>
+        <div class="gf-inline">
+          <button type="button" class="step-btn" id="sf-min-minus">−</button>
+          <input id="sf-est" type="number" min="60" max="100000" step="60" value="${g.est_total_min}"/>
+          <button type="button" class="step-btn" id="sf-min-plus">+</button>
+        </div>
+      </div>
+      <div class="gf-row">
+        <label class="gf-label">难度 <span class="gf-diff-val" id="sf-diff-val">${g.difficulty}</span></label>
+        <input id="sf-difficulty" type="range" min="1" max="5" step="1" value="${g.difficulty}"/>
+        <div class="gf-diff-hint" id="sf-diff-hint">${diffHintMap[g.difficulty] || ''}</div>
+      </div>
+      <div class="gf-row">
+        <label class="gf-label">起止日期（结束留空 = 长期）</label>
+        <div class="gf-inline">
+          <input id="sf-start" type="date" value="${g.start_date || new Date().toISOString().slice(0, 10)}"/>
+          <span>–</span>
+          <input id="sf-end" type="date" value="${g.end_date || ''}"/>
+        </div>
+      </div>
+      <div class="gf-row">
+        <label class="gf-label">备注（可选）</label>
+        <textarea id="sf-desc" rows="2" maxlength="200" placeholder="补充背景、方法，或给自己鼓鼓劲">${UI.esc(g.description)}</textarea>
+      </div>
+      <div class="gf-preview sf-preview" id="sf-preview"></div>
+    `;
+
+    function cur() {
+      return {
+        est_total_min: Number(body.querySelector('#sf-est').value) || 600,
+        difficulty: Number(body.querySelector('#sf-difficulty').value) || 3,
+      };
+    }
+    function totalPoints() {
+      const c = cur();
+      const coef = DIFF_COEF[c.difficulty] || 1.5;
+      return Math.min(Math.round(c.est_total_min * 0.5 * coef), 1200);
+    }
+    function preview() {
+      body.querySelector('#sf-preview').innerHTML = `
+        <div class="pv-left">
+          <div class="pv-label">达成后预计入账</div>
+          <div class="pv-val">+${UI.fmtNum(totalPoints())} 分</div>
+        </div>
+        <div class="pv-right">
+          <span class="pv-tag ok">约 ${UI.fmtNum(cur().est_total_min)} 分钟投入</span>
+        </div>`;
+    }
+    body.querySelector('#sf-difficulty').addEventListener('input', (e) => {
+      body.querySelector('#sf-diff-val').textContent = e.target.value;
+      body.querySelector('#sf-diff-hint').textContent = diffHintMap[Number(e.target.value)] || '';
+      preview();
+    });
+    body.querySelector('#sf-est').addEventListener('input', preview);
+    body.querySelector('#sf-min-minus').addEventListener('click', () => {
+      const i = body.querySelector('#sf-est');
+      i.value = Math.max(60, (Number(i.value) || 600) - 60);
+      preview();
+    });
+    body.querySelector('#sf-min-plus').addEventListener('click', () => {
+      const i = body.querySelector('#sf-est');
+      i.value = Math.min(100000, (Number(i.value) || 600) + 60);
+      preview();
+    });
+    body.querySelector('#sf-emoji').addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      body.querySelectorAll('#sf-emoji button').forEach((x) => x.classList.remove('on'));
+      b.classList.add('on');
+    });
+    preview();
+
+    let saving = false;
+    UI.sheet({
+      title: editing ? '编辑小目标' : '新小目标',
+      body,
+      actions: [
+        { label: editing ? '保存' : '创建小目标', kind: 'primary big', async onClick(close) {
+          if (saving) return;
+          const title = body.querySelector('#sf-title').value.trim();
+          if (!title) { UI.toast('先起个名字', 'warn'); return; }
+          const criteria = body.querySelector('#sf-criteria').value.trim();
+          if (!criteria) { UI.toast('验收标准是必填的，写清怎么算数', 'warn'); return; }
+          const end = body.querySelector('#sf-end').value;
+          const start = body.querySelector('#sf-start').value;
+          if (end && start && end < start) { UI.toast('结束日期不能早于开始日期', 'warn'); return; }
+          const payload = {
+            type: 'stage',
+            title,
+            emoji: body.querySelector('#sf-emoji .on').dataset.e,
+            description: body.querySelector('#sf-desc').value.trim(),
+            accept_criteria: criteria,
+            est_total_min: Number(body.querySelector('#sf-est').value) || 600,
+            difficulty: Number(body.querySelector('#sf-difficulty').value) || 3,
+            start_date: start || undefined,
+            end_date: end || null,
+          };
+          saving = true;
+          try {
+            if (editing) await api.put(`/api/goals/${goal.id}`, payload);
+            else await api.post('/api/goals', payload);
+            close();
+            UI.toast(editing ? '已保存' : '小目标建好了，慢慢啃 🌱', 'ok');
+            if (onSaved) onSaved();
+          } catch (e) {
+            saving = false;
+            UI.toast(e.message, 'err');
+          }
+        } },
+      ],
+    });
   },
 };
 

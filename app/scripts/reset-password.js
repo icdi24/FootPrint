@@ -7,6 +7,7 @@ const { hashPassword, destroyAllSessions } = require('../src/auth');
 const logMod = require('../src/log');
 
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, '..', 'data');
+const DATABASE_URL = process.env.DATABASE_URL || 'postgres://postgres:footprint_dev_pw@localhost:5432/footprint';
 
 function promptHidden(question) {
   return new Promise((resolve) => {
@@ -37,15 +38,15 @@ function promptHidden(question) {
     console.error('口令至少 6 位');
     process.exit(1);
   }
-  const db = openDb(DATA_DIR);
+  const db = await openDb(DATABASE_URL);
   logMod.init(path.join(DATA_DIR, 'logs'));
-  const user = db.prepare('SELECT * FROM users WHERE nickname = ?').get(nickname);
+  const user = await db.get('SELECT * FROM users WHERE nickname = ?', [nickname]);
   if (!user) {
     console.error(`找不到昵称为「${nickname}」的账号`);
     process.exit(1);
   }
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(password), user.id);
-  destroyAllSessions(db, user.id);
+  await db.run('UPDATE users SET password_hash = ? WHERE id = ?', [hashPassword(password), user.id]);
+  await destroyAllSessions(db, user.id);
   logMod.log('reset_password', `管理员重置了 ${nickname} 的口令`);
   console.log(`已重置「${nickname}」的口令，全部设备已登出。`);
   process.exit(0);

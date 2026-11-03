@@ -11,7 +11,7 @@ const HomePage = {
       return;
     }
     App.state.partner = data.partner;
-    const { me, partner, balance, monthPoints, currentStreak, todos } = data;
+    const { me, partner, balance, monthPoints, currentStreak, todos, stageGoals } = data;
 
     const pending = todos.filter((t) => (t.dueToday || (t.weekly && t.weekly.done < t.weekly.need)) && !t.checked);
     const done = todos.filter((t) => t.checked);
@@ -54,6 +54,14 @@ const HomePage = {
         <div class="sec-head"><h2>已完成</h2><span class="sec-count ok">${done.length} 项 ✓</span></div>
         <div class="todo-list done-list">
           ${done.map((t, i) => doneCard(t, i)).join('')}
+        </div>
+      </section>` : ''}
+
+      ${stageGoals && stageGoals.length ? `
+      <section class="sec">
+        <div class="sec-head"><h2>进行中的小目标</h2><span class="sec-count">${stageGoals.length} 个</span></div>
+        <div class="stage-list home-stage-list">
+          ${stageGoals.map((g) => stageMiniCard(g)).join('')}
         </div>
       </section>` : ''}
 
@@ -104,6 +112,13 @@ const HomePage = {
     const toPartner = root.querySelector('#to-partner');
     if (toPartner) toPartner.addEventListener('click', () => App.showTab('partner'));
 
+    root.querySelectorAll('.home-stage-list .stage-card').forEach((card) => {
+      card.addEventListener('click', () => {
+        GoalsPage.goalType = 'stage';
+        App.showTab('goals');
+      });
+    });
+
     // 第一次进入出场：卡片依次浮入
     root.querySelectorAll('.todo-card, .done-card').forEach((el, i) => {
       el.style.animationDelay = `${Math.min(i * 60, 360)}ms`;
@@ -153,5 +168,21 @@ function doneCard(t) {
         <div class="tc-points ok">+${UI.fmtNum(t.checked.points)}</div>
         <span class="done-check">${window.icon('check')}</span>
       </div>
+    </div>`;
+}
+
+function stageMiniCard(g) {
+  const badge = (g.status === 'reviewing') ? '<span class="sc-badge reviewing">待验收</span>' : '<span class="sc-badge active">进行中</span>';
+  return `
+    <div class="stage-card home-stage-card" data-id="${g.id}">
+      <div class="sc-head">
+        <span class="sc-emoji">${UI.esc(g.emoji || '🎯')}</span>
+        <div class="sc-title-box">
+          <div class="sc-title">${UI.esc(g.title)}</div>
+          ${g.end_date ? `<div class="sc-meta">截止 ${UI.fmtDate(g.end_date)}</div>` : ''}
+        </div>
+        ${badge}
+      </div>
+      <div class="sc-points">${window.icon('coin')} 达成 +${UI.fmtNum(Number(g.total_points) || 0)} 分</div>
     </div>`;
 }
