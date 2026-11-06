@@ -3,6 +3,8 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 
+require('./env').loadEnvFile();
+
 const { openDb } = require('./db');
 const { ensureSettings } = require('./points');
 const { makeMiddleware } = require('./middleware');
@@ -13,6 +15,11 @@ const goalsRoutes = require('./routes/goals');
 const wishRoutes = require('./routes/wish');
 const partnerRoutes = require('./routes/partner');
 const opsRoutes = require('./routes/ops');
+const usageRoutes = require('./routes/usage');
+const bigGoalsRoutes = require('./routes/biggoals');
+const diariesRoutes = require('./routes/diaries');
+const zoowyRoutes = require('./routes/zoowy');
+const { scheduleDaily } = require('./agent/workflows/daily');
 const { scheduleAutoApprove } = require('./verify-auto');
 
 const ROOT = path.join(__dirname, '..');
@@ -50,6 +57,13 @@ async function main() {
   app.use('/api', wishRoutes(db));
   app.use('/api', partnerRoutes(db));
   app.use('/api', opsRoutes(db, DATA_DIR));
+  app.use('/api', usageRoutes(db));
+  app.use('/api', bigGoalsRoutes(db));
+  app.use('/api', diariesRoutes(db));
+  app.use('/api', zoowyRoutes(db));
+
+  // AI 日报定时（P2-#12）：每晚 23:30 两人各一份；幂等，服务重启当天会补跑
+  scheduleDaily(db, async () => db.all('SELECT id FROM users'));
 
   // 健康检查（需求 13.5：GET /healthz）
   app.get('/healthz', (req, res) => {

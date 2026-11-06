@@ -3,7 +3,7 @@ services:
     image: postgres:17-alpine
     environment:
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=footprint_dev_pw
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?请在 .env 里设置 POSTGRES_PASSWORD}
       - POSTGRES_DB=footprint
     volumes:
       - ./runtime/pgdata:/var/lib/postgresql/data
@@ -17,11 +17,15 @@ services:
   footprint:
     build: .
     ports:
-      - "3000:3000"
+      - "3201:3000"
     environment:
       - PORT=3000
       - DATA_DIR=/app/data
-      - DATABASE_URL=postgres://postgres:footprint_dev_pw@db:5432/footprint
+      - DATABASE_URL=postgres://postgres:${POSTGRES_PASSWORD}@db:5432/footprint
+      # AI 底座（P0-3）：密钥只在服务器 .env，compose 注入容器，不下发到 Web/Android
+      - AI_BASE_URL=${AI_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      - AI_API_KEY=${AI_API_KEY:?请在 .env 里设置 AI_API_KEY}
+      - AI_MODEL=${AI_MODEL:-qwen-plus}
     volumes:
       - ./runtime/data:/app/data
     depends_on:

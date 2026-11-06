@@ -1,0 +1,89 @@
+// agent/workflows/chat.js —— chat 常驻问答工作流（P0 骨架，P2 接「我」页路由）
+// 「我」页 zoowy：带用户信息的知识库问答（结构化数据直接拼上下文，不引向量库），
+// 保留工具调用能力（chat 白名单：读全 + 排计划相关写；不给写日报/写进度）。
+const { PERSONA } = require('../persona');
+const { runAgentLoop } = require('../gateway');
+const { ensureSession, recentMessages, appendMessage } = require('../session');
+const { todayStr, addDaysStr } = require('../../tz');
+
+// 拼用户快照上下文：画像 / 活跃目标 / 今日打卡 / 最近日报 / 近 7 天时长
+async function buildUserContext(db, userId, bigGoalId) {
+  const parts = [];
+  const profile = await db.all(
+    "SELECT block, content FROM user_profiles WHERE user_id = ? AND status = 'active' ORDER BY block", [userId]
+  );
+  parts.push(`【画像】${profile.length ? profile.map((p) => `[${p.block}] ${p.content}`).join('\n') : '（暂无）'}`);
+
+  const goals = await db.all(
+    "SELECT type, title, status, streak_count, big_goal_id FROM goals WHERE owner_id = ? AND status = 'active' ORDER BY id DESC LIMIT 20",
+    [userId]
+  );
+  parts.push(`【进行中的目标】${goals.length ? goals.map((g) => `${g.title}(${g.type === 'daily' ? '日常' : '小目标'}${g.streak_count ? '，连续' + g.streak_count : ''})`).join('；') : '（无）'}`);
+
+  const today = todayStr();
+  const checkins = await db.all(
+    "SELECT c.duration_min, g.title AS goal_title FROM check_ins c JOIN goals g ON g.id = c.goal_id WHERE c.user_id = ? AND c.check_date = ? AND c.status = 'credited'",
+    [userId, today]
+  );
+  parts.push(`【今日打卡】${checkins.length ? checkins.map((c) => `${c.goal_title} ${c.duration_min}分钟`).join('；') : '（还没打）'}`);
+
+  const diaries = await db.all(
+    "SELECT diary_date, CASE WHEN user_edited <> '' THEN user_edited ELSE ai_original END AS content FROM diaries WHERE user_id = ? ORDER BY diary_date DESC LIMIT 3",
+    [userId]
+  );
+  if (diaries.length) parts.push(`【最近日报】${diaries.map((d) => `${d.diary_date}：${String(d.content).slice(0, 150)}`).join('\n')}`);
+
+  const usage = await db.all(
+    'SELECT usage_date, ROUND(SUM(seconds)/60.0) AS minutes FROM usage_daily WHERE user_id = ? AND usage_date >= ? GROUP BY usage_date ORDER BY usage_date',
+    [userId, addDaysStr(today, -6)]
+  );
+  if (usage.length) parts.push(`【近 7 天手机时长（分钟/天）】${usage.map((u) => `${u.usage_date}:${u.minutes}`).join(' ')}`);
+
+  // 大目标快捷入口带该大目标上下文，不是空聊（1.6）
+  if (bigGoalId) {
+    const bg = await db.get('SELECT * FROM big_goals WHERE id = ? AND owner_id = ?', [Number(bigGoalId), userId]);
+    if (bg) {
+      const chain = await db.all(
+        "SELECT title, planned_date, plan_status, status FROM goals WHERE big_goal_id = ? AND owner_id = ? AND status != 'archived' ORDER BY COALESCE(plan_order, 999999), id",
+        [bg.id, userId]
+      );
+      parts.push(`【当前讨论的大目标】${bg.title}（${bg.progress}%）\n${bg.description}\n【链上小目标】${chain.map((g) => `${g.planned_date || '未排'} ${g.title}(${g.plan_status || '-'}/${g.status})`).join('；')}`);
+    }
+  }
+  return parts.join('\n\n');
+}
+
+async function runChat({ db, userId, message, bigGoalId = null }) {
+  const text = String(message || '').trim();
+  if (!text) throw new Error('消息不能为空');
+
+  const { session, messages: history } = await recentMessages(db, userId, 40);
+  const userContext = await buildUserContext(db, userId, bigGoalId);
+
+  const system = `${PERSONA}
+
+你在「我」页的聊天框里。下面是这位用户的实时数据（每次对话前刷新），回答尽量结合它，像了解他/她的朋友那样说话。
+需要更新计划或画像时可以调工具（白名单已限好）；用户没明确要改就别改。
+数据里没有的就直说没有，别编。回答简短：一般不超过 150 字，除非用户要详细展开。
+
+${userContext}`;
+
+  const convo = [
+    { role: 'system', content: system },
+    ...history.slice(-30).map((m) => ({ role: m.role, content: m.content })),
+    { role: 'user', content: text },
+  ];
+
+  const result = await runAgentLoop({
+    db, userId, workflow: 'chat', action: 'chat_reply', messages: convo,
+    idempotencyKey: null,
+  });
+
+  // 会话落服务端：双方消息都存（meta 记工具调用，前端可展示）
+  await appendMessage(db, userId, session.id, 'user', text, bigGoalId ? { entry: 'big_goal', big_goal_id: Number(bigGoalId) } : null);
+  await appendMessage(db, userId, session.id, 'assistant', result.content, result.toolLog.length ? { tools: result.toolLog.map((t) => t.name) } : null);
+
+  return { reply: result.content, sessionId: session.id, toolCalls: result.toolLog.map((t) => t.name) };
+}
+
+module.exports = { runChat, buildUserContext };

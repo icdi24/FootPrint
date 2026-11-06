@@ -140,6 +140,128 @@ CREATE TABLE IF NOT EXISTS uploads (
   ext TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS usage_daily (
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  usage_date TEXT NOT NULL,
+  package_name TEXT NOT NULL,
+  app_name TEXT NOT NULL DEFAULT '',
+  seconds INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, usage_date, package_name)
+);
+CREATE INDEX IF NOT EXISTS idx_usage_date ON usage_daily(usage_date);
+
+-- ===== AI 工作流与双端改造（待办计划 P0）=====
+
+-- 大目标：长期方向，不能手动打卡，进度由 AI 写入，另留 done/total 客观计数
+CREATE TABLE IF NOT EXISTS big_goals (
+  id SERIAL PRIMARY KEY,
+  owner_id INTEGER NOT NULL REFERENCES users(id),
+  title TEXT NOT NULL,
+  emoji TEXT NOT NULL DEFAULT '🏔️',
+  description TEXT NOT NULL DEFAULT '',
+  progress INTEGER NOT NULL DEFAULT 0,
+  progress_note TEXT NOT NULL DEFAULT '',
+  progress_at TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- 个人画像：每用户一份、分块存（basic/resume/skills/goal_progress/important…）
+-- status: active 正常 / void AI 标失效（删除只标失效，不物理删）
+CREATE TABLE IF NOT EXISTS user_profiles (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  block TEXT NOT NULL,
+  content TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT 'ai',
+  status TEXT NOT NULL DEFAULT 'active',
+  updated_at TEXT NOT NULL,
+  UNIQUE (user_id, block)
+);
+
+-- 画像快照：每次 apply 前存全量，可看历史、可回滚
+CREATE TABLE IF NOT EXISTS profile_versions (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  snapshot TEXT NOT NULL,
+  changed_by TEXT NOT NULL DEFAULT 'ai',
+  reason TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+
+-- 计划链快照：手改与 AI 重排共用同一套链路，每次写库后存快照
+CREATE TABLE IF NOT EXISTS plan_versions (
+  id SERIAL PRIMARY KEY,
+  big_goal_id INTEGER NOT NULL REFERENCES big_goals(id),
+  owner_id INTEGER NOT NULL REFERENCES users(id),
+  snapshot TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'ai',
+  reason TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+
+-- AI 日报：每晚 23:30 一人一份；ai_original 原文 + user_edited 改后版（空=未改）
+CREATE TABLE IF NOT EXISTS diaries (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  diary_date TEXT NOT NULL,
+  ai_original TEXT NOT NULL DEFAULT '',
+  user_edited TEXT NOT NULL DEFAULT '',
+  shared INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (user_id, diary_date)
+);
+
+-- zoowy 会话（按 user_id 隔离；两处入口进同一会话）
+CREATE TABLE IF NOT EXISTS zoowy_sessions (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  title TEXT NOT NULL DEFAULT 'zoowy',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- zoowy 消息（meta 存 JSON：工具调用记录、入口上下文标记等）
+CREATE TABLE IF NOT EXISTS zoowy_messages (
+  id SERIAL PRIMARY KEY,
+  session_id INTEGER NOT NULL REFERENCES zoowy_sessions(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  meta TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_zoowy_msg_session ON zoowy_messages(session_id);
+
+-- AI 调用记账：成功 / 跳过 / 失败都记（skip = AI 判断不用改、整轮没调模型）
+CREATE TABLE IF NOT EXISTS ai_calls (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER,
+  workflow TEXT NOT NULL,
+  action TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL,
+  model TEXT NOT NULL DEFAULT '',
+  prompt_tokens INTEGER NOT NULL DEFAULT 0,
+  completion_tokens INTEGER NOT NULL DEFAULT 0,
+  total_tokens INTEGER NOT NULL DEFAULT 0,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  detail TEXT NOT NULL DEFAULT '',
+  idempotency_key TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_calls_user ON ai_calls(user_id);
+
+-- 按用户的 AI 设置（现有全局 settings 表只存积分系数，不动）
+-- skip_confirm 默认关；report_changes 默认开
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id),
+  skip_confirm INTEGER NOT NULL DEFAULT 0,
+  report_changes INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL
+);
 `;
 
 // 打开连接池并建表（异步）。
@@ -149,6 +271,14 @@ async function openDb(connString) {
   await pool.query(SCHEMA);
   // 迁移：老库补 custom_points 字段（幂等）
   await pool.query('ALTER TABLE goals ADD COLUMN IF NOT EXISTS custom_points INTEGER');
+  // 迁移：计划链字段（P0-2，与现有 status 状态机解耦；老目标四列全空 = 不在计划链）
+  // 注意：不加 FK —— goals 建表早于 big_goals，纯列也符合本项目 point_ledger 的轻约束风格
+  await pool.query('ALTER TABLE goals ADD COLUMN IF NOT EXISTS big_goal_id INTEGER');
+  await pool.query('ALTER TABLE goals ADD COLUMN IF NOT EXISTS planned_date TEXT');
+  await pool.query('ALTER TABLE goals ADD COLUMN IF NOT EXISTS plan_order INTEGER');
+  await pool.query("ALTER TABLE goals ADD COLUMN IF NOT EXISTS plan_status TEXT");
+  // 迁移：画像块分享标记（P3：默认仅自己，主动分享后对方可见）
+  await pool.query('ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS shared INTEGER NOT NULL DEFAULT 0');
   return makeDb(pool);
 }
 

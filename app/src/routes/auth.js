@@ -117,6 +117,28 @@ module.exports = function authRoutes(db) {
     res.json({ user: { id: req.user.id, nickname: req.user.nickname, avatar: req.user.avatar } });
   });
 
+  // 改昵称：1–30 字、不能和对方（或任何现有用户）重名。会话保持有效。
+  r.patch('/me', requireUser, async (req, res, next) => {
+    try {
+      const nickname = req.body && req.body.nickname;
+      if (typeof nickname !== 'string' || !nickname.trim()) {
+        return res.status(400).json({ error: '昵称不能为空' });
+      }
+      const name = nickname.trim();
+      if (name.length > NICK_MAX) {
+        return res.status(400).json({ error: `昵称不能超过 ${NICK_MAX} 字` });
+      }
+      const clash = await db.get('SELECT id FROM users WHERE nickname = ? AND id <> ?', [name, req.user.id]);
+      if (clash) {
+        return res.status(400).json({ error: '这个昵称已经有人用了' });
+      }
+      const oldName = req.user.nickname;
+      await db.run('UPDATE users SET nickname = ? WHERE id = ?', [name, req.user.id]);
+      log.log('nickname_change', `${oldName} -> ${name}`);
+      res.json({ user: { id: req.user.id, nickname: name, avatar: req.user.avatar } });
+    } catch (e) { next(e); }
+  });
+
   r.post('/me/password', requireUser, async (req, res, next) => {
     try {
       const { oldPassword, newPassword } = req.body || {};
@@ -130,6 +152,97 @@ module.exports = function authRoutes(db) {
       await destroyAllSessions(db, req.user.id);
       log.log('password_change', req.user.nickname);
       res.json({ ok: true });
+    } catch (e) { next(e); }
+  });
+
+  // ---- AI 设置（P0-5）：每用户一份，与全局 settings 表（积分系数）无关 ----
+  // skipConfirm 默认关、reportChanges 默认开；两开关只调确认与汇报，不调工具白名单
+  async function getUserSettings(userId) {
+    const row = await db.get('SELECT * FROM user_settings WHERE user_id = ?', [userId]);
+    return {
+      skipConfirm: row ? Boolean(row.skip_confirm) : false,
+      reportChanges: row ? Boolean(row.report_changes) : true,
+    };
+  }
+
+  r.get('/me/settings', requireUser, async (req, res, next) => {
+    try {
+      res.json(await getUserSettings(req.user.id));
+    } catch (e) { next(e); }
+  });
+
+  r.put('/me/settings', requireUser, async (req, res, next) => {
+    try {
+      const b = req.body || {};
+      const cur = await getUserSettings(req.user.id);
+      const skipConfirm = b.skipConfirm !== undefined ? Boolean(b.skipConfirm) : cur.skipConfirm;
+      const reportChanges = b.reportChanges !== undefined ? Boolean(b.reportChanges) : cur.reportChanges;
+      await db.run(
+        `INSERT INTO user_settings (user_id, skip_confirm, report_changes, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT (user_id) DO UPDATE SET skip_confirm = EXCLUDED.skip_confirm, report_changes = EXCLUDED.report_changes, updated_at = EXCLUDED.updated_at`,
+        [req.user.id, skipConfirm ? 1 : 0, reportChanges ? 1 : 0, new Date().toISOString()]
+      );
+      log.log('user_settings', `${req.user.nickname} skipConfirm=${skipConfirm} reportChanges=${reportChanges}`);
+      res.json({ skipConfirm, reportChanges });
+    } catch (e) { next(e); }
+  });
+
+  // ---- 个人画像（P2-#14）：默认仅自己可见；支持查看/手改/删除 ----
+  // 手改存 profile_versions（changed_by='user'）可回滚；删除标 void 不物理删（与 AI 补丁同规则）
+  r.get('/me/profile', requireUser, async (req, res, next) => {
+    try {
+      const rows = await db.all(
+        "SELECT block, content, source, status, updated_at FROM user_profiles WHERE user_id = ? ORDER BY block",
+        [req.user.id]
+      );
+      res.json({ blocks: rows });
+    } catch (e) { next(e); }
+  });
+
+  r.put('/me/profile/:block', requireUser, async (req, res, next) => {
+    try {
+      const block = String(req.params.block || '').trim();
+      if (!/^[a-z][a-z0-9_]{0,31}$/.test(block)) return res.status(400).json({ error: '块名不合法' });
+      const content = String((req.body && req.body.content) || '').trim();
+      if (content.length > 4000) return res.status(400).json({ error: '单块最多 4000 字' });
+      // apply 前存快照
+      const current = await db.all(
+        'SELECT block, content, source, status FROM user_profiles WHERE user_id = ? ORDER BY block', [req.user.id]
+      );
+      await db.run(
+        'INSERT INTO profile_versions (user_id, snapshot, changed_by, reason, created_at) VALUES (?, ?, ?, ?, ?)',
+        [req.user.id, JSON.stringify(current), 'user', `手改 ${block}`, new Date().toISOString()]
+      );
+      if (!content) {
+        await db.run("UPDATE user_profiles SET status = 'void', updated_at = ? WHERE user_id = ? AND block = ?",
+          [new Date().toISOString(), req.user.id, block]);
+        return res.json({ ok: true, deleted: true });
+      }
+      await db.run(
+        `INSERT INTO user_profiles (user_id, block, content, source, status, updated_at) VALUES (?, ?, ?, 'user', 'active', ?)
+         ON CONFLICT (user_id, block) DO UPDATE SET content = EXCLUDED.content, source = 'user', status = 'active', updated_at = EXCLUDED.updated_at`,
+        [req.user.id, block, content, new Date().toISOString()]
+      );
+      res.json({ ok: true });
+    } catch (e) { next(e); }
+  });
+
+  // 分享画像块给对方（P3-#17）：传要分享的块名列表 = 全量设置（列表外的一律取消分享）
+  r.post('/me/profile/share', requireUser, async (req, res, next) => {
+    try {
+      const blocks = Array.isArray(req.body && req.body.blocks) ? req.body.blocks.map(String) : [];
+      if (blocks.length > 20) return res.status(400).json({ error: '最多分享 20 块' });
+      for (const b of blocks) {
+        if (!/^[a-z][a-z0-9_]{0,31}$/.test(b)) return res.status(400).json({ error: `块名不合法：${b}` });
+      }
+      await db.run('UPDATE user_profiles SET shared = 0 WHERE user_id = ?', [req.user.id]);
+      if (blocks.length) {
+        await db.run(
+          `UPDATE user_profiles SET shared = 1 WHERE user_id = ? AND block IN (${blocks.map(() => '?').join(',')})`,
+          [req.user.id, ...blocks]
+        );
+      }
+      res.json({ ok: true, shared: blocks });
     } catch (e) { next(e); }
   });
 

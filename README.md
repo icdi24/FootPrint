@@ -46,7 +46,7 @@ npm start              # 默认 http://localhost:3000
 | 数据 | PostgreSQL；每日 03:00 自动快照（JSON 导出）保留 30 天；手动快照/下载；全量导出 zip（JSON+各表 CSV）；restore 脚本恢复 |
 | 周视图 | 模仿参考 App 的周网格打卡表（周/月切换、点格子打卡、漏打标记） |
 
-**暂缓（V0.2/V0.3）**：事件类愿望单、豁免卡、软惩罚规则、补卡、关系终止、积分手动修正、通知中心、Webhook/推送、周报月报、只读访客链接、48h 验收超时自动通过、逾期 14 天自动放弃。手机版需求文档.md 是原生 App 增量，不在本 Web 部署内。
+**暂缓（V0.2/V0.3）**：事件类愿望单、豁免卡、软惩罚规则、补卡、关系终止、积分手动修正、通知中心（Android 日报通知已做）、Webhook/推送、周报月报、只读访客链接、48h 验收超时自动通过、逾期 14 天自动放弃。手机版需求文档.md 是原生 App 增量：M1（读时长）与 AI 工作流改造（大目标 / 日报通知 / Worker 补报）均已实装，功能验收见待办计划；Web 本身仍可独立部署运行。
 
 ## 配置（环境变量）
 
@@ -73,6 +73,15 @@ curl http://localhost:3000/healthz   # → {"ok":true}
 ```
 
 灾难恢复三步：新机器跑起来（起 PG + 应用）→ 上传导出 zip 里的 `data.json` → `node scripts/restore.js data.json`。
+
+## Android App（M1 · 读手机使用时长）
+
+只读手机各 App 使用时长给对方看，**不包含锁机**（锁机是 M2）。App 是新客户端，复用本仓库后端与账号，本仓库的 Web 代码不需改动。
+
+- 方案定稿：`手机版需求文档.md` 第 **15 节**（平台只做 Android / 只用 `UsageStatsManager` / 只在前台上报 / 上报包名 / 真机测试）。
+- 后端待加：`usage_daily` 表 + `app/src/routes/usage.js`（三个接口：`PUT /api/usage/report`、`GET /api/usage/today`、`GET /api/usage/partner`）。
+- 开发机只需 Windows + Android Studio；**不需要 Mac**。
+- 手机联调要点：手机与电脑同一 Wi-Fi，用电脑局域网 IP 访问（不是 `localhost`）；debug 包放行明文 HTTP；**使用时长在模拟器里恒为 0，核心功能必须真机测**。
 
 ## 安全说明（部署给外网前）
 

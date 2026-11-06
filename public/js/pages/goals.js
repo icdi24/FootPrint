@@ -24,8 +24,11 @@ const GoalsPage = {
   },
 
   async draw(root) {
-    // 小目标视图走独立渲染
+    // 兜底：任何入口（refresh、深链、外部直接调 draw）进来都不会因为没有 weekStart 而崩
+    if (!this.weekStart) this.weekStart = this._monday(new Date());
+    // 小目标 / 大目标视图走独立渲染
     if (this.goalType === 'stage') { await this.drawStage(root); return; }
+    if (this.goalType === 'big') { await this.drawBig(root); return; }
 
     const isWeek = this.viewMode === 'week';
     let data;
@@ -162,7 +165,74 @@ const GoalsPage = {
     return `<div class="type-seg seg" id="type-seg">
       <button type="button" data-t="daily" class="${active === 'daily' ? 'on' : ''}">日常目标</button>
       <button type="button" data-t="stage" class="${active === 'stage' ? 'on' : ''}">小目标</button>
+      <button type="button" data-t="big" class="${active === 'big' ? 'on' : ''}">大目标</button>
     </div>`;
+  },
+
+  // 大目标视图：列表 + FAB 建大目标 + 卡片点开详情
+  async drawBig(root) {
+    let bigGoals = [];
+    try {
+      bigGoals = (await api.get('/api/biggoals')).bigGoals;
+    } catch (e) {
+      root.innerHTML = `<div class="empty big"><div class="empty-emoji">😿</div><div>${UI.esc(e.message)}</div></div>`;
+      return;
+    }
+    root.innerHTML = `
+      <header class="page-head goals-head">
+        ${this._typeSeg('big')}
+      </header>
+      <div class="stage-list">
+        ${bigGoals.length ? bigGoals.map((b) => this.bigCard(b)).join('') : `
+        <div class="empty">
+          <div class="empty-emoji">🏔️</div>
+          <div class="empty-title">还没有大目标</div>
+          <div class="empty-sub">大目标是长期方向（比如「找到 Agent 开发的工作」），不能打卡，只能靠路线上的小目标推进</div>
+          <button class="btn primary" id="bg-empty-add">建一个大目标</button>
+        </div>`}
+      </div>
+      ${bigGoals.length ? `<button class="fab" id="add-biggoal" aria-label="新建大目标">${window.icon('plus')}</button>` : ''}
+    `;
+    root.querySelector('#type-seg').addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      this.goalType = b.dataset.t;
+      this.draw(root);
+    });
+    const emptyAdd = root.querySelector('#bg-empty-add');
+    if (emptyAdd) emptyAdd.addEventListener('click', () => BigGoalForm.open({ onSaved: () => this.draw(root) }));
+    const fab = root.querySelector('#add-biggoal');
+    if (fab) fab.addEventListener('click', () => BigGoalForm.open({ onSaved: () => this.draw(root) }));
+    root.querySelectorAll('.stage-card.big-card').forEach((card) => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return;
+        BigGoalDetail.open(Number(card.dataset.id), { onChanged: () => this.draw(root) });
+      });
+      card.querySelector('[data-act="zoowy"]')?.addEventListener('click', () => {
+        const bg = bigGoals.find((b) => b.id === Number(card.dataset.id));
+        if (bg) ZoowyPlan.open({ bigGoal: bg, onConfirmed: () => this.draw(root) });
+      });
+    });
+  },
+
+  bigCard(b) {
+    const pct = Math.max(0, Math.min(100, Number(b.progress) || 0));
+    return `
+      <div class="stage-card big-card" data-id="${b.id}">
+        <div class="sc-head">
+          <span class="sc-emoji">${UI.esc(b.emoji || '🏔️')}</span>
+          <div class="sc-title-box">
+            <div class="sc-title">${UI.esc(b.title)}</div>
+            <div class="sc-meta">客观 ${b.done || 0}/${b.total || 0} 个小目标达成</div>
+          </div>
+          <span class="bgc-pct">${pct}%</span>
+        </div>
+        <div class="bgd-bar"><i style="width:${pct}%"></i></div>
+        ${b.progress_note ? `<div class="bgd-note">${UI.esc(b.progress_note)}</div>` : ''}
+        <div class="sc-actions">
+          <button class="sc-btn primary" data-act="zoowy">🐾 让 zoowy 拆计划</button>
+        </div>
+      </div>`;
   },
 
   async drawStage(root) {
@@ -970,6 +1040,10 @@ const StageGoalForm = {
         <textarea id="sf-desc" rows="2" maxlength="200" placeholder="补充背景、方法，或给自己鼓鼓劲">${UI.esc(g.description)}</textarea>
       </div>
       <div class="gf-preview sf-preview" id="sf-preview"></div>
+      ${!editing ? `
+      <div class="gf-row zf-entry">
+        <button type="button" class="ghost-btn" id="sf-zoowy">🐾 不知道怎么定？让 zoowy 按大目标帮你拆</button>
+      </div>` : ''}
     `;
 
     function cur() {
@@ -1058,6 +1132,8 @@ const StageGoalForm = {
       b.classList.add('on');
     });
     preview();
+    const zfEntry = body.querySelector('#sf-zoowy');
+    if (zfEntry) zfEntry.addEventListener('click', () => ZoowyPlan.open({ onConfirmed: onSaved }));
 
     let saving = false;
     UI.sheet({

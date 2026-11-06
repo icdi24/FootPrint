@@ -668,6 +668,48 @@ module.exports = function goalsRoutes(db) {
     } catch (e) { next(e); }
   });
 
+  // 验收详情（P5-#21）：reviewer 或提交人可看；含证据图片、第几次提交、历史驳回理由
+  r.get('/verifications/:id/detail', mw.requireUser, async (req, res, next) => {
+    try {
+      const v = await db.get(
+        `SELECT v.*, g.title AS goal_title, g.emoji AS goal_emoji, g.description AS goal_desc,
+                g.accept_criteria, g.total_points, g.end_date,
+                u.nickname AS submitter_nickname, u.avatar AS submitter_avatar
+         FROM verifications v JOIN goals g ON g.id = v.goal_id JOIN users u ON u.id = v.submitter_id
+         WHERE v.id = ?`,
+        [Number(req.params.id) || 0]
+      );
+      if (!v) return res.status(404).json({ error: '验收记录不存在' });
+      if (v.reviewer_id !== req.user.id && v.submitter_id !== req.user.id) {
+        return res.status(403).json({ error: '无权查看这条验收' });
+      }
+      const history = await db.all(
+        `SELECT status, reason, submit_count, created_at, decided_at FROM verifications
+         WHERE goal_id = ? ORDER BY id`,
+        [v.goal_id]
+      );
+      res.json({
+        verification: {
+          id: v.id,
+          status: v.status,
+          submitCount: v.submit_count,
+          selfStatement: v.self_statement,
+          evidenceText: v.evidence_text,
+          evidenceUrls: v.evidence_ids ? v.evidence_ids.split(',').filter(Boolean).map((id) => `/api/file/${id}`) : [],
+          createdAt: v.created_at,
+          decidedAt: v.decided_at,
+          reason: v.reason,
+        },
+        goal: {
+          title: v.goal_title, emoji: v.goal_emoji, description: v.goal_desc,
+          acceptCriteria: v.accept_criteria, totalPoints: Number(v.total_points) || 0, endDate: v.end_date,
+        },
+        submitter: { nickname: v.submitter_nickname, avatar: v.submitter_avatar },
+        history,
+      });
+    } catch (e) { next(e); }
+  });
+
   // 通过（对方 → 入账 stage_credit，逾期只发 90%）
   r.post('/verifications/:id/approve', mw.requireUser, async (req, res, next) => {
     try {
@@ -687,6 +729,12 @@ module.exports = function goalsRoutes(db) {
       await tx(db, async (c) => {
         await c.run(`UPDATE verifications SET status='approved', decided_at=? WHERE id=?`, [nowIso(), v.id]);
         await c.run(`UPDATE goals SET status='achieved', updated_at=? WHERE id=?`, [nowIso(), g.id]);
+        // 计划链联动：链上小目标达成 → plan_status='done'；并释放下一个（提前完成 → 提前露面）
+        if (g.big_goal_id) {
+          await c.run(`UPDATE goals SET plan_status='done' WHERE id=? AND plan_status IS NOT NULL`, [g.id]);
+          const { releaseChain } = require('./biggoals');
+          await releaseChain(c, g.big_goal_id, g.owner_id);
+        }
         if (points > 0) {
           await ledgerAdd(c, {
             userId: g.owner_id,
@@ -699,6 +747,21 @@ module.exports = function goalsRoutes(db) {
         }
       });
       log.log('verify_approve', `${req.user.nickname} 通过 ${g.title} 的验收 +${points} 分`);
+
+      // AI 进度分析（P2-#11）：异步触发，不阻塞验收响应；失败只记 ai_calls，不影响验收结果
+      if (g.big_goal_id) {
+        setImmediate(() => {
+          const { runProgress } = require('../agent/workflows/progress');
+          const ai = require('../ai');
+          runProgress({ db, userId: g.owner_id, goalId: g.id }).catch(async (e) => {
+            await ai.recordCall(db, {
+              userId: g.owner_id, workflow: 'progress', action: 'progress_trigger', status: 'fail',
+              detail: JSON.stringify({ error: String(e.message), goal_id: g.id }),
+            });
+          });
+        });
+      }
+
       res.json({ ok: true, points, overdue });
     } catch (e) { next(e); }
   });

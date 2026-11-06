@@ -121,10 +121,28 @@ module.exports = function opsRoutes(db, dataDir) {
         }));
       }
 
-      // 小目标（stage）：进行中/待验收，单独返回
+      // 小目标（stage）：进行中/待验收，单独返回（挂在大目标计划链上的不在这展示，走 currentPlanGoals）
       const stageGoals = await db.all(
-        `SELECT * FROM goals WHERE owner_id = ? AND type = 'stage' AND status IN ('active','reviewing')
+        `SELECT * FROM goals WHERE owner_id = ? AND type = 'stage' AND status IN ('active','reviewing') AND big_goal_id IS NULL
          ORDER BY CASE status WHEN 'reviewing' THEN 0 ELSE 1 END, id DESC`,
+        [req.user.id]
+      );
+
+      // 当前小目标（计划链已释放的，首页露 1–2 个；未启动 planned 的不出现）
+      // 先对每个进行中的大目标跑一次惰性释放：到了日期就露面，不必先打开详情页
+      const activeBgs = await db.all(
+        "SELECT id FROM big_goals WHERE owner_id = ? AND status = 'active'",
+        [req.user.id]
+      );
+      const { releaseChain } = require('./biggoals');
+      for (const bg of activeBgs) {
+        await releaseChain(db, bg.id, req.user.id);
+      }
+      const currentPlanGoals = await db.all(
+        `SELECT g.id, g.title, g.emoji, g.planned_date, g.status, g.big_goal_id, b.title AS big_goal_title
+         FROM goals g JOIN big_goals b ON b.id = g.big_goal_id
+         WHERE g.owner_id = ? AND g.plan_status = 'released' AND g.status NOT IN ('achieved','abandoned','archived')
+         ORDER BY g.planned_date, g.id LIMIT 2`,
         [req.user.id]
       );
 
@@ -137,6 +155,7 @@ module.exports = function opsRoutes(db, dataDir) {
         bestStreak: stats.bestStreak,
         todos,
         stageGoals,
+        currentPlanGoals,
         pendingCount: pending.length + weeklyPending.length,
         partnerToday,
         today,
@@ -164,7 +183,11 @@ module.exports = function opsRoutes(db, dataDir) {
         return res.status(403).json({ error: '无权查看' });
       }
       const u = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
-      res.json({ user: u, stats: await statsFor(db, userId) });
+      // ⚠ 只返回公开字段：绝不能把 password_hash 发给前端
+      res.json({
+        user: u ? { id: u.id, nickname: u.nickname, avatar: u.avatar } : null,
+        stats: await statsFor(db, userId),
+      });
     } catch (e) { next(e); }
   });
 

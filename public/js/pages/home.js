@@ -11,7 +11,7 @@ const HomePage = {
       return;
     }
     App.state.partner = data.partner;
-    const { me, partner, balance, monthPoints, currentStreak, todos, stageGoals } = data;
+    const { me, partner, balance, monthPoints, currentStreak, todos, stageGoals, currentPlanGoals } = data;
 
     const pending = todos.filter((t) => (t.dueToday || (t.weekly && t.weekly.done < t.weekly.need)) && !t.checked);
     const done = todos.filter((t) => t.checked);
@@ -54,6 +54,22 @@ const HomePage = {
         <div class="sec-head"><h2>已完成</h2><span class="sec-count ok">${done.length} 项 ✓</span></div>
         <div class="todo-list done-list">
           ${done.map((t, i) => doneCard(t, i)).join('')}
+        </div>
+      </section>` : ''}
+
+      ${currentPlanGoals && currentPlanGoals.length ? `
+      <section class="sec">
+        <div class="sec-head"><h2>当前小目标</h2><span class="sec-count">大目标路线</span></div>
+        <div class="plan-list">
+          ${currentPlanGoals.map((g) => `
+            <div class="plan-card" data-id="${g.big_goal_id}">
+              <div class="pc-emoji">${UI.esc(g.emoji || '🎯')}</div>
+              <div class="pc-main">
+                <div class="pc-title">${UI.esc(g.title)}</div>
+                <div class="pc-meta">${window.icon('target')} ${UI.esc(g.big_goal_title)}${g.planned_date ? ` · 计划 ${UI.fmtDate(g.planned_date)}` : ''}</div>
+              </div>
+              <span class="sc-badge active">进行中</span>
+            </div>`).join('')}
         </div>
       </section>` : ''}
 
@@ -111,6 +127,13 @@ const HomePage = {
     if (goGoals) goGoals.addEventListener('click', () => App.showTab('goals'));
     const toPartner = root.querySelector('#to-partner');
     if (toPartner) toPartner.addEventListener('click', () => App.showTab('partner'));
+
+    // 当前小目标卡 → 大目标详情
+    root.querySelectorAll('.plan-card').forEach((card) => {
+      const go = () => BigGoalDetail.open(Number(card.dataset.bigGoalId || card.dataset.id), { onChanged: () => HomePage.render(root) });
+      card.setAttribute('role', 'button');
+      card.addEventListener('click', go);
+    });
 
     root.querySelectorAll('.home-stage-list .stage-card').forEach((card) => {
       const go = () => {

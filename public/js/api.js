@@ -26,6 +26,8 @@ const api = {
   get(url) { return this.req('GET', url); },
   post(url, body) { return this.req('POST', url, body); },
   put(url, body) { return this.req('PUT', url, body); },
+  patch(url, body) { return this.req('PATCH', url, body); },
+  delete(url) { return this.req('DELETE', url); },
   async upload(file, kind) {
     let ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
     if (['jpeg'].includes(ext)) ext = 'jpg';

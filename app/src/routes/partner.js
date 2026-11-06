@@ -58,10 +58,42 @@ module.exports = function partnerRoutes(db) {
          WHERE v.reviewer_id = ? AND v.status = 'pending' ORDER BY v.id DESC`,
         [req.user.id]
       );
+      // 对方大目标（P3-#18：大目标 + 进度条全可见；链上未启动的不出现）
+      const partnerBigGoals = await db.all(
+        "SELECT id, title, emoji, description, progress, progress_note, progress_at, status FROM big_goals WHERE owner_id = ? AND status != 'archived' ORDER BY id DESC",
+        [partner.id]
+      );
+      for (const bg of partnerBigGoals) {
+        const cnt = await db.get(
+          "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'achieved') AS done FROM goals WHERE big_goal_id = ? AND owner_id = ? AND status != 'archived' AND plan_status != 'planned'",
+          [bg.id, partner.id]
+        );
+        bg.done = Number(cnt.done);
+        bg.total = Number(cnt.total);
+      }
+
+      // 对方主动分享的：日报（P3-#17，摘要取全文由前端截断）+ 画像块
+      const sharedDiaries = await db.all(
+        `SELECT diary_date, ai_original, user_edited, updated_at FROM diaries
+         WHERE user_id = ? AND shared = 1 ORDER BY diary_date DESC LIMIT 7`,
+        [partner.id]
+      );
+      const sharedProfile = await db.all(
+        "SELECT block, content, updated_at FROM user_profiles WHERE user_id = ? AND shared = 1 AND status = 'active' ORDER BY block",
+        [partner.id]
+      );
+
       res.json({
         partner: { id: partner.id, nickname: partner.nickname, avatar: partner.avatar },
         partnerStats: await statsFor(db, partner.id),
         myStats: await statsFor(db, req.user.id),
+        partnerBigGoals,
+        sharedDiaries: sharedDiaries.map((d) => ({
+          diary_date: d.diary_date,
+          content: d.user_edited || d.ai_original,
+          updated_at: d.updated_at,
+        })),
+        sharedProfile,
         partnerGoals: goals.map((g) => ({
           id: g.id,
           type: g.type,

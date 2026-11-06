@@ -8,3 +8,16 @@ npm-debug.log*
 .pgdata/
 start-pg.bat
 .shots/
+.env
+
+# Android（M1 App）：构建产物与机器相关配置
+android/.gradle/
+android/.idea/
+android/local.properties
+android/**/build/
+android/.kotlin/
+*.apk
+*.aab
+*.keystore
+*.jks
+public/app-debug.apk
