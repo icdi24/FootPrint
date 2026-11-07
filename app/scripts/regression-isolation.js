@@ -7,11 +7,12 @@ const https = require('https');
 const assert = require('assert');
 
 const BASE = process.env.REG_BASE_URL || 'http://127.0.0.1:3000';
+// 真实口令不写进仓库：用 REG_ACCOUNTS 传入（JSON 数组）
 const ACCOUNTS = process.env.REG_ACCOUNTS ? JSON.parse(process.env.REG_ACCOUNTS) : [
-  { loginName: '栗子', password: 'lizi123', partner: '阿白' },
-  { loginName: '阿白', password: 'abai123', partner: '栗子' },
-  { loginName: 'icdi', password: '123456', partner: 'sushi' },
-  { loginName: 'sushi', password: '123456', partner: 'icdi' },
+  { loginName: '栗子', password: '', partner: '阿白' },
+  { loginName: '阿白', password: '', partner: '栗子' },
+  { loginName: 'icdi', password: '', partner: 'sushi' },
+  { loginName: 'sushi', password: '', partner: 'icdi' },
 ];
 
 function req(method, urlPath, body, cookie) {
@@ -41,6 +42,7 @@ function req(method, urlPath, body, cookie) {
 
 async function run() {
   assert(ACCOUNTS.length >= 4, '至少要有两对共 4 个账号');
+  assert(ACCOUNTS.every((a) => a.password), '请通过 REG_ACCOUNTS 提供各账号口令（真实口令不要写进仓库）');
   const s = [];
   for (const a of ACCOUNTS) {
     const r = await req('POST', '/api/login', { loginName: a.loginName, password: a.password });
