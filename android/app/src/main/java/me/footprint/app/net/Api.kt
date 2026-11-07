@@ -378,6 +378,37 @@ object Api {
         return json.decodeFromString(UserSettings.serializer(), text)
     }
 
+    /** PUT /api/me/settings —— 改 AI 设置（reportChanges / skipConfirm / dailyEnabled） */
+    suspend fun updateAiSettings(token: String, body: AiSettingsPayload): UserSettings {
+        val text = send("PUT", "api/me/settings", json.encodeToString(AiSettingsPayload.serializer(), body), token)
+        return json.decodeFromString(UserSettings.serializer(), text)
+    }
+
+    // ---------------- 画像变更（「改完告诉用户改了什么」） ----------------
+
+    /** GET /api/me/profile/changes —— 变更留痕列表 + 未读数 */
+    suspend fun getProfileChanges(token: String, limit: Int = 30): ProfileChangesResponse {
+        val text = send("GET", "api/me/profile/changes?limit=$limit", null, token)
+        return json.decodeFromString(ProfileChangesResponse.serializer(), text)
+    }
+
+    /** POST /api/me/profile/changes/read —— 全部标为已读 */
+    suspend fun markProfileChangesRead(token: String) {
+        send("POST", "api/me/profile/changes/read", "{}", token)
+    }
+
+    /** GET /api/me/profile/versions —— 版本历史（不再只写不读） */
+    suspend fun getProfileVersions(token: String, limit: Int = 20): ProfileVersionsResponse {
+        val text = send("GET", "api/me/profile/versions?limit=$limit", null, token)
+        return json.decodeFromString(ProfileVersionsResponse.serializer(), text)
+    }
+
+    /** POST /api/me/profile/versions/{id}/rollback —— 回滚到指定版本 */
+    suspend fun rollbackProfileVersion(token: String, id: Long): RollbackResponse {
+        val text = send("POST", "api/me/profile/versions/$id/rollback", "{}", token)
+        return json.decodeFromString(RollbackResponse.serializer(), text)
+    }
+
     // ---------------- 愿望单（wish） ----------------
 
     /** GET /api/wish —— 愿望列表 */
@@ -982,7 +1013,59 @@ data class DiaryTodayResponse(val today: String = "", val diary: DiaryDto? = nul
 data class UserSettings(
     val skipConfirm: Boolean = false,
     val reportChanges: Boolean = true,
+    val dailyEnabled: Boolean = false,
 )
+
+@Serializable
+data class AiSettingsPayload(
+    val skipConfirm: Boolean = false,
+    val reportChanges: Boolean = true,
+    val dailyEnabled: Boolean = false,
+)
+
+/** 一条画像变更里的单个块改动 */
+@Serializable
+data class ProfileChangeDetailDto(
+    val op: String = "",
+    val block: String = "",
+    val reason: String = "",
+    val evidence: String = "",
+    val before: String = "",
+    val after: String = "",
+)
+
+@Serializable
+data class ProfileChangeDto(
+    val id: Long = 0,
+    val workflow: String = "",
+    val summary: String = "",
+    val detail: List<ProfileChangeDetailDto> = emptyList(),
+    val reported: Boolean = true,
+    val read: Boolean = false,
+    val versionId: Long? = null,
+    val createdAt: String = "",
+)
+
+@Serializable
+data class ProfileChangesResponse(
+    val unread: Int = 0,
+    val items: List<ProfileChangeDto> = emptyList(),
+)
+
+@Serializable
+data class ProfileVersionDto(
+    val id: Long = 0,
+    val changedBy: String = "",
+    val reason: String = "",
+    val createdAt: String = "",
+    val blockCount: Int = 0,
+)
+
+@Serializable
+data class ProfileVersionsResponse(val versions: List<ProfileVersionDto> = emptyList())
+
+@Serializable
+data class RollbackResponse(val restored: Int = 0, val versionId: Long = 0)
 
 @Serializable
 data class BigGoalCreated(val bigGoal: BigGoalDto = BigGoalDto())

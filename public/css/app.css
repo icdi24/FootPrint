@@ -1334,6 +1334,24 @@ code { background: var(--bg-2); border: 1px solid var(--line-strong); padding: 1
 .pf-content { font-size: 12px; line-height: 1.8; margin-top: 6px; }
 .pf-acts { display: flex; gap: 6px; margin-top: 8px; }
 
+/* ===== 画像变更：改了什么 / 明细 / 版本回滚 ===== */
+.pc-body { min-width: 0; max-height: 62vh; overflow-y: auto; }
+.pc-card { background: var(--card); border: 2px solid var(--line-strong); box-shadow: var(--sh-px-sm); padding: 10px 12px; margin-bottom: 6px; }
+.pc-sum { font-size: 12px; line-height: 1.7; }
+.pc-meta { font-size: 10px; color: var(--ink-2); margin-top: 4px; }
+.pc-item { background: var(--card); border: 2px solid var(--line); padding: 8px 10px; margin-bottom: 6px; cursor: pointer; }
+.pc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.pc-head b { font-size: 12px; font-family: var(--font-px-mono); }
+.pc-wf { font-size: 10px; color: var(--ink-2); flex: none; }
+.pc-detail { margin-top: 8px; border-top: 2px dashed var(--line-strong); padding-top: 6px; }
+.pc-chg { font-size: 11px; line-height: 1.7; margin-bottom: 6px; color: var(--ink-2); }
+.pc-chg-h { font-family: var(--font-px-mono); color: var(--ink); }
+.pc-chg-b { word-break: break-all; }
+.pc-vers { margin-top: 12px; border-top: 2px dashed var(--line-strong); padding-top: 8px; }
+.pc-vers-h { font-size: 12px; font-family: var(--font-px-mono); margin-bottom: 6px; }
+.pc-ver { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11px; padding: 4px 0; border-bottom: 1px dashed var(--line); }
+.zc-profile { margin-top: 6px; font-size: 10px; color: var(--green-deep); border-top: 1px dashed var(--line-strong); padding-top: 4px; }
+
 /* ===== 「我们」页：大目标卡 / 分享区 / 7天折线 / 验收详情（P3/P4/P5）===== */
 .pbig-list { display: flex; flex-direction: column; gap: 8px; }
 .pbig-card { background: var(--card); border: 2px solid var(--line-strong); box-shadow: var(--sh-px-sm); padding: 12px; }

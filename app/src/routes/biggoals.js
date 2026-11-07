@@ -279,6 +279,7 @@ function bigGoalsRoutes(db) {
         db, userId: req.user.id,
         bigGoalId: Number(b.big_goal_id) || 0,
         items: Array.isArray(b.items) ? b.items : [],
+        profilePatches: Array.isArray(b.profile_patches) ? b.profile_patches : [],
       });
       res.json(out);
     } catch (e) { next(e); }

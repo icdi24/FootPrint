@@ -8,6 +8,9 @@ function q(sql) {
   return sql.replace(/\?/g, () => `$${++i}`);
 }
 
+// ⚠️ 数据库结构的唯一真源。改这里 / openDb() 的 ALTER / 触发器后，
+//    必须同步更新根目录《数据库设计实现文档.md》（§3 表清单、§4 字段表、§5 迁移、§11 变更记录），
+//    并跑：cd app && npm run check:schema-doc
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
@@ -263,6 +266,22 @@ CREATE TABLE IF NOT EXISTS user_settings (
   updated_at TEXT NOT NULL
 );
 
+-- 画像变更留痕：每次真实改动画像记一条，用于「改完告诉用户改了什么」+ 可查历史。
+-- reported = 当时 reportChanges 开关快照；关掉开关照样留痕，只是不推送 / 不计未读。
+CREATE TABLE IF NOT EXISTS profile_changes (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  workflow TEXT NOT NULL DEFAULT '',
+  summary TEXT NOT NULL DEFAULT '',
+  detail TEXT NOT NULL DEFAULT '',
+  reported INTEGER NOT NULL DEFAULT 1,
+  is_read INTEGER NOT NULL DEFAULT 0,
+  version_id INTEGER,
+  created_at TEXT NOT NULL,
+  pair_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_profile_changes_user ON profile_changes(user_id, id DESC);
+
 -- ===== 多人化：关系 / 邀请码 / 登录限流 =====
 -- 组：严格 2 人，永久保留只标 status（历史记录的 pair_id 不能悬空）
 CREATE TABLE IF NOT EXISTS pairs (
@@ -342,6 +361,7 @@ async function openDb(connString) {
     'wish_items', 'wish_history', 'redemptions', 'uploads', 'usage_daily',
     'big_goals', 'user_profiles', 'profile_versions', 'plan_versions',
     'diaries', 'zoowy_sessions', 'zoowy_messages', 'ai_calls', 'user_settings',
+    'profile_changes',
   ];
   for (const t of pairTables) {
     await pool.query(`ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS pair_id INTEGER`);

@@ -404,7 +404,9 @@ const ZoowyPlan = {
     }
 
     // 出候选：勾选 = 一次确认
-    const cands = (out.candidates || []).map((c, i) => ({ ...c, _i: i, _on: true }));    flow.innerHTML = `
+    const cands = (out.candidates || []).map((c, i) => ({ ...c, _i: i, _on: true }));
+    const patches = Array.isArray(out.profile_patches) ? out.profile_patches.slice(0, 8) : [];
+    flow.innerHTML = `
       <div class="zp-q">
         <div class="zp-avatar">🐾</div>
         <div class="zp-bubble">拆好了 ${cands.length} 步。勾掉不要的，也可以改日期：</div>
@@ -443,9 +445,10 @@ const ZoowyPlan = {
       btn.disabled = true;
       btn.textContent = '创建中…';
       try {
-        const r = await api.post('/api/zoowy/plan/confirm', { big_goal_id: bgId, items });
+        const r = await api.post('/api/zoowy/plan/confirm', { big_goal_id: bgId, items, profile_patches: patches });
         const n = (r.created || []).filter((x) => !x.duplicate).length;
         UI.toast(`建了 ${n} 个小目标 🎉`, 'ok');
+        if (r.profileChanges) UI.toast(`画像已更新：${r.profileChanges.summary}`, 'ok');
         document.querySelector('.sheet-wrap:last-child .sheet-backdrop')?.click();
         if (onConfirmed) onConfirmed();
       } catch (e) {

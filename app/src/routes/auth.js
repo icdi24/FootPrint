@@ -16,6 +16,8 @@ const { tx } = require('../db');
 const { currentPairId } = require('../pair');
 const { nowIso } = require('../tz');
 const log = require('../log');
+const { getUserSettings } = require('../settings');
+const { listChanges, markRead, listVersions, rollback } = require('../profileChanges');
 
 const PW_MIN = 8;
 const NICK_MAX = 30;
@@ -215,25 +217,16 @@ module.exports = function authRoutes(db) {
 
   // ---- AI 设置（P0-5）：每用户一份，与全局 settings 表（积分系数）无关 ----
   // skipConfirm 默认关、reportChanges 默认开；两开关只调确认与汇报，不调工具白名单
-  async function getUserSettings(userId) {
-    const row = await db.get('SELECT * FROM user_settings WHERE user_id = ?', [userId]);
-    return {
-      skipConfirm: row ? Boolean(row.skip_confirm) : false,
-      reportChanges: row ? Boolean(row.report_changes) : true,
-      dailyEnabled: row ? Boolean(row.daily_enabled) : false,
-    };
-  }
-
   r.get('/me/settings', requireUser, async (req, res, next) => {
     try {
-      res.json(await getUserSettings(req.user.id));
+      res.json(await getUserSettings(db, req.user.id));
     } catch (e) { next(e); }
   });
 
   r.put('/me/settings', requireUser, async (req, res, next) => {
     try {
       const b = req.body || {};
-      const cur = await getUserSettings(req.user.id);
+      const cur = await getUserSettings(db, req.user.id);
       const skipConfirm = b.skipConfirm !== undefined ? Boolean(b.skipConfirm) : cur.skipConfirm;
       const reportChanges = b.reportChanges !== undefined ? Boolean(b.reportChanges) : cur.reportChanges;
       const dailyEnabled = b.dailyEnabled !== undefined ? Boolean(b.dailyEnabled) : cur.dailyEnabled;
@@ -302,6 +295,33 @@ module.exports = function authRoutes(db) {
         );
       }
       res.json({ ok: true, shared: blocks });
+    } catch (e) { next(e); }
+  });
+
+  // ---- 画像变更：改了什么（可查）、标记已读、版本历史与回滚 ----
+  // 留痕无条件写；reportChanges 只控制推送 / 未读，关掉也能在这里翻到全部。
+  r.get('/me/profile/changes', requireUser, async (req, res, next) => {
+    try {
+      res.json(await listChanges(db, req.user.id, req.query.limit));
+    } catch (e) { next(e); }
+  });
+
+  r.post('/me/profile/changes/read', requireUser, async (req, res, next) => {
+    try {
+      await markRead(db, req.user.id);
+      res.json({ ok: true, unread: 0 });
+    } catch (e) { next(e); }
+  });
+
+  r.get('/me/profile/versions', requireUser, async (req, res, next) => {
+    try {
+      res.json({ versions: await listVersions(db, req.user.id, req.query.limit) });
+    } catch (e) { next(e); }
+  });
+
+  r.post('/me/profile/versions/:id/rollback', requireUser, async (req, res, next) => {
+    try {
+      res.json(await rollback(db, req.user.id, Number(req.params.id) || 0));
     } catch (e) { next(e); }
   });
 

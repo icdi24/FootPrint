@@ -71,6 +71,11 @@ const MePage = {
       </section>
 
       <section class="sec">
+        <div class="sec-head"><h2>画像变更</h2><span class="sec-count" id="pc-dot" style="display:none">● 有新的</span></div>
+        <div id="pc-box"><div class="ld-loading">加载中…</div></div>
+      </section>
+
+      <section class="sec">
         <div class="sec-head"><h2>设置</h2></div>
         <div class="menu-list">
           <button class="menu-row" id="m-ai-settings">🐾<span>AI 设置</span><span class="menu-note">确认与汇报</span>${window.icon('right')}</button>
@@ -100,6 +105,7 @@ const MePage = {
     root.querySelector('#m-zoowy').addEventListener('click', () => ZoowyChat.open({ title: 'zoowy' }));
     root.querySelector('#m-profile').addEventListener('click', () => this.profileSheet());
     this.loadDiary(root);
+    this.loadProfileChanges(root);
     root.querySelector('#logout').addEventListener('click', async () => {
       const yes = await UI.confirm('退出登录？下次要用口令再进来。', { okLabel: '退出' });
       if (!yes) return;
@@ -272,6 +278,109 @@ const MePage = {
               close();
               MePage.loadDiary(root);
             } catch (e) { UI.toast(e.message, 'err'); }
+          },
+        },
+      ],
+    });
+  },
+
+  // ---- 画像变更：zoowy 改了什么（红点）+ 明细 + 版本历史与回滚 ----
+  async loadProfileChanges(root) {
+    const box = root.querySelector('#pc-box');
+    const dot = root.querySelector('#pc-dot');
+    if (!box) return;
+    let d;
+    try {
+      d = await api.get('/api/me/profile/changes?limit=5');
+    } catch (e) {
+      box.innerHTML = `<div class="ld-empty">${UI.esc(e.message)}</div>`;
+      return;
+    }
+    if (d.unread) dot.style.display = '';
+    if (!d.items.length) {
+      box.innerHTML = '<div class="ld-empty">还没有变更。zoowy 记住新信息时会在这里告诉你改了什么。</div>';
+      return;
+    }
+    const last = d.items[0];
+    box.innerHTML = `
+      <div class="pc-card">
+        <div class="pc-sum">${UI.esc(last.summary || '（无摘要）')}</div>
+        <div class="pc-meta">${UI.fmtDate(last.createdAt)} · ${UI.esc(last.workflow)}${last.reported ? '' : ' · 静默留痕'}</div>
+      </div>
+      <button class="ghost-btn" id="pc-open">查看全部 · 版本历史与回滚 →</button>
+    `;
+    box.querySelector('#pc-open').addEventListener('click', () => this.profileChangesSheet());
+  },
+
+  async profileChangesSheet() {
+    let d, v;
+    try {
+      d = await api.get('/api/me/profile/changes?limit=50');
+      v = await api.get('/api/me/profile/versions?limit=20');
+    } catch (e) { return UI.toast(e.message, 'err'); }
+    const WF = { chat: '聊天', plan: '拆计划', progress: '进度分析', daily: '日报', user: '你手动', ai: 'zoowy' };
+    const body = document.createElement('div');
+    body.className = 'pc-body';
+    body.innerHTML = `
+      <div class="gf-hint">每次改动都留痕。关掉「改完汇报」只是不推红点，这里照样能翻到全部，也能一键回到任一历史版本。</div>
+      <div class="pc-list">
+        ${d.items.length ? d.items.map((it) => `
+          <div class="pc-item" data-id="${it.id}">
+            <div class="pc-head"><b>${UI.esc(it.summary || '（无摘要）')}</b><span class="pc-wf">${UI.esc(WF[it.workflow] || it.workflow)}</span></div>
+            <div class="pc-meta">${UI.fmtDate(it.createdAt)}${it.reported ? '' : ' · 静默留痕'}${it.read ? ' · 已读' : ' · 未读'}</div>
+            <div class="pc-detail hidden">
+              ${(it.detail || []).map((c) => `
+                <div class="pc-chg">
+                  <div class="pc-chg-h">${UI.esc(c.op)} · ${UI.esc(c.block)}</div>
+                  <div class="pc-chg-r">理由：${UI.esc(c.reason || '—')}</div>
+                  <div class="pc-chg-e">依据：${UI.esc(c.evidence || '—')}</div>
+                  ${c.before ? `<div class="pc-chg-b">原：${UI.esc(String(c.before).slice(0, 120))}</div>` : ''}
+                  ${c.after ? `<div class="pc-chg-b">新：${UI.esc(String(c.after).slice(0, 120))}</div>` : ''}
+                </div>`).join('')}
+            </div>
+          </div>`).join('') : '<div class="ld-empty">还没有变更。</div>'}
+      </div>
+      <div class="pc-vers">
+        <div class="pc-vers-h">版本历史（可回滚）</div>
+        ${v.versions.length ? v.versions.map((x) => `
+          <div class="pc-ver">
+            <span>#${x.id} ${UI.fmtDate(x.createdAt)} · ${x.blockCount} 块 · ${UI.esc(x.changedBy)}</span>
+            <button class="sc-btn ghost" data-rollback="${x.id}">回滚</button>
+          </div>`).join('') : '<div class="ld-empty">还没有版本快照。</div>'}
+      </div>
+    `;
+    body.querySelector('.pc-list').addEventListener('click', (e) => {
+      const item = e.target.closest('.pc-item');
+      if (!item) return;
+      const det = item.querySelector('.pc-detail');
+      if (det) det.classList.toggle('hidden');
+    });
+    body.querySelector('.pc-vers').addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-rollback]');
+      if (!btn) return;
+      const id = btn.dataset.rollback;
+      const yes = await UI.confirm(`回到版本 #${id}？当前画像会先存一份快照，随时能再回来。`, { okLabel: '回滚' });
+      if (!yes) return;
+      try {
+        await api.post(`/api/me/profile/versions/${id}/rollback`);
+        UI.toast('已回滚', 'ok');
+        this.profileChangesSheet();
+      } catch (err) { UI.toast(err.message, 'err'); }
+    });
+    UI.sheet({
+      title: '画像变更记录',
+      body,
+      actions: [
+        {
+          label: '全部标为已读', kind: 'primary',
+          async onClick(close) {
+            try {
+              await api.post('/api/me/profile/changes/read');
+              UI.toast('已标为已读', 'ok');
+              const dot = document.getElementById('pc-dot');
+              if (dot) dot.style.display = 'none';
+              close();
+            } catch (err) { UI.toast(err.message, 'err'); }
           },
         },
       ],
