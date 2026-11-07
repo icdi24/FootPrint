@@ -62,7 +62,7 @@ const AuthPage = (() => {
   function renderRegister(card) {
     card.innerHTML = `
       <h2 class="auth-title">注册</h2>
-      <p class="auth-hint">注册后到『我的 → 我的搭档』看自己的邀请码，或输入对方的码完成配对。</p>
+      <p class="auth-hint">注册后到『我的 → 我的搭档』看自己的邀请码，或输入对方的码完成配对</p>
       ${field('用户名', 'rg-name', 'text', '2–30 字，登录用')}
       ${field('密码', 'rg-pw', 'password', '至少 8 位')}
       ${field('再输一遍', 'rg-pw2', 'password', '确认密码')}
