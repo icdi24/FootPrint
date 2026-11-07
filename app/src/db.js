@@ -312,6 +312,17 @@ CREATE TABLE IF NOT EXISTS pair_events (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_pair_events_pair ON pair_events(pair_id);
+
+-- 搭子私聊消息：同组两人互相发文字（read_at NULL = 未读）
+CREATE TABLE IF NOT EXISTS pair_messages (
+  id SERIAL PRIMARY KEY,
+  pair_id INTEGER NOT NULL REFERENCES pairs(id),
+  sender_id INTEGER NOT NULL REFERENCES users(id),
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  read_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pair_messages_pair ON pair_messages(pair_id, id);
 `;
 
 // 打开连接池并建表（异步）。

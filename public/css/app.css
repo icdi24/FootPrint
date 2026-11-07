@@ -299,6 +299,14 @@ img { max-width: 100%; }
 .tab-item.active { color: #FFFDF6; }
 .tab-item.active .tab-ico { transform: translateY(-1px); }
 .tab-label { font-weight: 400; }
+.tab-ico { position: relative; }
+.tab-badge {
+  position: absolute; top: -4px; right: -6px;
+  min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px;
+  background: #E5484D; color: #FFFDF6; border: 1px solid #FFFDF6;
+  font-size: 10px; font-style: normal; font-weight: 700; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
 .tab-slider {
   position: absolute; top: 6px; left: 0; width: 20%; height: calc(var(--tab-h) - 12px);
   background: var(--green);

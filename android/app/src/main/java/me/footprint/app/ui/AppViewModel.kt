@@ -10,9 +10,12 @@ import kotlinx.coroutines.launch
 import me.footprint.app.net.Api
 import me.footprint.app.net.ApiException
 import me.footprint.app.net.AppUsage
+import me.footprint.app.net.ChatMessage
+import me.footprint.app.net.ChatWebSocket
 import me.footprint.app.net.HomeResponse
 import me.footprint.app.net.PartnerResponse
 import me.footprint.app.net.Session
+import me.footprint.app.net.UserDto
 import me.footprint.app.usage.UsageAccess
 import me.footprint.app.usage.UsageCollector
 import me.footprint.app.usage.UsageReporter
@@ -87,6 +90,131 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _toast.value = null
     }
 
+    // ---------------- 搭子私聊 ----------------
+
+    private val _chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
+    val chatMessages: StateFlow<List<ChatMessage>> = _chatMessages.asStateFlow()
+
+    private val _chatUnread = MutableStateFlow(0)
+    val chatUnread: StateFlow<Int> = _chatUnread.asStateFlow()
+
+    private val _chatPartner = MutableStateFlow<UserDto?>(null)
+    val chatPartner: StateFlow<UserDto?> = _chatPartner.asStateFlow()
+
+    /** 聊天数据是否已加载过（ChatScreen 据此区分「加载中」与「真的没消息」） */
+    private val _chatLoaded = MutableStateFlow(false)
+    val chatLoaded: StateFlow<Boolean> = _chatLoaded.asStateFlow()
+
+    private var chatWs: ChatWebSocket? = null
+
+    private fun connectChatWs() {
+        val token = Session.token(getApplication()) ?: return
+        chatWs?.disconnect()
+        chatWs = ChatWebSocket(
+            onMessage = { m, unread ->
+                val list = _chatMessages.value
+                if (list.none { it.id == m.id }) {
+                    _chatMessages.value = list + m
+                }
+                // 未读数只在「发给搭档」的推送里带；同步自己其它端不带，不动红点
+                if (unread != null) {
+                    if (chatOpen) {
+                        // 聊天页正开着，直接标记已读，不亮红点
+                        val t = Session.token(getApplication())
+                        if (t != null) {
+                            viewModelScope.launch {
+                                try { Api.markChatRead(t, m.id) } catch (_: Exception) {}
+                            }
+                        }
+                    } else {
+                        _chatUnread.value = unread
+                    }
+                }
+            },
+            onAuthFailed = {
+                Session.clear(getApplication())
+                _loggedIn.value = false
+                _chatUnread.value = 0
+            },
+        )
+        chatWs?.connect(token)
+    }
+
+    private fun disconnectChatWs() {
+        chatWs?.disconnect()
+        chatWs = null
+    }
+
+    /** 拉取聊天历史 + 未读数（打开 ChatScreen 时 / 登录后调用） */
+    fun loadChat() {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                val r = Api.getChat(token)
+                _chatPartner.value = r.partner
+                _chatMessages.value = r.messages
+                _chatUnread.value = r.unread
+                _chatLoaded.value = true
+            } catch (e: Exception) {
+                // 失败不打断已有数据，静默
+            }
+        }
+    }
+
+    /** 发消息；成功回调 null，失败回调错误文案 */
+    fun sendChatMessage(content: String, onDone: (String?) -> Unit) {
+        val token = Session.token(getApplication()) ?: return
+        val text = content.trim()
+        if (text.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                val m = Api.sendChatMessage(token, text)
+                val list = _chatMessages.value
+                if (list.none { it.id == m.id }) {
+                    _chatMessages.value = list + m
+                }
+                onDone(null)
+            } catch (e: Exception) {
+                onDone(e.message ?: "发送失败")
+            }
+        }
+    }
+
+    /** 标记搭档发来的消息已读（打开 ChatScreen 后把红点清掉） */
+    fun markChatRead(upToId: Long?) {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                Api.markChatRead(token, upToId)
+            } catch (e: Exception) {
+                // 静默
+            } finally {
+                _chatUnread.value = 0
+            }
+        }
+    }
+
+    /** 本地直接清未读红点（无需等网络） */
+    fun clearChatUnread() {
+        _chatUnread.value = 0
+    }
+
+    /** 聊天页是否处于打开状态（打开时收到推送直接已读、不亮红点） */
+    private var chatOpen = false
+
+    fun setChatOpen(open: Boolean) {
+        chatOpen = open
+        if (open) _chatUnread.value = 0
+    }
+
+    init {
+        // 冷启动时若已登录（上次会话留存），也要把 WS 连上并拉一次未读
+        if (_loggedIn.value) {
+            connectChatWs()
+            loadChat()
+        }
+    }
+
     // ---------------- 登录动作 ----------------
 
     fun onNicknameChange(v: String) {
@@ -110,6 +238,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 _loggedIn.value = true
                 _login.value = _login.value.copy(busy = false, error = null)
                 refreshAll()
+                connectChatWs()
+                loadChat()
             } catch (e: Exception) {
                 _login.value = _login.value.copy(
                     busy = false,
@@ -121,12 +251,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun logout() {
         Session.clear(getApplication())
+        disconnectChatWs()
         _loggedIn.value = false
         _myName.value = ""
         _mine.value = null
         _partner.value = null
         _syncNote.value = null
         _login.value = LoginState()
+        _chatMessages.value = emptyList()
+        _chatUnread.value = 0
+        _chatPartner.value = null
+        _chatLoaded.value = false
     }
 
     // ---------------- 刷新 / 上报 ----------------

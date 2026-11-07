@@ -1,6 +1,6 @@
 // 应用壳：启动、认证门、Tab 路由、滑动指示条。
 const App = (() => {
-  const state = { me: null, partner: null, tab: 'home', refresh: {}, pointsCfg: null };
+  const state = { me: null, partner: null, tab: 'home', refresh: {}, pointsCfg: null, chatUnread: 0 };
 
   // 客户端积分预览（与服务端同公式，用于弹层即时反馈）
   window.__DEFAULT_CFG = {
@@ -47,7 +47,7 @@ const App = (() => {
     if (!bar) return;
     bar.innerHTML = `<div class="tab-slider"></div>` + TABS.map((t) => `
       <button class="tab-item ${state.tab === t.key ? 'active' : ''}" data-key="${t.key}">
-        <span class="tab-ico">${window.icon(t.icon)}</span>
+        <span class="tab-ico">${window.icon(t.icon)}${t.key === 'partner' && state.chatUnread ? `<i class="tab-badge">${Math.min(state.chatUnread, 99)}</i>` : ''}</span>
         <span class="tab-label">${t.label}</span>
       </button>`).join('');
     bar.className = `tabbar sel-${TABS.findIndex((t) => t.key === state.tab)}`;
@@ -77,11 +77,13 @@ const App = (() => {
     document.getElementById('app-shell').classList.remove('hidden');
     renderTabbar();
     showTab('home');
+    if (typeof Chat !== 'undefined') Chat.connect();
   }
 
   function showAuth() {
     document.getElementById('app-shell').classList.add('hidden');
     document.getElementById('auth-screen').classList.remove('hidden');
+    if (typeof Chat !== 'undefined') Chat.disconnect();
     if (typeof AuthPage !== 'undefined') AuthPage.render(document.getElementById('auth-screen'));
   }
 
@@ -99,7 +101,7 @@ const App = (() => {
     }
   }
 
-  return { state, pages, register, showTab, showShell, showAuth, boot };
+  return { state, pages, register, showTab, showShell, showAuth, boot, setChatUnread(n) { state.chatUnread = n; renderTabbar(); } };
 })();
 
 document.addEventListener('DOMContentLoaded', () => App.boot());

@@ -94,6 +94,7 @@ fun PartnerScreen(vm: AppViewModel, onOpenUsageSettings: () -> Unit) {
   val state = remember { PartnerState() }
   val home by vm.home.collectAsStateWithLifecycle()
   val myAvatar = home?.me?.avatar.orEmpty()
+  var chatOpen by remember { mutableStateOf(false) }
 
   // 拉数据：成功后写进 state；失败写 error
   fun load() {
@@ -174,7 +175,7 @@ fun PartnerScreen(vm: AppViewModel, onOpenUsageSettings: () -> Unit) {
       }
 
       // 1. 顶部对方卡片
-      PartnerHeaderCard(page)
+      PartnerHeaderCard(page, onOpenChat = { chatOpen = true })
       Spacer(Modifier.height(16.dp))
 
       // 2. 并排对比
@@ -282,13 +283,18 @@ fun PartnerScreen(vm: AppViewModel, onOpenUsageSettings: () -> Unit) {
       state.toast = null
     }
   }
+
+  // 搭子私聊弹层
+  if (chatOpen) {
+    ChatScreen(vm = vm, onClose = { chatOpen = false })
+  }
 }
 
 // ---------------- 子卡片 ----------------
 
-/** 顶部对方卡片：昵称 + 头像 + 连续天数 + 本月得分 + 今日打卡进度 */
+/** 顶部对方卡片：昵称 + 头像 + 连续天数 + 本月得分 + 今日打卡进度 + 发消息入口 */
 @Composable
-private fun PartnerHeaderCard(page: PartnerPageResponse) {
+private fun PartnerHeaderCard(page: PartnerPageResponse, onOpenChat: () -> Unit) {
   val p = page.partner
   val stats = page.partnerStats
   val today = page.today
@@ -341,6 +347,12 @@ private fun PartnerHeaderCard(page: PartnerPageResponse) {
           modifier = Modifier.fillMaxWidth(),
           color = PixelColors.Green,
         )
+        Spacer(Modifier.height(12.dp))
+      }
+
+      // 发消息入口（只有有搭档时这个卡片才会渲染，天然只在有搭档时出现）
+      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        PixelSmallButton(text = "💬 发消息", filled = false, onClick = onOpenChat)
       }
     }
   }

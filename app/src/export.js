@@ -28,6 +28,7 @@ const TABLES = [
   'ai_calls',
   'user_settings',
   'pair_invites',
+  'pair_messages',
 ];
 
 // 不是每张表都有 id 列（goal_milestones 是联合主键，settings/pair_invites 主键是 key/code），

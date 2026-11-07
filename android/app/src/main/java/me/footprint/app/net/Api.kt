@@ -477,6 +477,37 @@ object Api {
     suspend fun createBackup(token: String) {
         send("POST", "api/backups", "{}", token)
     }
+
+    // ---------------- 搭子私聊 ----------------
+
+    /** GET /api/chat —— 搭档 + 未读数 + 最近 40 条消息（升序） */
+    suspend fun getChat(token: String): ChatResponse {
+        val text = send("GET", "api/chat", null, token)
+        return json.decodeFromString(ChatResponse.serializer(), text)
+    }
+
+    /** GET /api/chat/messages?before=<id>&limit=40 —— 更早历史（升序） */
+    suspend fun getChatMessages(token: String, before: Long, limit: Int = 40): List<ChatMessage> {
+        val text = send("GET", "api/chat/messages?before=$before&limit=$limit", null, token)
+        return json.decodeFromString(ChatMessagesResponse.serializer(), text).messages
+    }
+
+    /** POST /api/chat/messages {content} —— 发消息，返回写入的那条 */
+    suspend fun sendChatMessage(token: String, content: String): ChatMessage {
+        val body = json.encodeToString(SendChatRequest.serializer(), SendChatRequest(content))
+        val text = send("POST", "api/chat/messages", body, token)
+        return json.decodeFromString(SendChatResponse.serializer(), text).message
+    }
+
+    /** POST /api/chat/read {upToId?} —— 标记搭档发来的消息已读 */
+    suspend fun markChatRead(token: String, upToId: Long?) {
+        val body = json.encodeToString(MarkChatReadRequest.serializer(), MarkChatReadRequest(upToId))
+        send("POST", "api/chat/read", body, token)
+    }
+
+    /** 复用同一 OkHttp 配置建 WebSocket（供 ChatWebSocket 用） */
+    fun newWebSocket(request: Request, listener: okhttp3.WebSocketListener) =
+        client.newWebSocket(request, listener)
 }
 
 // ---------------- 打卡 / 积分相关数据类 ----------------
@@ -904,6 +935,36 @@ data class BackupsResponse(val backups: List<BackupEntry> = emptyList())
 
 @Serializable
 data class SubmitRequest(val self_statement: String)
+
+// ---------------- 搭子私聊 ----------------
+
+@Serializable
+data class ChatMessage(
+    val id: Long = 0,
+    val senderId: Long = 0,
+    val content: String = "",
+    val createdAt: String = "",
+    val readAt: String? = null,
+)
+
+@Serializable
+data class ChatResponse(
+    val partner: UserDto? = null,
+    val unread: Int = 0,
+    val messages: List<ChatMessage> = emptyList(),
+)
+
+@Serializable
+data class ChatMessagesResponse(val messages: List<ChatMessage> = emptyList())
+
+@Serializable
+data class SendChatRequest(val content: String)
+
+@Serializable
+data class SendChatResponse(val message: ChatMessage)
+
+@Serializable
+data class MarkChatReadRequest(val upToId: Long? = null)
 
 // ---------------- 大目标与计划链（P1-#8） ----------------
 

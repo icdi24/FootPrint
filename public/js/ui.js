@@ -42,19 +42,20 @@ const UI = (() => {
       }
       requestAnimationFrame(() => wrap.classList.add('show'));
 
+      let closed = false;
       function close(result) {
+        if (closed) return;
+        closed = true;
         wrap.classList.remove('show');
-        setTimeout(() => wrap.remove(), 320);
+        setTimeout(() => {
+          wrap.remove();
+          // 关闭时回调（用于丢弃草稿等）；此前靠 transitionend 监听，
+          // 但 .sheet-wrap 自身无 transition，e.target 恒为子元素，回调从不触发。
+          if (opts.onClose) opts.onClose();
+        }, 320);
         resolve(result);
       }
       wrap.querySelector('.sheet-backdrop').addEventListener('click', () => close(null));
-      if (opts.onClose) {
-        // 关闭时回调（用于丢弃草稿）
-        const orig = opts.onClose;
-        wrap.addEventListener('transitionend', (e) => {
-          if (e.target === wrap && !wrap.classList.contains('show')) orig();
-        });
-      }
       wrap.querySelectorAll('.sheet-action').forEach((btn) => {
         btn.addEventListener('click', () => {
           const a = opts.actions[Number(btn.dataset.idx)];

@@ -66,6 +66,7 @@ const PartnerPage = {
           <div class="pc-today-num">${today.checked}<span>/${today.expected}</span></div>
           <div class="pc-today-label">今日打卡</div>
         </div>
+        <button class="btn ghost" id="partner-chat">💬 发消息</button>
       </section>
 
       <section class="sec">
@@ -207,6 +208,8 @@ const PartnerPage = {
         UI.sheet({ title: `${UI.esc(partner.nickname)} 分享的日报 · ${UI.fmtDate(d.diary_date)}`, body, actions: [{ label: '关闭', onClick: (close) => close() }] });
       });
     });
+
+    root.querySelector('#partner-chat')?.addEventListener('click', () => ChatSheet.open());
   },
 
   // 待审核详情（P5-#21）：描述、验收标准、自述、证据、第几次提交、历史驳回理由
