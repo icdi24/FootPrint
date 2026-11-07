@@ -1,4 +1,4 @@
-// 认证页：首次初始化（两人账号向导）+ 登录。
+// 认证页：登录（登录名）+ 凭邀请码注册。
 const AuthPage = (() => {
   const AVATARS = ['🐱', '🐻', '🐰', '🦊', '🐶', '🐼', '🐨', '🦁'];
 
@@ -17,18 +17,6 @@ const AuthPage = (() => {
       </div>`;
   }
 
-  function bindAvatar(id) {
-    const wrap = document.getElementById(id);
-    if (!wrap) return AVATARS[0];
-    wrap.addEventListener('click', (e) => {
-      const b = e.target.closest('button');
-      if (!b) return;
-      wrap.querySelectorAll('button').forEach((x) => x.classList.remove('on'));
-      b.classList.add('on');
-    });
-    return AVATARS[0];
-  }
-
   function render(root, opts = {}) {
     root.innerHTML = `
       <div class="auth-wrap">
@@ -40,24 +28,25 @@ const AuthPage = (() => {
         <div class="auth-card" id="auth-card"></div>
       </div>`;
     const card = root.querySelector('#auth-card');
-    if (opts.setup) renderSetup(card);
+    if (opts.register) renderRegister(card);
     else renderLogin(card);
   }
 
   function renderLogin(card) {
     card.innerHTML = `
       <h2 class="auth-title">登录</h2>
-      ${field('昵称', 'login-nick', 'text', '你的昵称')}
-      ${field('口令', 'login-pw', 'password', '至少 6 位')}
+      ${field('登录名', 'login-name', 'text', '你的登录名')}
+      ${field('口令', 'login-pw', 'password', '口令')}
       <button class="btn primary block" id="login-btn">进入脚印</button>
+      <button class="link-btn" id="to-register">有邀请码？加入脚印</button>
       <p class="auth-hint" id="auth-err"></p>`;
     const err = card.querySelector('#auth-err');
     const doLogin = async () => {
-      const nickname = card.querySelector('#login-nick').value.trim();
+      const loginName = card.querySelector('#login-name').value.trim();
       const password = card.querySelector('#login-pw').value;
-      if (!nickname || !password) { err.textContent = '填上昵称和口令'; return; }
+      if (!loginName || !password) { err.textContent = '填上登录名和口令'; return; }
       try {
-        const data = await api.post('/api/login', { nickname, password });
+        const data = await api.post('/api/login', { loginName, password });
         App.state.me = data.user;
         UI.toast(`欢迎回来，${data.user.nickname} 🐾`, 'ok');
         App.showShell();
@@ -67,71 +56,52 @@ const AuthPage = (() => {
     };
     card.querySelector('#login-btn').addEventListener('click', doLogin);
     card.querySelector('#login-pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+    card.querySelector('#to-register').addEventListener('click', () => renderRegister(card));
   }
 
-  function renderSetup(card) {
-    let step = 0;
-    const steps = ['我的账号', '对方账号'];
-    let me = { avatar: AVATARS[0] };
-    let partner = { avatar: AVATARS[1] };
-
-    function draw() {
-      card.innerHTML = `
-        <div class="setup-steps">
-          ${steps.map((s, i) => `<span class="dot ${i === step ? 'on' : i < step ? 'done' : ''}"></span>`).join('')}
-        </div>
-        <h2 class="auth-title">${step === 0 ? '先创建你的账号' : '再创建对方的账号'}</h2>
-        <div class="setup-person">${step === 0 ? '👤 我' : '🤝 对方'}</div>
-        ${avatarRow('av-row')}
-        ${field('昵称', 'su-nick', 'text', step === 0 ? '你的昵称' : '对方的昵称')}
-        ${field('口令', 'su-pw', 'password', '至少 6 位，以后登录用')}
-        ${field('再输一遍', 'su-pw2', 'password', '确认口令')}
-        <button class="btn primary block" id="su-btn">${step === 0 ? '下一步' : '完成，开始使用'}</button>
-        ${step === 1 ? '<button class="link-btn" id="su-back">返回上一步</button>' : ''}
-        <p class="auth-hint" id="su-err"></p>`;
-      const cur = step === 0 ? me : partner;
-      const avWrap = card.querySelector('#av-row');
-      const first = step === 0 ? AVATARS[0] : AVATARS[1];
-      avWrap.innerHTML = AVATARS.map((a) => `<button type="button" data-a="${a}" class="${a === cur.avatar ? 'on' : ''}">${a}</button>`).join('');
-      avWrap.addEventListener('click', (e) => {
-        const b = e.target.closest('button');
-        if (!b) return;
-        avWrap.querySelectorAll('button').forEach((x) => x.classList.remove('on'));
-        b.classList.add('on');
-        cur.avatar = b.dataset.a;
-      });
-      void first;
-      const err = card.querySelector('#su-err');
-      const next = async () => {
-        const nick = card.querySelector('#su-nick').value.trim();
-        const pw = card.querySelector('#su-pw').value;
-        const pw2 = card.querySelector('#su-pw2').value;
-        if (!nick) { err.textContent = '填一下昵称'; return; }
-        if (nick.length > 30) { err.textContent = '昵称别超过 30 字'; return; }
-        if (pw.length < 6) { err.textContent = '口令至少 6 位'; return; }
-        if (pw !== pw2) { err.textContent = '两次口令不一样'; return; }
-        if (step === 0) {
-          me = { nickname: nick, password: pw, avatar: cur.avatar };
-          step = 1;
-          draw();
-          return;
-        }
-        partner = { nickname: nick, password: pw, avatar: cur.avatar };
-        if (me.nickname === partner.nickname) { err.textContent = '两个人的昵称不能一样'; return; }
-        try {
-          await api.post('/api/setup', { me, partner });
-          UI.toast('两个账号建好了，用各自的昵称登录吧 🎉', 'ok');
-          renderLogin(card);
-        } catch (e) {
-          err.textContent = e.message;
-        }
-      };
-      card.querySelector('#su-btn').addEventListener('click', next);
-      card.querySelector('#su-pw2').addEventListener('keydown', (e) => { if (e.key === 'Enter') next(); });
-      const back = card.querySelector('#su-back');
-      if (back) back.addEventListener('click', () => { step = 0; draw(); });
-    }
-    draw();
+  function renderRegister(card) {
+    card.innerHTML = `
+      <h2 class="auth-title">用邀请码加入</h2>
+      <p class="auth-hint">邀请码由对方在「我的 → 我的搭档」里生成，24 小时内有效、只能用一次。</p>
+      ${field('邀请码', 'rg-code', 'text', '12 位邀请码')}
+      ${field('登录名', 'rg-name', 'text', '2–30 字，以后登录用，不可改')}
+      ${field('昵称', 'rg-nick', 'text', '对方看到的名字，可以改')}
+      ${field('口令', 'rg-pw', 'password', '至少 8 位')}
+      ${field('再输一遍', 'rg-pw2', 'password', '确认口令')}
+      ${avatarRow('av-row')}
+      <button class="btn primary block" id="rg-btn">加入</button>
+      <button class="link-btn" id="to-login">已有账号？去登录</button>
+      <p class="auth-hint" id="rg-err"></p>`;
+    const err = card.querySelector('#rg-err');
+    let avatar = AVATARS[0];
+    const wrap = card.querySelector('#av-row');
+    wrap.addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      wrap.querySelectorAll('button').forEach((x) => x.classList.remove('on'));
+      b.classList.add('on');
+      avatar = b.dataset.a;
+    });
+    const submit = async () => {
+      const code = card.querySelector('#rg-code').value.trim();
+      const loginName = card.querySelector('#rg-name').value.trim();
+      const nickname = card.querySelector('#rg-nick').value.trim();
+      const password = card.querySelector('#rg-pw').value;
+      const pw2 = card.querySelector('#rg-pw2').value;
+      if (!code || !loginName || !nickname) { err.textContent = '把邀请码、登录名、昵称填齐'; return; }
+      if (password !== pw2) { err.textContent = '两次口令不一样'; return; }
+      try {
+        const data = await api.post('/api/register', { code, loginName, nickname, password, avatar });
+        App.state.me = data.user;
+        UI.toast(`欢迎加入，${data.user.nickname} 🐾`, 'ok');
+        App.showShell();
+      } catch (e) {
+        err.textContent = e.message;
+      }
+    };
+    card.querySelector('#rg-btn').addEventListener('click', submit);
+    card.querySelector('#rg-pw2').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+    card.querySelector('#to-login').addEventListener('click', () => renderLogin(card));
   }
 
   return { render };

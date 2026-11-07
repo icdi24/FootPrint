@@ -1,5 +1,6 @@
-// 路由中间件：会话认证 + 越权校验（本人或搭档）。
+// 路由中间件：会话认证 + 越权校验（同组成员）。关系判定统一收口到 pair.js
 const { userByToken, parseCookies, COOKIE_NAME } = require('./auth');
+const { currentPairId, pairOf, canAccess } = require('./pair');
 
 function makeMiddleware(db) {
   async function attachUser(req, res, next) {
@@ -18,18 +19,17 @@ function makeMiddleware(db) {
     next();
   }
 
+  // 同 pair_id 的另一个成员；无组返回 null（老 partner_id / count==2 回退已废弃）
   async function partnerOf(userId) {
-    const row = await db.get('SELECT * FROM users WHERE id != ? ORDER BY id LIMIT 1', [userId]);
-    return row || null;
+    return pairOf(db, userId);
   }
 
-  // 目标：本人（可写）或搭档（只读）
+  // 目标：本人（可写）或同组成员（只读）
   async function loadGoal(req, res, next) {
     try {
       const goal = await db.get('SELECT * FROM goals WHERE id = ?', [Number(req.params.id) || 0]);
       if (!goal) return res.status(404).json({ error: '目标不存在' });
-      const partner = await partnerOf(req.user.id);
-      if (goal.owner_id !== req.user.id && (!partner || goal.owner_id !== partner.id)) {
+      if (!(await canAccess(db, req.user.id, goal.owner_id))) {
         return res.status(403).json({ error: '无权访问' });
       }
       req.goal = goal;
@@ -47,7 +47,11 @@ function makeMiddleware(db) {
     });
   }
 
-  return { attachUser, requireUser, partnerOf, loadGoal, requireGoalOwner };
+  return {
+    attachUser, requireUser, partnerOf, loadGoal, requireGoalOwner,
+    canAccess: (meId, targetId) => canAccess(db, meId, targetId),
+    currentPairId: (userId) => currentPairId(db, userId),
+  };
 }
 
 module.exports = { makeMiddleware };

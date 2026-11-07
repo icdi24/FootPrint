@@ -3,6 +3,9 @@ const AdmZip = require('adm-zip');
 
 const TABLES = [
   'users',
+  'pairs',
+  'pair_members',
+  'pair_events',
   'goals',
   'check_ins',
   'point_ledger',

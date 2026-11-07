@@ -1,13 +1,10 @@
-// 认证与会话：bcrypt 口令、30 天 Token Cookie、登录失败 5 次锁 10 分钟。
+// 认证与会话：bcrypt 口令、30 天 Token Cookie、登录失败 5 次锁 15 分钟（落库，重启不清空）
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 
 const SESSION_DAYS = 30;
 const MAX_FAILS = 5;
-const LOCK_MS = 10 * 60 * 1000;
-
-// 登录限流（单进程内存即可；重启清空锁）
-const failMap = new Map(); // nickname -> { fails, lockedUntil }
+const LOCK_MS = 15 * 60 * 1000;
 
 function hashPassword(pw) {
   return bcrypt.hashSync(pw, 10);
@@ -17,35 +14,35 @@ function verifyPassword(pw, hash) {
   return bcrypt.compareSync(pw, hash);
 }
 
-function checkLoginLocked(nickname) {
-  const rec = failMap.get(nickname);
-  if (!rec) return false;
-  if (rec.lockedUntil && rec.lockedUntil > Date.now()) return true;
-  if (rec.lockedUntil && rec.lockedUntil <= Date.now()) {
-    failMap.delete(nickname);
-    return false;
+async function lockRemainingMs(db, loginName, ip) {
+  const r = await db.get('SELECT locked_until FROM login_attempts WHERE login_name = ? AND ip = ?', [loginName, ip]);
+  if (!r || !r.locked_until) return 0;
+  const ms = new Date(r.locked_until).getTime() - Date.now();
+  return ms > 0 ? ms : 0;
+}
+
+async function checkLoginLocked(db, loginName, ip) {
+  return (await lockRemainingMs(db, loginName, ip)) > 0;
+}
+
+async function recordLoginFail(db, loginName, ip) {
+  const now = new Date().toISOString();
+  const r = await db.get('SELECT fails FROM login_attempts WHERE login_name = ? AND ip = ?', [loginName, ip]);
+  let fails = r ? Number(r.fails) + 1 : 1;
+  let lockedUntil = null;
+  if (fails >= MAX_FAILS) {
+    lockedUntil = new Date(Date.now() + LOCK_MS).toISOString();
+    fails = 0;
   }
-  return false;
+  await db.run(
+    `INSERT INTO login_attempts (login_name, ip, fails, locked_until, updated_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (login_name, ip) DO UPDATE SET fails = EXCLUDED.fails, locked_until = EXCLUDED.locked_until, updated_at = EXCLUDED.updated_at`,
+    [loginName, ip, fails, lockedUntil, now]
+  );
 }
 
-function recordLoginFail(nickname) {
-  const rec = failMap.get(nickname) || { fails: 0, lockedUntil: 0 };
-  rec.fails += 1;
-  if (rec.fails >= MAX_FAILS) {
-    rec.lockedUntil = Date.now() + LOCK_MS;
-    rec.fails = 0;
-  }
-  failMap.set(nickname, rec);
-}
-
-function recordLoginOk(nickname) {
-  failMap.delete(nickname);
-}
-
-function lockRemainingMs(nickname) {
-  const rec = failMap.get(nickname);
-  if (rec && rec.lockedUntil > Date.now()) return rec.lockedUntil - Date.now();
-  return 0;
+async function recordLoginOk(db, loginName, ip) {
+  await db.run('DELETE FROM login_attempts WHERE login_name = ? AND ip = ?', [loginName, ip]);
 }
 
 async function createSession(db, userId) {

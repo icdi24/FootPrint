@@ -1,5 +1,5 @@
 // 从导出的 JSON 恢复：node scripts/restore.js <导出文件 data.json>
-// 恢复前会自动做一次当前库快照。
+// 安全闸：当前库非空时拒绝（会整表替换账号与业务数据）；确需覆盖请设 FORCE_RESTORE=1
 const fs = require('fs');
 const path = require('path');
 const { openDb } = require('../src/db');
@@ -24,9 +24,15 @@ const DATABASE_URL = process.env.DATABASE_URL || 'postgres://postgres:footprint_
   const db = await openDb(DATABASE_URL);
   logMod.init(path.join(DATA_DIR, 'logs'));
   try {
+    const cnt = await db.get('SELECT COUNT(*) AS c FROM users');
+    if (Number(cnt.c) > 0 && process.env.FORCE_RESTORE !== '1') {
+      console.error(`当前库已有 ${cnt.c} 个账号，拒绝恢复（恢复会整表替换所有账号与业务数据）。`);
+      console.error('确需覆盖请先备份，然后设 FORCE_RESTORE=1 重试。');
+      process.exit(1);
+    }
     await restoreFromJson(db, json, DATA_DIR);
     logMod.log('restore', `从 ${file} 恢复数据`);
-    console.log('恢复完成。当前会话与积分系数设置保持不变，业务数据已替换。');
+    console.log('恢复完成。业务数据已替换。');
     process.exit(0);
   } catch (e) {
     console.error('恢复失败：' + e.message);

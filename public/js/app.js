@@ -87,17 +87,6 @@ const App = (() => {
 
   async function boot() {
     try {
-      const boot = await api.get('/api/bootstrap');
-      if (!boot.initialized) {
-        if (typeof AuthPage !== 'undefined') AuthPage.render(document.getElementById('auth-screen'), { setup: true });
-        document.getElementById('auth-screen').classList.remove('hidden');
-        return;
-      }
-    } catch (e) {
-      // 服务没起来也先显示登录页，避免整屏空白
-      showAuth();
-    }
-    try {
       const me = await api.get('/api/me');
       state.me = me.user;
       try {

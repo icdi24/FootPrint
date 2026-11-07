@@ -12,6 +12,30 @@ const PartnerPage = {
 
   async draw(root) {
     const data = await api.get('/api/partner');
+    if (!data.partner) {
+      root.innerHTML = `
+        <header class="page-head">
+          <div><div class="hello">我们</div><div class="date-line">还没有搭档</div></div>
+        </header>
+        <section class="sec">
+          <div class="empty big">
+            <div class="empty-emoji">🤝</div>
+            <div>生成邀请码，请对方加入后就能互相看见。</div>
+            <button class="btn primary" id="partner-invite">生成邀请码</button>
+          </div>
+        </section>`;
+      root.querySelector('#partner-invite').addEventListener('click', async () => {
+        try {
+          const d = await api.post('/api/pair/invite', {});
+          UI.sheet({
+            title: '邀请码已生成',
+            body: `<p>把这串码发给对方，24 小时内有效、只能用一次：</p><p><code class="invite-code">${UI.esc(d.code)}</code></p>`,
+            actions: [{ label: '知道了', onClick: (close) => close() }],
+          });
+        } catch (e) { UI.toast(e.message); }
+      });
+      return;
+    }
     const { partner, partnerStats, myStats, partnerGoals, partnerToday, today, pendingVerifications } = data;
 
     // 手机时长单独拉：失败只让卡片降级，不拖垮整页

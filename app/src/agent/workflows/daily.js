@@ -95,6 +95,8 @@ async function runDaily({ db, userId, date }) {
 // 到点给每个用户跑一份；服务重启后当天补跑（runDaily 幂等，已有就跳过）。P2 挂到 index.js。
 function scheduleDaily(db, listUsers) {
   let firedDate = '';
+  let countDate = '';
+  let dayCount = 0;
   const tick = async () => {
     try {
       const now = new Date(Date.now() + 8 * 3600 * 1000);
@@ -103,9 +105,21 @@ function scheduleDaily(db, listUsers) {
       const today = now.toISOString().slice(0, 10);
       if (h === 23 && m >= 30 && m < 40 && firedDate !== today) {
         firedDate = today;
+        if (countDate !== today) { countDate = today; dayCount = 0; }
+        const limit = Number(process.env.AI_DAILY_LIMIT || 50);
         const users = await listUsers();
         for (const u of users) {
           try {
+            const st = await db.get('SELECT daily_enabled FROM user_settings WHERE user_id = ?', [u.id]);
+            if (!st || !Number(st.daily_enabled)) continue; // 默认关，用户自行开启
+            if (dayCount >= limit) {
+              await ai.recordCall(db, {
+                userId: u.id, workflow: 'daily', action: 'daily_limit', status: 'skip',
+                detail: JSON.stringify({ limit, date: today }),
+              });
+              break;
+            }
+            dayCount += 1;
             await runDaily({ db, userId: u.id, date: today });
           } catch (e) {
             await ai.recordCall(db, {

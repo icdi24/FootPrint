@@ -262,6 +262,56 @@ CREATE TABLE IF NOT EXISTS user_settings (
   report_changes INTEGER NOT NULL DEFAULT 1,
   updated_at TEXT NOT NULL
 );
+
+-- ===== 多人化：关系 / 邀请码 / 登录限流 =====
+-- 组：严格 2 人，永久保留只标 status（历史记录的 pair_id 不能悬空）
+CREATE TABLE IF NOT EXISTS pairs (
+  id SERIAL PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  dissolved_at TEXT
+);
+CREATE TABLE IF NOT EXISTS pair_members (
+  pair_id INTEGER NOT NULL REFERENCES pairs(id),
+  user_id INTEGER NOT NULL UNIQUE REFERENCES users(id),
+  joined_at TEXT NOT NULL,
+  PRIMARY KEY (pair_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_pair_members_pair ON pair_members(pair_id);
+
+-- 邀请码：一次性、24h、发码人可撤销
+CREATE TABLE IF NOT EXISTS pair_invites (
+  code TEXT PRIMARY KEY,
+  pair_id INTEGER NOT NULL REFERENCES pairs(id),
+  created_by INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_by INTEGER REFERENCES users(id),
+  used_at TEXT,
+  revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pair_invites_pair ON pair_invites(pair_id);
+
+-- 登录失败计数：落库，进程重启不再清空
+CREATE TABLE IF NOT EXISTS login_attempts (
+  login_name TEXT NOT NULL,
+  ip TEXT NOT NULL,
+  fails INTEGER NOT NULL DEFAULT 0,
+  locked_until TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (login_name, ip)
+);
+
+-- 绑定审计：组内双方可见
+CREATE TABLE IF NOT EXISTS pair_events (
+  id SERIAL PRIMARY KEY,
+  pair_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  action TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pair_events_pair ON pair_events(pair_id);
 `;
 
 // 打开连接池并建表（异步）。
@@ -279,6 +329,46 @@ async function openDb(connString) {
   await pool.query("ALTER TABLE goals ADD COLUMN IF NOT EXISTS plan_status TEXT");
   // 迁移：画像块分享标记（P3：默认仅自己，主动分享后对方可见）
   await pool.query('ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS shared INTEGER NOT NULL DEFAULT 0');
+  // partner_id 仅保留作回滚兼容，新代码一律读 pair_members
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS partner_id INTEGER');
+  // 迁移：多人化 —— 登录名 + 各业务表记录产生时所属组（可见性快照）
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS login_name TEXT');
+  // 迁移：AI 日报按用户开关，默认关（多人后避免按人数线性烧额度）
+  await pool.query('ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS daily_enabled INTEGER NOT NULL DEFAULT 0');
+  // 迁移：管理员标记（后台入口用，默认 0）
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER NOT NULL DEFAULT 0');
+  const pairTables = [
+    'goals', 'check_ins', 'point_ledger', 'goal_milestones', 'verifications',
+    'wish_items', 'wish_history', 'redemptions', 'uploads', 'usage_daily',
+    'big_goals', 'user_profiles', 'profile_versions', 'plan_versions',
+    'diaries', 'zoowy_sessions', 'zoowy_messages', 'ai_calls', 'user_settings',
+  ];
+  for (const t of pairTables) {
+    await pool.query(`ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS pair_id INTEGER`);
+  }
+  // 所有业务记录 INSERT 时自动打上「产生时所属组」快照，避免漏改写入点
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION fp_set_pair_id() RETURNS trigger AS $$
+    DECLARE j jsonb; uid integer; pid integer;
+    BEGIN
+      IF NEW.pair_id IS NOT NULL THEN RETURN NEW; END IF;
+      j := to_jsonb(NEW);
+      uid := COALESCE((j->>'user_id')::integer, (j->>'owner_id')::integer,
+                      (j->>'submitter_id')::integer, (j->>'changed_by')::integer);
+      IF uid IS NOT NULL THEN
+        SELECT pm.pair_id INTO pid FROM pair_members pm WHERE pm.user_id = uid;
+      ELSIF (j ? 'goal_id') THEN
+        SELECT g.pair_id INTO pid FROM goals g WHERE g.id = (j->>'goal_id')::integer;
+      END IF;
+      IF pid IS NOT NULL THEN NEW.pair_id := pid; END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+  `);
+  for (const t of pairTables) {
+    await pool.query(`DROP TRIGGER IF EXISTS trg_${t}_pair ON ${t}`);
+    await pool.query(`CREATE TRIGGER trg_${t}_pair BEFORE INSERT ON ${t} FOR EACH ROW EXECUTE FUNCTION fp_set_pair_id()`);
+  }
   return makeDb(pool);
 }
 

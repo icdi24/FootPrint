@@ -1,4 +1,4 @@
-// 认证路由：初始化 2 账号、登录、登出、我、改口令。
+// 认证路由：注册（凭邀请码）、登录、登出、我、改口令、AI 设置、画像。
 const express = require('express');
 const {
   hashPassword,
@@ -12,12 +12,18 @@ const {
   destroyAllSessions,
   COOKIE_NAME,
 } = require('../auth');
-const { ensureSettings } = require('../points');
+const { tx } = require('../db');
+const { currentPairId } = require('../pair');
 const { nowIso } = require('../tz');
 const log = require('../log');
 
-const PW_MIN = 6;
+const PW_MIN = 8;
 const NICK_MAX = 30;
+const WEAK = new Set([
+  '12345678', '123456789', '1234567890', '11111111', '00000000', '87654321',
+  'password', 'password1', 'qwertyui', 'abc12345', 'iloveyou', 'admin123',
+  'footprint', 'footprint123', 'letmein', 'welcome1',
+]);
 
 module.exports = function authRoutes(db) {
   const r = express.Router();
@@ -33,66 +39,114 @@ module.exports = function authRoutes(db) {
     });
   }
 
+  function clientIp(req) {
+    const xf = req.headers['x-forwarded-for'];
+    if (xf) return String(xf).split(',')[0].trim();
+    return req.ip || (req.socket && req.socket.remoteAddress) || 'unknown';
+  }
+
+  // 只对新注册 / 主动改密生效，老账号不强制
+  function validPassword(pw, loginName, nickname) {
+    if (typeof pw !== 'string' || pw.length < PW_MIN) return false;
+    const low = pw.toLowerCase();
+    if (WEAK.has(low)) return false;
+    if (low === String(loginName || '').toLowerCase() || low === String(nickname || '').toLowerCase()) return false;
+    if (/^(\d)\1+$/.test(pw)) return false;
+    return true;
+  }
+
   r.get('/bootstrap', async (req, res, next) => {
     try {
       const row = await db.get('SELECT COUNT(*) AS c FROM users');
-      res.json({ initialized: Number(row.c) > 0 });
+      res.json({ initialized: Number(row.c) > 0, signup: 'invite' });
     } catch (e) { next(e); }
   });
 
-  r.post('/setup', async (req, res, next) => {
+  // 初始化向导已停用：首个组由部署者用 create-seed-invite.js 发种子码
+  r.post('/setup', (req, res) => {
+    res.status(410).json({ error: '初始化向导已停用，请联系管理员获取邀请码' });
+  });
+
+  // 凭一次性邀请码注册，注册即入组
+  r.post('/register', async (req, res, next) => {
     try {
-      const row = await db.get('SELECT COUNT(*) AS c FROM users');
-      if (Number(row.c) > 0) return res.status(403).json({ error: '已初始化，不能重复创建账号' });
-      const me = req.body && req.body.me;
-      const partner = req.body && req.body.partner;
-      if (!me || !partner) return res.status(400).json({ error: '需要填写两个人的信息' });
-      for (const [name, u] of [['我的', me], ['对方', partner]]) {
-        if (!u || typeof u.nickname !== 'string' || !u.nickname.trim()) {
-          return res.status(400).json({ error: `${name}昵称不能为空` });
-        }
-        if (u.nickname.trim().length > NICK_MAX) {
-          return res.status(400).json({ error: `${name}昵称不能超过 ${NICK_MAX} 字` });
-        }
-        if (typeof u.password !== 'string' || u.password.length < PW_MIN) {
-          return res.status(400).json({ error: `${name}口令至少 ${PW_MIN} 位` });
-        }
+      const b = req.body || {};
+      const code = String(b.code || '').trim();
+      const loginName = String(b.loginName || '').trim();
+      const nickname = String(b.nickname || '').trim();
+      const password = typeof b.password === 'string' ? b.password : '';
+      const avatar = b.avatar || '🐱';
+
+      if (!code) return res.status(400).json({ error: '请填邀请码' });
+      if (loginName.length < 2 || loginName.length > 30) return res.status(400).json({ error: '登录名 2–30 字' });
+      if (!nickname || nickname.length > NICK_MAX) return res.status(400).json({ error: `昵称 1–${NICK_MAX} 字` });
+      if (!validPassword(password, loginName, nickname)) {
+        return res.status(400).json({ error: `口令至少 ${PW_MIN} 位，且不能是常见弱口令` });
       }
-      if (me.nickname.trim() === partner.nickname.trim()) {
-        return res.status(400).json({ error: '两个人的昵称不能一样' });
+
+      const invite = await db.get('SELECT * FROM pair_invites WHERE code = ?', [code]);
+      if (!invite) return res.status(400).json({ error: '邀请码不对' });
+      if (invite.revoked_at) return res.status(400).json({ error: '邀请码已撤销' });
+      if (invite.used_by) return res.status(400).json({ error: '邀请码已被使用' });
+      if (new Date(invite.expires_at).getTime() < Date.now()) return res.status(400).json({ error: '邀请码已过期' });
+      const pair = await db.get('SELECT * FROM pairs WHERE id = ?', [invite.pair_id]);
+      if (!pair || pair.status !== 'active') return res.status(400).json({ error: '邀请码对应的组已失效' });
+      const members = await db.all('SELECT user_id FROM pair_members WHERE pair_id = ?', [invite.pair_id]);
+      if (members.length >= 2) return res.status(400).json({ error: '这个组已经满员了' });
+      if (!members.some((m) => Number(m.user_id) === Number(invite.created_by))) {
+        return res.status(400).json({ error: '发码人已不在该组，邀请码无效' });
       }
-      await db.run('INSERT INTO users (nickname, password_hash, avatar, created_at) VALUES (?, ?, ?, ?)',
-        [me.nickname.trim(), hashPassword(me.password), me.avatar || '🐱', nowIso()]);
-      await db.run('INSERT INTO users (nickname, password_hash, avatar, created_at) VALUES (?, ?, ?, ?)',
-        [partner.nickname.trim(), hashPassword(partner.password), partner.avatar || '🐻', nowIso()]);
-      await ensureSettings(db);
-      log.log('setup', `初始化完成：${me.nickname.trim()} / ${partner.nickname.trim()}`);
-      res.json({ ok: true });
+      if (await db.get('SELECT id FROM users WHERE login_name = ?', [loginName])) {
+        return res.status(400).json({ error: '这个登录名已经有人用了' });
+      }
+      const nickClash = await db.get(
+        'SELECT u.id FROM users u JOIN pair_members pm ON pm.user_id = u.id WHERE pm.pair_id = ? AND u.nickname = ?',
+        [invite.pair_id, nickname]
+      );
+      if (nickClash) return res.status(400).json({ error: '组里已经有人用这个昵称了' });
+
+      let newUser;
+      await tx(db, async (c) => {
+        const info = await c.run(
+          'INSERT INTO users (login_name, nickname, password_hash, avatar, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id',
+          [loginName, nickname, hashPassword(password), avatar, nowIso()]
+        );
+        const uid = Number(info.id);
+        await c.run('INSERT INTO pair_members (pair_id, user_id, joined_at) VALUES (?, ?, ?)',
+          [invite.pair_id, uid, nowIso()]);
+        await c.run('UPDATE pair_invites SET used_by = ?, used_at = ? WHERE code = ?', [uid, nowIso(), code]);
+        newUser = { id: uid, loginName, nickname, avatar };
+      });
+      const s = await createSession(db, newUser.id);
+      setCookie(res, s.token, s.expiresAt);
+      log.log('register', `${loginName} 加入组 ${invite.pair_id}`);
+      res.json({ user: newUser });
     } catch (e) { next(e); }
   });
 
   r.post('/login', async (req, res, next) => {
     try {
-      const { nickname, password } = req.body || {};
-      if (typeof nickname !== 'string' || !nickname.trim() || typeof password !== 'string') {
-        return res.status(400).json({ error: '请填写昵称和口令' });
-      }
-      const name = nickname.trim();
-      if (checkLoginLocked(name)) {
-        const secs = Math.ceil(lockRemainingMs(name) / 1000);
+      const b = req.body || {};
+      // 兼容旧 APK：仍接受 nickname 字段当登录名
+      const loginName = String(b.loginName || b.nickname || '').trim();
+      const password = typeof b.password === 'string' ? b.password : '';
+      if (!loginName || !password) return res.status(400).json({ error: '请填登录名和口令' });
+      const ip = clientIp(req);
+      if (await checkLoginLocked(db, loginName, ip)) {
+        const secs = Math.ceil((await lockRemainingMs(db, loginName, ip)) / 1000);
         return res.status(429).json({ error: `失败次数过多，请 ${secs} 秒后再试` });
       }
-      const user = await db.get('SELECT * FROM users WHERE nickname = ?', [name]);
+      const user = await db.get('SELECT * FROM users WHERE login_name = ?', [loginName]);
       if (!user || !verifyPassword(password, user.password_hash)) {
-        recordLoginFail(name);
-        log.log('login_fail', name);
-        return res.status(401).json({ error: '昵称或口令不对' });
+        await recordLoginFail(db, loginName, ip);
+        log.log('login_fail', loginName);
+        return res.status(401).json({ error: '登录名或口令不对' });
       }
-      recordLoginOk(name);
+      await recordLoginOk(db, loginName, ip);
       const s = await createSession(db, user.id);
       setCookie(res, s.token, s.expiresAt);
       log.log('login', `${user.nickname} (${user.id})`);
-      res.json({ user: { id: user.id, nickname: user.nickname, avatar: user.avatar } });
+      res.json({ user: { id: user.id, loginName: user.login_name, nickname: user.nickname, avatar: user.avatar } });
     } catch (e) { next(e); }
   });
 
@@ -114,10 +168,10 @@ module.exports = function authRoutes(db) {
   });
 
   r.get('/me', requireUser, (req, res) => {
-    res.json({ user: { id: req.user.id, nickname: req.user.nickname, avatar: req.user.avatar } });
+    res.json({ user: { id: req.user.id, loginName: req.user.login_name, nickname: req.user.nickname, avatar: req.user.avatar } });
   });
 
-  // 改昵称：1–30 字、不能和对方（或任何现有用户）重名。会话保持有效。
+  // 改昵称：只要求组内不重名（nickname 已无全局唯一约束），会话保持有效
   r.patch('/me', requireUser, async (req, res, next) => {
     try {
       const nickname = req.body && req.body.nickname;
@@ -128,14 +182,18 @@ module.exports = function authRoutes(db) {
       if (name.length > NICK_MAX) {
         return res.status(400).json({ error: `昵称不能超过 ${NICK_MAX} 字` });
       }
-      const clash = await db.get('SELECT id FROM users WHERE nickname = ? AND id <> ?', [name, req.user.id]);
-      if (clash) {
-        return res.status(400).json({ error: '这个昵称已经有人用了' });
-      }
+      const pid = await currentPairId(db, req.user.id);
+      const clash = pid
+        ? await db.get(
+          'SELECT u.id FROM users u JOIN pair_members pm ON pm.user_id = u.id WHERE pm.pair_id = ? AND u.nickname = ? AND u.id <> ?',
+          [pid, name, req.user.id]
+        )
+        : null;
+      if (clash) return res.status(400).json({ error: '组里已经有人用这个昵称了' });
       const oldName = req.user.nickname;
       await db.run('UPDATE users SET nickname = ? WHERE id = ?', [name, req.user.id]);
       log.log('nickname_change', `${oldName} -> ${name}`);
-      res.json({ user: { id: req.user.id, nickname: name, avatar: req.user.avatar } });
+      res.json({ user: { id: req.user.id, loginName: req.user.login_name, nickname: name, avatar: req.user.avatar } });
     } catch (e) { next(e); }
   });
 
@@ -145,8 +203,8 @@ module.exports = function authRoutes(db) {
       if (!verifyPassword(String(oldPassword || ''), req.user.password_hash)) {
         return res.status(401).json({ error: '原口令不对' });
       }
-      if (typeof newPassword !== 'string' || newPassword.length < PW_MIN) {
-        return res.status(400).json({ error: `新口令至少 ${PW_MIN} 位` });
+      if (!validPassword(newPassword, req.user.login_name, req.user.nickname)) {
+        return res.status(400).json({ error: `新口令至少 ${PW_MIN} 位，且不能是常见弱口令` });
       }
       await db.run('UPDATE users SET password_hash = ? WHERE id = ?', [hashPassword(newPassword), req.user.id]);
       await destroyAllSessions(db, req.user.id);
@@ -162,6 +220,7 @@ module.exports = function authRoutes(db) {
     return {
       skipConfirm: row ? Boolean(row.skip_confirm) : false,
       reportChanges: row ? Boolean(row.report_changes) : true,
+      dailyEnabled: row ? Boolean(row.daily_enabled) : false,
     };
   }
 
@@ -177,13 +236,14 @@ module.exports = function authRoutes(db) {
       const cur = await getUserSettings(req.user.id);
       const skipConfirm = b.skipConfirm !== undefined ? Boolean(b.skipConfirm) : cur.skipConfirm;
       const reportChanges = b.reportChanges !== undefined ? Boolean(b.reportChanges) : cur.reportChanges;
+      const dailyEnabled = b.dailyEnabled !== undefined ? Boolean(b.dailyEnabled) : cur.dailyEnabled;
       await db.run(
-        `INSERT INTO user_settings (user_id, skip_confirm, report_changes, updated_at) VALUES (?, ?, ?, ?)
-         ON CONFLICT (user_id) DO UPDATE SET skip_confirm = EXCLUDED.skip_confirm, report_changes = EXCLUDED.report_changes, updated_at = EXCLUDED.updated_at`,
-        [req.user.id, skipConfirm ? 1 : 0, reportChanges ? 1 : 0, new Date().toISOString()]
+        `INSERT INTO user_settings (user_id, skip_confirm, report_changes, daily_enabled, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (user_id) DO UPDATE SET skip_confirm = EXCLUDED.skip_confirm, report_changes = EXCLUDED.report_changes, daily_enabled = EXCLUDED.daily_enabled, updated_at = EXCLUDED.updated_at`,
+        [req.user.id, skipConfirm ? 1 : 0, reportChanges ? 1 : 0, dailyEnabled ? 1 : 0, new Date().toISOString()]
       );
-      log.log('user_settings', `${req.user.nickname} skipConfirm=${skipConfirm} reportChanges=${reportChanges}`);
-      res.json({ skipConfirm, reportChanges });
+      log.log('user_settings', `${req.user.nickname} skipConfirm=${skipConfirm} reportChanges=${reportChanges} dailyEnabled=${dailyEnabled}`);
+      res.json({ skipConfirm, reportChanges, dailyEnabled });
     } catch (e) { next(e); }
   });
 
@@ -205,7 +265,6 @@ module.exports = function authRoutes(db) {
       if (!/^[a-z][a-z0-9_]{0,31}$/.test(block)) return res.status(400).json({ error: '块名不合法' });
       const content = String((req.body && req.body.content) || '').trim();
       if (content.length > 4000) return res.status(400).json({ error: '单块最多 4000 字' });
-      // apply 前存快照
       const current = await db.all(
         'SELECT block, content, source, status FROM user_profiles WHERE user_id = ? ORDER BY block', [req.user.id]
       );

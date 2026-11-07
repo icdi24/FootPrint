@@ -21,3 +21,6 @@ android/.kotlin/
 *.keystore
 *.jks
 public/app-debug.apk
+
+# 过程工作区：数据导出 / 备份 / 演练产物（含口令哈希，不进 Git）
+migration/

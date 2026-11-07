@@ -61,6 +61,8 @@ async function main() {
   app.use('/api', bigGoalsRoutes(db));
   app.use('/api', diariesRoutes(db));
   app.use('/api', zoowyRoutes(db));
+  app.use('/api', require('./routes/pair')(db));
+  app.use('/api', require('./routes/admin')(db));
 
   // AI 日报定时（P2-#12）：每晚 23:30 两人各一份；幂等，服务重启当天会补跑
   scheduleDaily(db, async () => db.all('SELECT id FROM users'));

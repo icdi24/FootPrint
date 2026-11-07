@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>脚印 · 管理后台</title>
+<style>
+  :root { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; color: #23211f; background: #f6f3ee; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: #8a8378; font-size: 13px; margin-bottom: 20px; }
+  .card { background: #fff; border: 1px solid #e8e2d8; border-radius: 14px; padding: 18px; margin-bottom: 16px; }
+  h2 { font-size: 15px; margin: 0 0 12px; }
+  input, button { font: inherit; }
+  input { width: 100%; padding: 9px 11px; border: 1px solid #ddd5c8; border-radius: 8px; margin-bottom: 8px; background: #fffdf9; }
+  button { padding: 8px 16px; border: 1px solid #d8cfc0; border-radius: 8px; background: #fff; cursor: pointer; }
+  button.primary { background: #3c6e58; color: #fff; border-color: #3c6e58; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row input { flex: 1; min-width: 150px; margin-bottom: 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .stat { background: #faf7f1; border-radius: 10px; padding: 12px; }
+  .stat b { display: block; font-size: 22px; }
+  .stat span { color: #8a8378; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #f0ebe2; }
+  th { color: #8a8378; font-weight: 500; }
+  code { background: #f3eee5; padding: 2px 6px; border-radius: 4px; }
+  .msg { font-size: 13px; margin-top: 10px; min-height: 18px; }
+  .err { color: #b4432f; }
+  .ok { color: #2f6b4c; }
+  .muted { color: #8a8378; font-size: 12px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <h1>🐾 脚印 · 管理后台</h1>
+  <div class="sub">用户与组管理 · 重置口令 · 种子邀请码 · 审计</div>
+
+  <div id="login" class="card">
+    <h2>用管理员账号登录</h2>
+    <input id="lg-name" placeholder="登录名" autocomplete="off">
+    <input id="lg-pw" type="password" placeholder="口令">
+    <button class="primary" id="lg-btn">登录</button>
+    <div class="msg" id="lg-msg"></div>
+  </div>
+
+  <div id="panel" hidden>
+    <div class="card">
+      <h2>总览</h2>
+      <div class="grid" id="ov"></div>
+      <div class="msg" id="ov-msg"></div>
+    </div>
+    <div class="card">
+      <h2>用户</h2>
+      <div id="users"></div>
+      <div class="msg" id="users-msg"></div>
+    </div>
+    <div class="card">
+      <h2>重置口令</h2>
+      <div class="row">
+        <input id="rp-name" placeholder="登录名">
+        <input id="rp-pw" placeholder="新口令（至少 8 位）">
+        <button id="rp-btn">重置</button>
+      </div>
+      <div class="muted">用户没有自助找回通道，这是唯一入口。重置后该用户所有会话失效。</div>
+      <div class="msg" id="rp-msg"></div>
+    </div>
+    <div class="card">
+      <h2>生成种子邀请码</h2>
+      <div class="row">
+        <input id="si-name" placeholder="登录名（无组时自动建组）">
+        <button id="si-btn">生成</button>
+      </div>
+      <div class="msg" id="si-msg"></div>
+    </div>
+    <div class="card">
+      <h2>最近绑定审计</h2>
+      <div id="events"></div>
+      <div class="msg" id="ev-msg"></div>
+    </div>
+    <button id="refresh">刷新</button>
+  </div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+async function api(path, method, body) {
+  const r = await fetch(path, {
+    method: method || 'GET', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+  return d;
+}
+function msg(id, text, kind) {
+  const el = $(id); el.textContent = text || ''; el.className = 'msg ' + (kind || '');
+}
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+
+$('#lg-btn').addEventListener('click', async () => {
+  try {
+    await api('/api/login', 'POST', { loginName: $('#lg-name').value.trim(), password: $('#lg-pw').value });
+    await api('/api/admin/overview'); // 校验管理员权限
+    $('#login').hidden = true; $('#panel').hidden = false;
+    await refresh();
+  } catch (e) { msg('#lg-msg', e.message, 'err'); }
+});
+
+async function refresh() {
+  try {
+    const o = await api('/api/admin/overview');
+    $('#ov').innerHTML = [
+      ['用户数', o.users], ['活跃组', o.activePairs], ['有效邀请码', o.liveInvites],
+      ['未入组用户', o.soloUsers], ['今日 AI 调用', o.aiCallsToday], ['每日上限', o.dailyLimit],
+    ].map(([k, v]) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`).join('');
+    msg('#ov-msg', '', '');
+    const u = await api('/api/admin/users');
+    $('#users').innerHTML = `<table><thead><tr><th>ID</th><th>登录名</th><th>昵称</th><th>组</th><th>管理员</th><th>注册时间</th></tr></thead><tbody>` +
+      u.users.map((x) => `<tr><td>${x.id}</td><td><code>${esc(x.login_name)}</code></td><td>${esc(x.nickname)}</td><td>${x.pair_id || '—'}</td><td>${x.is_admin ? '是' : '—'}</td><td class="muted">${esc(String(x.created_at).slice(0, 10))}</td></tr>`).join('') +
+      `</tbody></table>`;
+    const e = await api('/api/admin/events');
+    $('#events').innerHTML = e.events.length
+      ? `<table><thead><tr><th>时间</th><th>组</th><th>操作人</th><th>动作</th><th>详情</th></tr></thead><tbody>` +
+        e.events.map((x) => `<tr><td class="muted">${esc(String(x.created_at).slice(0, 16).replace('T', ' '))}</td><td>${x.pair_id}</td><td>${esc(x.nickname)}</td><td>${esc(x.action)}</td><td>${esc(x.detail)}</td></tr>`).join('') + `</tbody></table>`
+      : '<div class="muted">暂无记录</div>';
+  } catch (e) { msg('#ov-msg', e.message, 'err'); }
+}
+$('#refresh').addEventListener('click', refresh);
+
+$('#rp-btn').addEventListener('click', async () => {
+  try {
+    const d = await api('/api/admin/reset-password', 'POST', { loginName: $('#rp-name').value.trim(), newPassword: $('#rp-pw').value });
+    msg('#rp-msg', '已重置 ' + d.nickname + ' 的口令', 'ok');
+  } catch (e) { msg('#rp-msg', e.message, 'err'); }
+});
+$('#si-btn').addEventListener('click', async () => {
+  try {
+    const d = await api('/api/admin/seed-invite', 'POST', { loginName: $('#si-name').value.trim() });
+    $('#si-msg').innerHTML = '邀请码：<code>' + esc(d.code) + '</code> · 24h 有效 · 组 ' + d.pairId;
+    $('#si-msg').className = 'msg ok';
+  } catch (e) { msg('#si-msg', e.message, 'err'); }
+});
+</script>
+</body>
+</html>

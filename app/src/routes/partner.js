@@ -11,7 +11,10 @@ module.exports = function partnerRoutes(db) {
   r.get('/partner', mw.requireUser, async (req, res, next) => {
     try {
       const partner = await mw.partnerOf(req.user.id);
-      if (!partner) return res.status(404).json({ error: '还没有搭档' });
+      if (!partner) {
+        return res.json({ partner: null, empty: true, myStats: await statsFor(db, req.user.id) });
+      }
+      const myPairId = await mw.currentPairId(req.user.id);
       const cfg = await getPoints(db);
       const today = todayStr();
 
@@ -75,12 +78,12 @@ module.exports = function partnerRoutes(db) {
       // 对方主动分享的：日报（P3-#17，摘要取全文由前端截断）+ 画像块
       const sharedDiaries = await db.all(
         `SELECT diary_date, ai_original, user_edited, updated_at FROM diaries
-         WHERE user_id = ? AND shared = 1 ORDER BY diary_date DESC LIMIT 7`,
-        [partner.id]
+         WHERE user_id = ? AND shared = 1 AND pair_id = ? ORDER BY diary_date DESC LIMIT 7`,
+        [partner.id, myPairId]
       );
       const sharedProfile = await db.all(
-        "SELECT block, content, updated_at FROM user_profiles WHERE user_id = ? AND shared = 1 AND status = 'active' ORDER BY block",
-        [partner.id]
+        "SELECT block, content, updated_at FROM user_profiles WHERE user_id = ? AND shared = 1 AND status = 'active' AND pair_id = ? ORDER BY block",
+        [partner.id, myPairId]
       );
 
       res.json({

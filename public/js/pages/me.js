@@ -84,7 +84,12 @@ const MePage = {
         <button class="logout-all-btn" id="logout-all">登出全部设备</button>
       </section>
 
-      <p class="about-line">脚印 V0.1 · 只属于你们两个人</p>
+      <section class="sec" id="pair-sec">
+        <div class="sec-head"><h2>我的搭档</h2><span class="sec-count">邀请 · 绑定 · 解绑</span></div>
+        <div id="pair-card"><div class="ld-loading">加载中…</div></div>
+      </section>
+
+      <p class="about-line">脚印 · 两个人互相看得见</p>
     `;
 
     root.querySelector('#change-nick').addEventListener('click', () => this.changeNickname(root));
@@ -108,7 +113,75 @@ const MePage = {
       try { await api.post('/api/me/logout-all'); } catch (e) { /* 忽略 */ }
       App.showAuth();
     });
+    this.loadPairCard(root);
     this.loadLedger(root);
+  },
+
+  // ---- 我的搭档：邀请码 / 解绑 / 组内动态 ----
+  async loadPairCard(root) {
+    const box = root.querySelector('#pair-card');
+    if (!box) return;
+    let st;
+    try {
+      st = await api.get('/api/pair/status');
+    } catch (e) {
+      box.innerHTML = `<div class="ld-loading">${UI.esc(e.message)}</div>`;
+      return;
+    }
+    let invites = [];
+    if (st.canInvite) {
+      try { invites = (await api.get('/api/pair/invites')).invites || []; } catch (e) { /* 忽略 */ }
+    }
+    const partnerHtml = st.partner ? `
+      <div class="pair-row">
+        <span class="ps-avatar">${UI.esc(st.partner.avatar)}</span>
+        <span class="pair-name">${UI.esc(st.partner.nickname)}</span>
+        <span class="pair-tag">已绑定 · 互相监督中</span>
+      </div>` : '<div class="ld-loading">还没有搭档，生成邀请码请对方加入。</div>';
+    const inviteHtml = st.canInvite ? `
+      <button class="btn primary" id="pair-gen">生成邀请码</button>
+      ${invites.length ? `<div class="invite-list">${invites.map((v) => `
+        <div class="invite-row"><code>${UI.esc(v.code)}</code>
+          <span class="menu-note">${UI.esc(String(v.expires_at).slice(0, 16).replace('T', ' '))} 前有效</span>
+          <button class="ghost-btn" data-revoke="${UI.esc(v.code)}">撤销</button>
+        </div>`).join('')}</div>` : ''}` : '';
+    const eventsHtml = st.events && st.events.length ? `
+      <div class="menu-list">${st.events.map((e) => `
+        <div class="menu-row"><span>${UI.esc(e.nickname)} · ${UI.esc(e.detail)}</span>
+          <span class="menu-note">${UI.esc(String(e.createdAt).slice(0, 16).replace('T', ' '))}</span></div>`).join('')}</div>` : '';
+    box.innerHTML = `<div class="pair-card">${partnerHtml}${inviteHtml}
+      ${st.paired ? '<button class="logout-btn" id="pair-unbind">解除绑定</button>' : ''}
+      ${eventsHtml}</div>`;
+
+    const gen = box.querySelector('#pair-gen');
+    if (gen) gen.addEventListener('click', async () => {
+      try {
+        const d = await api.post('/api/pair/invite', {});
+        UI.sheet({
+          title: '邀请码已生成',
+          body: `<p>把这串码发给对方，24 小时内有效、只能用一次：</p><p><code class="invite-code">${UI.esc(d.code)}</code></p>`,
+          actions: [{ label: '知道了', onClick: (close) => close() }],
+        });
+        this.loadPairCard(root);
+      } catch (e) { UI.toast(e.message); }
+    });
+    box.querySelectorAll('[data-revoke]').forEach((btn) => btn.addEventListener('click', async () => {
+      try {
+        await api.post(`/api/pair/invite/${btn.dataset.revoke}/revoke`, {});
+        UI.toast('已撤销', 'ok');
+        this.loadPairCard(root);
+      } catch (e) { UI.toast(e.message); }
+    }));
+    const unbind = box.querySelector('#pair-unbind');
+    if (unbind) unbind.addEventListener('click', async () => {
+      const yes = await UI.confirm('解除绑定后，对方立刻看不到你的数据；未完成的验收和未确认的兑换会作废。确定吗？', { okLabel: '解除绑定' });
+      if (!yes) return;
+      try {
+        const d = await api.post('/api/pair/unbind', {});
+        UI.toast(`已解除绑定（作废验收 ${d.cancelledVerifications} 条、退分 ${d.refunded} 笔）`, 'ok');
+        MePage.render(root);
+      } catch (e) { UI.toast(e.message); }
+    });
   },
 
   // ---- AI 日报（P2-#14）：今日日报卡 + 未读红点（localStorage 记已读日）----
@@ -309,6 +382,7 @@ const MePage = {
     body.innerHTML = `
       ${toggle('skipConfirm', '免确认', '开 = AI 改画像 / 改计划不再弹确认直接改（候选计划仍要你勾选，免的是弹窗不是决策）', cur.skipConfirm)}
       ${toggle('reportChanges', '改完汇报', '开 = AI 每次改完告诉你改了什么；关 = 静默改。不管开不开，改动都留痕，随时能翻', cur.reportChanges)}
+      ${toggle('dailyEnabled', 'AI 日报', '开 = 每晚 23:30 给你生成一份日报（会调用 AI）；默认关，不开就不烧额度', cur.dailyEnabled)}
       <div class="gf-hint">每人一份，两边互不影响。白名单不受开关影响：AI 永远碰不到验收、积分和对方的数据。</div>
     `;
     body.querySelectorAll('.at-switch').forEach((btn) => {
@@ -327,8 +401,9 @@ const MePage = {
           async onClick(close) {
             const skipConfirm = body.querySelector('[data-key="skipConfirm"]').classList.contains('on');
             const reportChanges = body.querySelector('[data-key="reportChanges"]').classList.contains('on');
+            const dailyEnabled = body.querySelector('[data-key="dailyEnabled"]').classList.contains('on');
             try {
-              await api.put('/api/me/settings', { skipConfirm, reportChanges });
+              await api.put('/api/me/settings', { skipConfirm, reportChanges, dailyEnabled });
               UI.toast('已保存', 'ok');
               close();
             } catch (e) { UI.toast(e.message, 'err'); }
