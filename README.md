@@ -101,4 +101,4 @@ public/             前端（原生 JS + CSS，无构建步骤，服务端同源
 Dockerfile / docker-compose.yml
 ```
 
-演示账号（`cd app && node scripts/seed-demo.js` 生成，正式部署请勿使用）：栗子 / lizi123，阿白 / abai123。
+演示账号由 `cd app && node scripts/seed-demo.js` 在本地空库生成（口令见脚本，仅限本地演示）。云端账号口令一律由管理员后台下发并定期轮换，不要沿用演示口令。
