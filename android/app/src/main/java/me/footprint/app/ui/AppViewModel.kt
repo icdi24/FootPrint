@@ -29,7 +29,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ---------------- 登录 ----------------
 
     data class LoginState(
-        val nickname: String = "",
+        val username: String = "",
         val busy: Boolean = false,
         val error: String? = null,
     )
@@ -42,7 +42,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _loggedIn = MutableStateFlow(Session.isLoggedIn(app))
     val loggedIn: StateFlow<Boolean> = _loggedIn.asStateFlow()
 
-    private val _myName = MutableStateFlow(Session.nickname(app).orEmpty())
+    private val _myName = MutableStateFlow(Session.username(app).orEmpty())
     val myName: StateFlow<String> = _myName.asStateFlow()
 
     /** 使用情况访问权限：每次回到前台都要重新查（用户可能刚从系统设置回来） */
@@ -89,14 +89,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------- 登录动作 ----------------
 
-    fun onNicknameChange(v: String) {
-        _login.value = _login.value.copy(nickname = v, error = null)
+    fun onUsernameChange(v: String) {
+        _login.value = _login.value.copy(username = v, error = null)
     }
 
-    fun login(nickname: String, password: String) {
-        val name = nickname.trim()
+    fun login(username: String, password: String) {
+        val name = username.trim()
         if (name.isEmpty() || password.isEmpty()) {
-            _login.value = _login.value.copy(error = "昵称和口令都要填")
+            _login.value = _login.value.copy(error = "用户名和密码都要填")
             return
         }
         _login.value = _login.value.copy(busy = true, error = null)
@@ -104,9 +104,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val resp = Api.login(name, password) { token ->
                     Session.saveToken(getApplication(), token)
-                    Session.saveNickname(getApplication(), name)
+                    Session.saveUsername(getApplication(), name)
                 }
-                _myName.value = resp.user?.nickname ?: name
+                _myName.value = resp.user?.username ?: name
                 _loggedIn.value = true
                 _login.value = _login.value.copy(busy = false, error = null)
                 refreshAll()

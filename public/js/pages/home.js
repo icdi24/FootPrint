@@ -22,7 +22,7 @@ const HomePage = {
     root.innerHTML = `
       <header class="page-head home-head">
         <div>
-          <div class="hello">${UI.greeting()}，${UI.esc(me.nickname)} <span class="hello-avatar">${UI.esc(me.avatar)}</span></div>
+          <div class="hello">${UI.greeting()}，${UI.esc(me.username)} <span class="hello-avatar">${UI.esc(me.avatar)}</span></div>
           <div class="date-line">${dateStr}</div>
         </div>
       </header>
@@ -95,7 +95,7 @@ const HomePage = {
       <section class="sec partner-strip" id="partner-strip">
         <span class="ps-avatar">${UI.esc(partner.avatar)}</span>
         <div class="ps-text">
-          <b>${UI.esc(partner.nickname)}</b>
+          <b>${UI.esc(partner.username)}</b>
           ${partnerTodayText(data.partnerToday)}
         </div>
         <button class="ghost-btn" id="to-partner">去看看</button>

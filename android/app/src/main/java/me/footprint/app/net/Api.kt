@@ -18,13 +18,13 @@ import java.util.concurrent.TimeUnit
 // ---------------- 请求 / 响应数据类 ----------------
 
 @Serializable
-data class LoginRequest(val nickname: String, val password: String)
+data class LoginRequest(val username: String, val password: String)
 
 @Serializable
 data class LoginResponse(val user: UserDto? = null)
 
 @Serializable
-data class UserDto(val id: Long, val nickname: String, val avatar: String? = null)
+data class UserDto(val id: Long, val username: String, val avatar: String? = null)
 
 @Serializable
 data class AppUsage(
@@ -176,11 +176,11 @@ object Api {
      * 成功后 token 同时进内存 CookieJar 和 SharedPreferences，调用方拿到的就是 token。
      */
     suspend fun login(
-        nickname: String,
+        username: String,
         password: String,
         onToken: (String) -> Unit,
     ): LoginResponse {
-        val body = json.encodeToString(LoginRequest.serializer(), LoginRequest(nickname.trim(), password))
+        val body = json.encodeToString(LoginRequest.serializer(), LoginRequest(username.trim(), password))
         // 从响应头的 Set-Cookie 里直接取 token（后端 Cookie 名是 fp_token）
         var fromHeader: String? = null
         val text = send("POST", "api/login", body) { cookies ->
@@ -472,7 +472,7 @@ object Api {
         return json.decodeFromString(StatsResponse.serializer(), text)
     }
 
-    /** POST /api/me/password —— 改口令 */
+    /** POST /api/me/password —— 改密码 */
     suspend fun changePassword(token: String, oldPassword: String, newPassword: String) {
         send(
             "POST",
@@ -681,7 +681,7 @@ data class PendingVerification(
     val goal_emoji: String = "🏁",
     val total_points: Int = 0,
     val accept_criteria: String? = null,
-    val submitter_nickname: String = "",
+    val submitter_username: String = "",
 )
 
 @Serializable

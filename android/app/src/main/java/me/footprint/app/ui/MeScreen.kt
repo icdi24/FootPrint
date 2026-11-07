@@ -50,7 +50,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * 「我的」页：个人信息 + 统计卡片 + 积分流水 + 改口令 + 积分系数 + 备份 + 登出。
+ * 「我的」页：个人信息 + 统计卡片 + 积分流水 + 改密码 + 积分系数 + 备份 + 登出。
  *
  * 只用基础组件（Box / Row / Column / PixelTextField），直角、2px 描边、硬投影，
  * 颜色和字号只用 PixelColors / PixelType。
@@ -104,7 +104,7 @@ fun MeScreen(vm: AppViewModel) {
   var partnerName by remember { mutableStateOf<String?>(null) }
   var myAvatar by remember { mutableStateOf("") }
 
-  // 提示消息（改口令/备份/系数保存等一次性反馈）
+  // 提示消息（改密码/备份/系数保存等一次性反馈）
   var toast by remember { mutableStateOf<String?>(null) }
 
   // ---- 弹层开关 ----
@@ -113,9 +113,9 @@ fun MeScreen(vm: AppViewModel) {
   var showProfileChanges by remember { mutableStateOf(false) }
   var showAiSettings by remember { mutableStateOf(false) }
 
-  // 我的昵称（优先 vm.myName，兜底 Session.nickname）
+  // 我的用户名（优先 vm.myName，兜底 Session.username）
   val myName by vm.myName.collectAsState()
-  val nickname = myName.ifBlank { Session.nickname(context).orEmpty() }
+  val username = myName.ifBlank { Session.username(context).orEmpty() }
 
   suspend fun loadAll() {
     val token = Session.token(context)
@@ -133,9 +133,9 @@ fun MeScreen(vm: AppViewModel) {
     } catch (e: Exception) {
       error = e.message ?: "加载统计失败"
     }
-    // 搭档昵称：getStats 不带参返回的是自己，必须走 /api/partner 拿搭档
+    // 搭档用户名：getStats 不带参返回的是自己，必须走 /api/partner 拿搭档
     try {
-      partnerName = Api.getPartnerPage(token).partner?.nickname
+      partnerName = Api.getPartnerPage(token).partner?.username
     } catch (e: Exception) {
       // 没搭档/失败都不阻塞其它模块
     }
@@ -177,7 +177,7 @@ fun MeScreen(vm: AppViewModel) {
     ) {
       // ===== 顶部个人信息 =====
       ProfileHeader(
-        nickname = nickname.ifBlank { "我" },
+        username = username.ifBlank { "我" },
         partnerName = partnerName,
         avatar = myAvatar,
       )
@@ -220,7 +220,7 @@ fun MeScreen(vm: AppViewModel) {
 
       Spacer(Modifier.height(16.dp))
 
-      // ===== 改口令 / 积分系数 / AI 设置 入口 =====
+      // ===== 改密码 / 积分系数 / AI 设置 入口 =====
       SettingsActions(
         onPassword = { showPassword = true },
         onPoints = { showPoints = true },
@@ -265,7 +265,7 @@ fun MeScreen(vm: AppViewModel) {
       onDismiss = { showPassword = false },
       onSuccess = {
         showPassword = false
-        toast = "口令已修改，可能需要重新登录"
+        toast = "密码已修改，可能需要重新登录"
       },
     )
   }
@@ -337,9 +337,9 @@ fun MeScreen(vm: AppViewModel) {
 // 各区块组件
 // ---------------------------------------------------------------------------
 
-/** 顶部个人信息：昵称 + 头像框 + 搭档监督文案 */
+/** 顶部个人信息：用户名 + 头像框 + 搭档监督文案 */
 @Composable
-private fun ProfileHeader(nickname: String, partnerName: String?, avatar: String) {
+private fun ProfileHeader(username: String, partnerName: String?, avatar: String) {
   PixelPanel(Modifier.fillMaxWidth()) {
     Row(
       modifier = Modifier.padding(16.dp),
@@ -355,13 +355,13 @@ private fun ProfileHeader(nickname: String, partnerName: String?, avatar: String
         contentAlignment = Alignment.Center,
       ) {
         Text(
-          text = avatar.ifBlank { nickname.take(1).ifBlank { "我" } },
+          text = avatar.ifBlank { username.take(1).ifBlank { "我" } },
           style = PixelType.Huge,
         )
       }
       Spacer(Modifier.width(12.dp))
       Column {
-        Text(nickname, style = PixelType.Title, color = PixelColors.Ink)
+        Text(username, style = PixelType.Title, color = PixelColors.Ink)
         Spacer(Modifier.height(4.dp))
         Text(
           text = if (partnerName.isNullOrBlank()) "还没有搭档" else "和 $partnerName 互相监督中",
@@ -476,12 +476,12 @@ private fun LedgerRow(item: LedgerItem) {
   }
 }
 
-/** 改口令 / 积分系数 / AI 设置 三个入口按钮 */
+/** 改密码 / 积分系数 / AI 设置 三个入口按钮 */
 @Composable
 private fun SettingsActions(onPassword: () -> Unit, onPoints: () -> Unit, onAiSettings: () -> Unit) {
   Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
     Box(Modifier.weight(1f)) {
-      PixelButton("改口令", onClick = onPassword, modifier = Modifier.fillMaxWidth())
+      PixelButton("改密码", onClick = onPassword, modifier = Modifier.fillMaxWidth())
     }
     Box(Modifier.weight(1f)) {
       PixelButton("积分系数", onClick = onPoints, modifier = Modifier.fillMaxWidth())
@@ -554,7 +554,7 @@ private fun ToastBar(message: String, onDismiss: () -> Unit) {
 // 弹层
 // ---------------------------------------------------------------------------
 
-/** 改口令弹层 */
+/** 改密码弹层 */
 @Composable
 private fun PasswordDialog(onDismiss: () -> Unit, onSuccess: () -> Unit) {
   val context = LocalContext.current
@@ -567,12 +567,12 @@ private fun PasswordDialog(onDismiss: () -> Unit, onSuccess: () -> Unit) {
   Overlay {
     PixelPanel(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
       Column(Modifier.padding(16.dp)) {
-        Text("改口令", style = PixelType.Title, color = PixelColors.Ink)
+        Text("改密码", style = PixelType.Title, color = PixelColors.Ink)
         Spacer(Modifier.height(12.dp))
         PixelTextField(
           value = oldPwd,
           onValueChange = { oldPwd = it; err = null },
-          placeholder = "旧口令",
+          placeholder = "旧密码",
           modifier = Modifier.fillMaxWidth(),
           isPassword = true,
         )
@@ -580,7 +580,7 @@ private fun PasswordDialog(onDismiss: () -> Unit, onSuccess: () -> Unit) {
         PixelTextField(
           value = newPwd,
           onValueChange = { newPwd = it; err = null },
-          placeholder = "新口令（至少 6 位）",
+          placeholder = "新密码（至少 6 位）",
           modifier = Modifier.fillMaxWidth(),
           isPassword = true,
         )
@@ -598,11 +598,11 @@ private fun PasswordDialog(onDismiss: () -> Unit, onSuccess: () -> Unit) {
               "确定",
               onClick = {
                 if (oldPwd.isBlank() || newPwd.isBlank()) {
-                  err = "旧口令和新口令都要填"
+                  err = "旧密码和新密码都要填"
                   return@PixelButton
                 }
                 if (newPwd.length < 6) {
-                  err = "新口令至少 6 位"
+                  err = "新密码至少 6 位"
                   return@PixelButton
                 }
                 busy = true

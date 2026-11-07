@@ -20,20 +20,11 @@ const PartnerPage = {
         <section class="sec">
           <div class="empty big">
             <div class="empty-emoji">🤝</div>
-            <div>生成邀请码，请对方加入后就能互相看见。</div>
-            <button class="btn primary" id="partner-invite">生成邀请码</button>
+            <div>还没有搭档。去『我的 → 我的搭档』看自己的邀请码，或输入对方的码完成配对。</div>
+            <button class="btn primary" id="partner-go-me">去配对</button>
           </div>
         </section>`;
-      root.querySelector('#partner-invite').addEventListener('click', async () => {
-        try {
-          const d = await api.post('/api/pair/invite', {});
-          UI.sheet({
-            title: '邀请码已生成',
-            body: `<p>把这串码发给对方，24 小时内有效、只能用一次：</p><p><code class="invite-code">${UI.esc(d.code)}</code></p>`,
-            actions: [{ label: '知道了', onClick: (close) => close() }],
-          });
-        } catch (e) { UI.toast(e.message); }
-      });
+      root.querySelector('#partner-go-me').addEventListener('click', () => App.showTab('me'));
       return;
     }
     const { partner, partnerStats, myStats, partnerGoals, partnerToday, today, pendingVerifications } = data;
@@ -59,7 +50,7 @@ const PartnerPage = {
       <section class="partner-card">
         <span class="ps-avatar big">${UI.esc(partner.avatar)}</span>
         <div class="pc-main">
-          <div class="pc-name">${UI.esc(partner.nickname)}</div>
+          <div class="pc-name">${UI.esc(partner.username)}</div>
           <div class="pc-meta">${window.icon('flame')} 连续 ${partnerStats.currentStreak} 天 · 本月 +${UI.fmtNum(partnerStats.monthPoints)} 分</div>
         </div>
         <div class="pc-today">
@@ -73,7 +64,7 @@ const PartnerPage = {
         <div class="compare-card">
           ${compareCol('我', App.state.me, myStats, false)}
           <div class="cmp-divider"></div>
-          ${compareCol(UI.esc(partner.nickname), partner, partnerStats, true)}
+          ${compareCol(UI.esc(partner.username), partner, partnerStats, true)}
         </div>
       </section>
 
@@ -81,7 +72,7 @@ const PartnerPage = {
 
       ${partnerBigGoals.length ? `
       <section class="sec">
-        <div class="sec-head"><h2>${UI.esc(partner.nickname)} 的大目标</h2><span class="sec-count">路线看得见</span></div>
+        <div class="sec-head"><h2>${UI.esc(partner.username)} 的大目标</h2><span class="sec-count">路线看得见</span></div>
         <div class="pbig-list">
           ${partnerBigGoals.map((b) => `
             <div class="pbig-card">
@@ -98,7 +89,7 @@ const PartnerPage = {
 
       ${sharedDiaries.length || sharedProfile.length ? `
       <section class="sec">
-        <div class="sec-head"><h2>${UI.esc(partner.nickname)} 分享的</h2><span class="sec-count">ta 主动给你看的</span></div>
+        <div class="sec-head"><h2>${UI.esc(partner.username)} 分享的</h2><span class="sec-count">ta 主动给你看的</span></div>
         ${sharedProfile.length ? `
         <div class="pshare-profile">
           ${sharedProfile.map((p) => `
@@ -123,7 +114,7 @@ const PartnerPage = {
       </section>` : ''}
 
       <section class="sec">
-        <div class="sec-head"><h2>${UI.esc(partner.nickname)} 今天的打卡</h2></div>
+        <div class="sec-head"><h2>${UI.esc(partner.username)} 今天的打卡</h2></div>
         ${partnerToday.length ? `
         <div class="pcheck-list">
           ${partnerToday.map((c) => pcheckRow(c)).join('')}
@@ -204,7 +195,7 @@ const PartnerPage = {
         const body = document.createElement('div');
         body.className = 'diary-full';
         body.innerHTML = `<div class="df-text">${UI.esc(d.content).replace(/\n/g, '<br/>')}</div>`;
-        UI.sheet({ title: `${UI.esc(partner.nickname)} 分享的日报 · ${UI.fmtDate(d.diary_date)}`, body, actions: [{ label: '关闭', onClick: (close) => close() }] });
+        UI.sheet({ title: `${UI.esc(partner.username)} 分享的日报 · ${UI.fmtDate(d.diary_date)}`, body, actions: [{ label: '关闭', onClick: (close) => close() }] });
       });
     });
   },
@@ -223,7 +214,7 @@ const PartnerPage = {
         <span class="vfy-emoji">${UI.esc(d.goal.emoji || '🎯')}</span>
         <div>
           <div class="vfy-title">${UI.esc(d.goal.title)}</div>
-          <div class="vfy-meta">${UI.esc(d.submitter.nickname)} · 第 ${v.submitCount} 次提交 · ${UI.fmtTimeIso(v.createdAt)}</div>
+          <div class="vfy-meta">${UI.esc(d.submitter.username)} · 第 ${v.submitCount} 次提交 · ${UI.fmtTimeIso(v.createdAt)}</div>
         </div>
       </div>
       ${d.goal.description ? `<div class="vfy-block"><span class="vfy-label">描述</span><div class="vfy-text">${UI.esc(d.goal.description)}</div></div>` : ''}
@@ -284,7 +275,7 @@ const PartnerPage = {
           </svg>
           <div class="wc-legend">
             <span><i class="wc-sw me"></i>我</span>
-            <span><i class="wc-sw ta"></i>${UI.esc(partner.nickname)}</span>
+            <span><i class="wc-sw ta"></i>${UI.esc(partner.username)}</span>
             <span><i class="wc-sw gap"></i>未上报（不补 0）</span>
           </div>
         </div>
@@ -302,7 +293,7 @@ const PartnerPage = {
     }
     const mine = mineRes.status === 'fulfilled' ? mineRes.value : null;
     const pu = partnerRes.status === 'fulfilled' ? partnerRes.value : null;
-    const nick = UI.esc((pu && pu.partner && pu.partner.nickname) || partner.nickname);
+    const nick = UI.esc((pu && pu.partner && pu.partner.username) || partner.username);
 
     // 对比条：我 / ta 并排，按较大值归一，短的也留一截好认
     const mySec = mine ? mine.totalSeconds : 0;
@@ -564,7 +555,7 @@ function verifyCard(v) {
         <span class="vfy-emoji">${UI.esc(v.goal_emoji || '🎯')}</span>
         <div class="vfy-title-box">
           <div class="vfy-title">${UI.esc(v.goal_title)}</div>
-          <div class="vfy-meta">${v.submitter_nickname ? `${UI.esc(v.submitter_nickname)} · ` : ''}${UI.fmtTimeIso(v.created_at)} · 达成 +${UI.fmtNum(Number(v.total_points) || 0)} 分</div>
+          <div class="vfy-meta">${v.submitter_username ? `${UI.esc(v.submitter_username)} · ` : ''}${UI.fmtTimeIso(v.created_at)} · 达成 +${UI.fmtNum(Number(v.total_points) || 0)} 分</div>
         </div>
       </div>
       ${v.accept_criteria ? `<div class="vfy-block"><span class="vfy-label">验收标准</span><div class="vfy-text">${UI.esc(v.accept_criteria)}</div></div>` : ''}

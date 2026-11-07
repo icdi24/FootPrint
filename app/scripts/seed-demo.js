@@ -45,11 +45,11 @@ async function main() {
   const tables = ['redemptions', 'wish_history', 'wish_items', 'goal_milestones', 'point_ledger', 'check_ins', 'verifications', 'goals', 'uploads', 'sessions', 'users'];
   await db.exec(`TRUNCATE ${tables.join(', ')} RESTART IDENTITY CASCADE`);
 
-  // 两个账号
-  await db.run('INSERT INTO users (nickname, password_hash, avatar, created_at) VALUES (?, ?, ?, ?)',
-    ['栗子', bcrypt.hashSync('lizi123', 10), '🐱', now]);
-  await db.run('INSERT INTO users (nickname, password_hash, avatar, created_at) VALUES (?, ?, ?, ?)',
-    ['阿白', bcrypt.hashSync('abai123', 10), '🐻', now]);
+  // 两个账号（不变量：login_name 与 nickname 恒等）
+  await db.run('INSERT INTO users (login_name, nickname, password_hash, avatar, created_at) VALUES (?, ?, ?, ?, ?)',
+    ['栗子', '栗子', bcrypt.hashSync('lizi123', 10), '🐱', now]);
+  await db.run('INSERT INTO users (login_name, nickname, password_hash, avatar, created_at) VALUES (?, ?, ?, ?, ?)',
+    ['阿白', '阿白', bcrypt.hashSync('abai123', 10), '🐻', now]);
 
   // 系数（默认）
   await db.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value',

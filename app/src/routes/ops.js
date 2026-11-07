@@ -147,8 +147,8 @@ module.exports = function opsRoutes(db, dataDir) {
       );
 
       res.json({
-        me: { id: req.user.id, nickname: req.user.nickname, avatar: req.user.avatar },
-        partner: partner ? { id: partner.id, nickname: partner.nickname, avatar: partner.avatar } : null,
+        me: { id: req.user.id, username: req.user.nickname, avatar: req.user.avatar },
+        partner: partner ? { id: partner.id, username: partner.nickname, avatar: partner.avatar } : null,
         balance: stats.balance,
         monthPoints: stats.monthPoints,
         currentStreak: stats.currentStreak,
@@ -185,7 +185,7 @@ module.exports = function opsRoutes(db, dataDir) {
       const u = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
       // ⚠ 只返回公开字段：绝不能把 password_hash 发给前端
       res.json({
-        user: u ? { id: u.id, nickname: u.nickname, avatar: u.avatar } : null,
+        user: u ? { id: u.id, username: u.nickname, avatar: u.avatar } : null,
         stats: await statsFor(db, userId),
       });
     } catch (e) { next(e); }

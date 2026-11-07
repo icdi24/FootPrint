@@ -356,6 +356,10 @@ async function openDb(connString) {
   await pool.query('ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS daily_enabled INTEGER NOT NULL DEFAULT 0');
   // 迁移：管理员标记（后台入口用，默认 0）
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER NOT NULL DEFAULT 0');
+  // 迁移：注册与配对改造 —— 邀请码绑人不绑组，pair_id 可空；两列记录待确认请求
+  await pool.query('ALTER TABLE pair_invites ALTER COLUMN pair_id DROP NOT NULL');
+  await pool.query('ALTER TABLE pair_invites ADD COLUMN IF NOT EXISTS requested_by INTEGER REFERENCES users(id)');
+  await pool.query('ALTER TABLE pair_invites ADD COLUMN IF NOT EXISTS requested_at TEXT');
   const pairTables = [
     'goals', 'check_ins', 'point_ledger', 'goal_milestones', 'verifications',
     'wish_items', 'wish_history', 'redemptions', 'uploads', 'usage_daily',

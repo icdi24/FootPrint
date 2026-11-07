@@ -286,13 +286,13 @@ fun PartnerScreen(vm: AppViewModel, onOpenUsageSettings: () -> Unit) {
 
 // ---------------- 子卡片 ----------------
 
-/** 顶部对方卡片：昵称 + 头像 + 连续天数 + 本月得分 + 今日打卡进度 */
+/** 顶部对方卡片：用户名 + 头像 + 连续天数 + 本月得分 + 今日打卡进度 */
 @Composable
 private fun PartnerHeaderCard(page: PartnerPageResponse) {
   val p = page.partner
   val stats = page.partnerStats
   val today = page.today
-  val name = p?.nickname ?: "ta"
+  val name = p?.username ?: "ta"
   val initial = name.take(1)
 
   PixelPanel(modifier = Modifier.fillMaxWidth(), background = PixelColors.GreenSoft) {
@@ -351,7 +351,7 @@ private fun PartnerHeaderCard(page: PartnerPageResponse) {
 private fun ComparePanel(page: PartnerPageResponse, myAvatar: String) {
   val my = page.myStats
   val ta = page.partnerStats
-  val taName = page.partner?.nickname ?: "ta"
+  val taName = page.partner?.username ?: "ta"
   val taAvatar = page.partner?.avatar.orEmpty()
 
   Column {
@@ -484,7 +484,7 @@ private fun VerificationPanel(
             Text("验收标准：$criteria", style = PixelType.Small, color = PixelColors.Ink2)
           }
           Text(
-            text = "提交人：${v.submitter_nickname} · +${v.total_points ?: 0} 分",
+            text = "提交人：${v.submitter_username} · +${v.total_points ?: 0} 分",
             style = PixelType.Small,
             color = PixelColors.Ink3,
           )
@@ -682,7 +682,7 @@ private fun UsageComparePanel(
           Box(modifier = Modifier.width(2.dp).height(80.dp).dashedDividerV())
           Spacer(Modifier.width(12.dp))
           Column(modifier = Modifier.weight(1f)) {
-            Text(ta?.partner?.nickname ?: "ta", style = PixelType.Small, color = PixelColors.Ink3)
+            Text(ta?.partner?.username ?: "ta", style = PixelType.Small, color = PixelColors.Ink3)
             Spacer(Modifier.height(2.dp))
             Text(
               text = ta?.let { AppViewModel.humanDuration(it.totalSeconds) } ?: "—",
@@ -722,7 +722,7 @@ private fun UsageComparePanel(
           Box(modifier = Modifier.width(2.dp).height(200.dp).dashedDividerV())
           Spacer(Modifier.width(12.dp))
           Column(modifier = Modifier.weight(1f)) {
-            Text(ta?.partner?.nickname ?: "ta", style = PixelType.Small, color = PixelColors.Ink3)
+            Text(ta?.partner?.username ?: "ta", style = PixelType.Small, color = PixelColors.Ink3)
             Spacer(Modifier.height(6.dp))
             val taApps = (ta?.apps ?: emptyList()).sortedByDescending { it.seconds }.take(5)
             if (taApps.isEmpty()) {

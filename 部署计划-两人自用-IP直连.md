@@ -42,8 +42,8 @@
 | S3 | 写 `.env` | `POSTGRES_PASSWORD=<随机 32 位>`，不放 git |
 | S4 | 起服务 | `docker compose up -d --build`，等 `curl http://127.0.0.1:3201/healthz` 返回 `{"ok":true}` |
 | S5 | 防火墙 | 云控制台安全组放行 **3201/TCP**（来源建议填常用网段）；服务器内 `ufw allow 3201/tcp` |
-| S6 | 建账号 | `docker compose exec footprint node scripts/create-users.js`，确认两个用户存在且业务表为空 |
-| S7 | 冒烟 | 手机浏览器打开 `http://SERVER_IP:3201` → 登录 → 改昵称 → 改口令 → 重登 |
+| S6 | 建账号 | 注册已常开，手机浏览器打开 `http://SERVER_IP:3201` 用「用户名 + 密码」直接注册；部署者另用 `create-admin.js` 指定管理员 |
+| S7 | 冒烟 | 注册 → 「我的 → 我的搭档」看自己的邀请码 → 另一人注册并输入该码 → 发码人确认配对 → 改用户名 → 改密码 → 重登 |
 
 ---
 
@@ -60,7 +60,8 @@
 ## 四、上线后运维
 
 - 备份：应用每天 03:00 自动 JSON 快照，落在容器卷 `./runtime/data/backups`；另外 `pg_dump` 每周一次到宿主机。
-- 改口令忘了：由管理员在 `/admin.html` 的「重置口令」处理（多人化后无自助找回）。
+- 忘记密码：由管理员在 `/admin.html` 的「重置密码」处理（无自助找回）。
+- 注册常开：任何人拿到 IP 都能注册；需要收口就在服务器 `.env` 设 `SIGNUP_OPEN=0` 后重建容器。
 - 升级：本地改完 → 推送 git / 重新打包上传 → `docker compose up -d --build`。
 
 ---

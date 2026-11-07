@@ -656,7 +656,7 @@ module.exports = function goalsRoutes(db) {
   r.get('/verifications/pending', mw.requireUser, async (req, res, next) => {
     try {
       const rows = await db.all(
-        `SELECT v.*, g.title AS goal_title, g.emoji AS goal_emoji, g.total_points, u.nickname AS submitter_nickname, u.avatar AS submitter_avatar
+        `SELECT v.*, g.title AS goal_title, g.emoji AS goal_emoji, g.total_points, u.nickname AS submitter_username, u.avatar AS submitter_avatar
          FROM verifications v
          JOIN goals g ON g.id = v.goal_id
          JOIN users u ON u.id = v.submitter_id
@@ -674,7 +674,7 @@ module.exports = function goalsRoutes(db) {
       const v = await db.get(
         `SELECT v.*, g.title AS goal_title, g.emoji AS goal_emoji, g.description AS goal_desc,
                 g.accept_criteria, g.total_points, g.end_date,
-                u.nickname AS submitter_nickname, u.avatar AS submitter_avatar
+                u.nickname AS submitter_username, u.avatar AS submitter_avatar
          FROM verifications v JOIN goals g ON g.id = v.goal_id JOIN users u ON u.id = v.submitter_id
          WHERE v.id = ?`,
         [Number(req.params.id) || 0]
@@ -704,7 +704,7 @@ module.exports = function goalsRoutes(db) {
           title: v.goal_title, emoji: v.goal_emoji, description: v.goal_desc,
           acceptCriteria: v.accept_criteria, totalPoints: Number(v.total_points) || 0, endDate: v.end_date,
         },
-        submitter: { nickname: v.submitter_nickname, avatar: v.submitter_avatar },
+        submitter: { nickname: v.submitter_username, avatar: v.submitter_avatar },
         history,
       });
     } catch (e) { next(e); }
