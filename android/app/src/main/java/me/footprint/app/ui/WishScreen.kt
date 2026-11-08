@@ -86,6 +86,7 @@ fun WishScreen(vm: AppViewModel) {
   // 弹层状态：null = 关闭；否则携带要编辑的愿望（null 表示新建）
   var editing: WishItem? by remember { mutableStateOf<WishItem?>(null) }
   var showEditor by remember { mutableStateOf(false) }
+  var lifecycleTarget by remember { mutableStateOf<WishItem?>(null) }
 
   // 正在操作的愿望 id / 兑换 id，用于防连点
   var busyWishId by remember { mutableStateOf<Long?>(null) }
@@ -102,6 +103,23 @@ fun WishScreen(vm: AppViewModel) {
       error = (e as? ApiException)?.message ?: e.message ?: "加载失败"
     } finally {
       loading = false
+    }
+  }
+
+  fun manageRedemption(redemption: Redemption, done: Boolean) {
+    val token = Session.token(context) ?: return
+    if (busyRedemptionId != null) return
+    busyRedemptionId = redemption.id
+    scope.launch {
+      try {
+        if (done) Api.doneRedemption(token, redemption.id) else Api.cancelRedemption(token, redemption.id)
+        Toast.makeText(context, if (done) "已标记兑现" else "已撤回兑换", Toast.LENGTH_SHORT).show()
+        load()
+      } catch (e: Exception) {
+        Toast.makeText(context, e.message ?: "操作失败", Toast.LENGTH_SHORT).show()
+      } finally {
+        busyRedemptionId = null
+      }
     }
   }
 
@@ -153,33 +171,36 @@ fun WishScreen(vm: AppViewModel) {
         return@Column
       }
 
-      val items = data?.items ?: emptyList()
+      val items = data?.items.orEmpty()
+      val activeItems = items.filter { it.status == "active" }
+      val cancelledItems = items.filter { it.status == "archived" }
       val redemptions = data?.redemptions ?: emptyList()
       val balance = data?.balance ?: 0
 
       if (items.isEmpty()) {
         Text("还没有愿望，点右上角「+ 新建」加一个吧", style = PixelType.Small, color = PixelColors.Ink3)
         Spacer(Modifier.height(24.dp))
-        return@Column
       }
 
       // ---- 想要的东西 标题 ----
-      Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Box(modifier = Modifier.size(10.dp).background(PixelColors.Ink))
-          Spacer(Modifier.width(8.dp))
-          Text("想要的东西", style = PixelType.Title, color = PixelColors.Ink)
+      if (activeItems.isNotEmpty()) {
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(10.dp).background(PixelColors.Ink))
+            Spacer(Modifier.width(8.dp))
+            Text("想要的东西", style = PixelType.Title, color = PixelColors.Ink)
+          }
+          Text("${activeItems.size} 件", style = PixelType.Small, color = PixelColors.Ink2)
         }
-        Text("${items.size} 件", style = PixelType.Small, color = PixelColors.Ink2)
+        Spacer(Modifier.height(8.dp))
       }
-      Spacer(Modifier.height(8.dp))
 
       // ---- 愿望列表 ----
-      for (item in items) {
+      for (item in activeItems) {
         // 找这条愿望对应的、已兑换未兑现的记录
         val applied = redemptions.firstOrNull { it.wish_item_id == item.id && it.status == "applied" }
         WishCard(
@@ -188,6 +209,7 @@ fun WishScreen(vm: AppViewModel) {
           redemption = applied,
           busy = busyWishId == item.id || busyRedemptionId == item.id,
           onEdit = { editing = item; showEditor = true },
+          onCancelWish = { if (busyWishId == null) lifecycleTarget = item },
           onRedeem = {
             scope.launch {
               val token = Session.token(context) ?: return@launch
@@ -237,14 +259,66 @@ fun WishScreen(vm: AppViewModel) {
         Spacer(Modifier.height(12.dp))
       }
 
+      if (cancelledItems.isNotEmpty()) {
+        Text("已取消的愿望", style = PixelType.Title, color = PixelColors.Ink)
+        Spacer(Modifier.height(8.dp))
+        for (item in cancelledItems) {
+          PixelPanel(modifier = Modifier.fillMaxWidth()) {
+            Row(
+              modifier = Modifier.fillMaxWidth().padding(12.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Text("${item.emoji} ${item.title}", style = PixelType.Body, color = PixelColors.Ink, modifier = Modifier.weight(1f))
+              PixelSmallButton(text = "删除", filled = false, onClick = { if (busyWishId == null) lifecycleTarget = item })
+            }
+          }
+          Spacer(Modifier.height(8.dp))
+        }
+      }
+
       // ---- 兑换记录（对齐 Web 版「兑换记录」板块）----
       if (redemptions.isNotEmpty()) {
-        RedemptionList(redemptions)
+        RedemptionList(
+          redemptions,
+          busy = busyRedemptionId != null,
+          onCancel = { manageRedemption(it, done = false) },
+          onDone = { manageRedemption(it, done = true) },
+        )
         Spacer(Modifier.height(12.dp))
       }
 
       Spacer(Modifier.height(12.dp))
     }
+  }
+
+  lifecycleTarget?.let { item ->
+    val deleting = item.status == "archived"
+    ConfirmDialog(
+      title = if (deleting) "删除愿望" else "取消愿望",
+      message = if (deleting) "「${item.title}」会从愿望单移除，已有兑换和积分记录会保留。"
+        else "取消「${item.title}」后将停止兑换，已有兑换和积分记录会保留。",
+      confirmText = if (deleting) "删除" else "确认取消",
+      danger = true,
+      onDismiss = { lifecycleTarget = null },
+      onConfirm = {
+        val token = Session.token(context)
+        if (token != null && busyWishId == null) {
+          lifecycleTarget = null
+          busyWishId = item.id
+          scope.launch {
+            try {
+              if (deleting) Api.deleteWish(token, item.id) else Api.cancelWish(token, item.id)
+              Toast.makeText(context, if (deleting) "已删除愿望" else "已取消愿望", Toast.LENGTH_SHORT).show()
+              load()
+            } catch (e: Exception) {
+              Toast.makeText(context, e.message ?: "操作失败", Toast.LENGTH_SHORT).show()
+            } finally {
+              busyWishId = null
+            }
+          }
+        }
+      },
+    )
   }
 
   // ---- 新建 / 编辑弹层 ----
@@ -326,6 +400,7 @@ private fun WishCard(
   redemption: Redemption?,
   busy: Boolean,
   onEdit: () -> Unit,
+  onCancelWish: () -> Unit,
   onRedeem: () -> Unit,
   onCancel: () -> Unit,
   onDone: () -> Unit,
@@ -347,6 +422,8 @@ private fun WishCard(
           }
         }
         PixelSmallButton(text = "编辑", onClick = onEdit, filled = false)
+        Spacer(Modifier.width(8.dp))
+        PixelSmallButton(text = "取消愿望", onClick = onCancelWish, filled = false)
       }
 
       Spacer(Modifier.height(10.dp))
@@ -595,7 +672,12 @@ private fun WishEditor(
 
 /** 兑换记录列表（对齐 Web 版 redRow）：emoji + 商品名 + 时间 + 锁定分 + 状态徽章 */
 @Composable
-private fun RedemptionList(redemptions: List<Redemption>) {
+private fun RedemptionList(
+  redemptions: List<Redemption>,
+  busy: Boolean,
+  onCancel: (Redemption) -> Unit,
+  onDone: (Redemption) -> Unit,
+) {
   PixelPanel(modifier = Modifier.fillMaxWidth()) {
     Column(modifier = Modifier.padding(16.dp)) {
       Text("兑换记录", style = PixelType.Title, color = PixelColors.Ink)
@@ -617,6 +699,15 @@ private fun RedemptionList(redemptions: List<Redemption>) {
               style = PixelType.Small,
               color = PixelColors.Ink2,
             )
+            if (r.status == "confirmed" && !busy) {
+              Spacer(Modifier.height(6.dp))
+              Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (canWithdrawRedemption(r.applied_at)) {
+                  PixelSmallButton(text = "撤回", onClick = { onCancel(r) }, filled = false)
+                }
+                PixelSmallButton(text = "已兑现", onClick = { onDone(r) }, filled = false)
+              }
+            }
           }
           PixelChip(
             text = redStatus(r.status),
@@ -638,6 +729,10 @@ private fun RedemptionList(redemptions: List<Redemption>) {
     }
   }
 }
+
+private fun canWithdrawRedemption(appliedAt: String): Boolean = runCatching {
+  System.currentTimeMillis() - java.time.Instant.parse(appliedAt).toEpochMilli() <= 2 * 60 * 60 * 1000L
+}.getOrDefault(false)
 
 /** 兑换状态 → 中文 */
 private fun redStatus(status: String): String = when (status) {

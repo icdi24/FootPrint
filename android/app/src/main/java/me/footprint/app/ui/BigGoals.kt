@@ -48,6 +48,7 @@ fun BigGoalsView(
     loading: Boolean,
     onNew: () -> Unit,
     onOpen: (Long) -> Unit,
+    onLifecycle: (BigGoalDto) -> Unit,
 ) {
     if (loading && goals == null) {
         PixelPanel(modifier = Modifier.fillMaxWidth()) {
@@ -77,28 +78,45 @@ fun BigGoalsView(
         }
         return
     }
-    for (b in list) {
-        PixelPanel(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 10.dp)
-                .clickable { onOpen(b.id) },
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(b.emoji, style = PixelType.Title)
-                    Spacer(Modifier.width(8.dp))
-                    Text(b.title, style = PixelType.Title, color = PixelColors.Ink, modifier = Modifier.weight(1f))
-                    PixelChip(text = "${b.progress}%", bg = PixelColors.GreenSoft, fg = PixelColors.GreenDeep)
+    val visible = list.filter { it.status != "abandoned" }
+    val abandoned = list.filter { it.status == "abandoned" }
+    for ((isAbandoned, group) in listOf(false to visible, true to abandoned)) {
+        if (group.isEmpty()) continue
+        if (isAbandoned) {
+            Text("已放弃的大目标", style = PixelType.Title, color = PixelColors.Ink)
+            Spacer(Modifier.height(8.dp))
+        }
+        for (b in group) {
+            PixelPanel(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 10.dp)
+                    .clickable { onOpen(b.id) },
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(b.emoji, style = PixelType.Title)
+                        Spacer(Modifier.width(8.dp))
+                        Text(b.title, style = PixelType.Title, color = PixelColors.Ink, modifier = Modifier.weight(1f))
+                        if (isAbandoned) {
+                            PixelChip(text = "已放弃", bg = PixelColors.Bg2, fg = PixelColors.Ink3)
+                        } else {
+                            PixelChip(text = "${b.progress}%", bg = PixelColors.GreenSoft, fg = PixelColors.GreenDeep)
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    PixelBar(fraction = b.progress / 100f)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "客观 ${b.done}/${b.total} 个小目标达成" + (b.progress_note.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+                        style = PixelType.Small,
+                        color = PixelColors.Ink2,
+                    )
+                    if (b.status == "active" || isAbandoned) {
+                        Spacer(Modifier.height(8.dp))
+                        PixelSmallButton(text = if (isAbandoned) "删除" else "放弃", onClick = { onLifecycle(b) }, filled = false)
+                    }
                 }
-                Spacer(Modifier.height(8.dp))
-                PixelBar(fraction = b.progress / 100f)
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "客观 ${b.done}/${b.total} 个小目标达成" + (b.progress_note.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
-                    style = PixelType.Small,
-                    color = PixelColors.Ink2,
-                )
             }
         }
     }
@@ -114,6 +132,7 @@ fun BigGoalDetailDialog(
     onDismiss: () -> Unit,
     onChanged: () -> Unit,
     onEdit: (BigGoalDto) -> Unit,
+    onLifecycle: (BigGoalDto) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var detail by remember { mutableStateOf<BigGoalDetailResponse?>(null) }
@@ -155,7 +174,11 @@ fun BigGoalDetailDialog(
                                 Text(bg.title, style = PixelType.Title, color = PixelColors.Ink)
                                 Text("客观 ${d.done}/${d.total} 个小目标达成", style = PixelType.Small, color = PixelColors.Ink2)
                             }
-                            PixelChip(text = "${bg.progress}%", bg = PixelColors.GreenSoft, fg = PixelColors.GreenDeep)
+                            if (bg.status == "abandoned") {
+                                PixelChip(text = "已放弃", bg = PixelColors.Bg2, fg = PixelColors.Ink3)
+                            } else {
+                                PixelChip(text = "${bg.progress}%", bg = PixelColors.GreenSoft, fg = PixelColors.GreenDeep)
+                            }
                         }
                         Spacer(Modifier.height(8.dp))
                         PixelBar(fraction = bg.progress / 100f)
@@ -188,10 +211,11 @@ fun BigGoalDetailDialog(
                                             append(g.planned_date?.let { "计划 $it" } ?: "未排日期")
                                             append(" · ")
                                             append(
-                                                when (g.plan_status) {
-                                                    "planned" -> "未启动"
-                                                    "released" -> "进行中"
-                                                    "done" -> "已达成"
+                                                when {
+                                                    g.status == "abandoned" -> "已放弃"
+                                                    g.plan_status == "planned" -> "未启动"
+                                                    g.plan_status == "released" -> "进行中"
+                                                    g.plan_status == "done" -> "已达成"
                                                     else -> "未绑定"
                                                 },
                                             )
@@ -204,17 +228,23 @@ fun BigGoalDetailDialog(
                                         Text(it, style = PixelType.Small, color = PixelColors.Ink3, maxLines = 2)
                                     }
                                 }
-                                if (g.status != "achieved" && g.status != "abandoned") {
+                                if (bg.status != "abandoned" && g.status != "achieved" && g.status != "abandoned") {
                                     PixelSmallButton(text = "改", onClick = { editTarget = g })
                                 }
                             }
                         }
                         Spacer(Modifier.height(12.dp))
+                        if (bg.status == "active" || bg.status == "abandoned") {
+                            PixelSmallButton(text = if (bg.status == "abandoned") "删除" else "放弃", onClick = { onLifecycle(bg) }, filled = false)
+                            Spacer(Modifier.height(8.dp))
+                        }
                         Row(modifier = Modifier.fillMaxWidth()) {
-                            PixelSmallButton(text = "编辑", onClick = { onEdit(bg) }, filled = false)
-                            Spacer(Modifier.width(8.dp))
-                            PixelSmallButton(text = "顺延 / 提前", onClick = { showShift = true }, filled = false)
-                            Spacer(Modifier.width(8.dp))
+                            if (bg.status != "abandoned") {
+                                PixelSmallButton(text = "编辑", onClick = { onEdit(bg) }, filled = false)
+                                Spacer(Modifier.width(8.dp))
+                                PixelSmallButton(text = "顺延 / 提前", onClick = { showShift = true }, filled = false)
+                                Spacer(Modifier.width(8.dp))
+                            }
                             PixelButton(text = "关掉", onClick = onDismiss, modifier = Modifier.weight(1f))
                         }
                     }

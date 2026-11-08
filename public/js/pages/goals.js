@@ -31,13 +31,13 @@ const GoalsPage = {
     if (this.goalType === 'big') { await this.drawBig(root); return; }
 
     const isWeek = this.viewMode === 'week';
-    let data;
-    if (isWeek) {
-      data = await api.get(`/api/goals/week?start=${this.weekStart}`);
-    } else {
-      if (!this.monthAnchor) this.monthAnchor = this.weekStart.slice(0, 7);
-      data = await api.get(`/api/goals/month?month=${this.monthAnchor}`);
-    }
+    if (!isWeek && !this.monthAnchor) this.monthAnchor = this.weekStart.slice(0, 7);
+    const [data, { goals: dailyGoals }] = await Promise.all([
+      api.get(isWeek ? `/api/goals/week?start=${this.weekStart}` : `/api/goals/month?month=${this.monthAnchor}`),
+      api.get('/api/goals?type=daily'),
+    ]);
+    const currentGoals = dailyGoals.filter((g) => g.status === 'active' || g.status === 'draft');
+    const abandonedGoals = dailyGoals.filter((g) => g.status === 'abandoned');
     const [y, m, d] = this.weekStart.split('-').map(Number);
     const today = data.today;
     const navLabel = isWeek ? `${m}月第${this._weekIndex(new Date(y, m - 1, d))}周` : `${Number(this.monthAnchor.slice(5, 7))}月`;
@@ -65,21 +65,18 @@ const GoalsPage = {
         <div class="grid-stats">
           <div class="gs-item"><div class="gs-val">${UI.fmtNum(pts)}</div><div class="gs-label">${isWeek ? '周得分' : '月得分'}</div></div>
           <div class="gs-item"><div class="gs-val">${done}<span class="gs-dim">/${expected}</span></div><div class="gs-label">打卡人次</div></div>
-          <div class="gs-item"><div class="gs-val">${data.goals.length}</div><div class="gs-label">进行中目标</div></div>
+          <div class="gs-item"><div class="gs-val">${data.goals.filter((g) => g.status === 'active').length}</div><div class="gs-label">进行中目标</div></div>
         </div>
         ${isWeek ? this.weekGrid(data, today) : this.monthList(data, today)}
       </section>
 
+      ${this.dailyActions('管理日常目标', currentGoals, 'abandon', '放弃')}
+      ${this.dailyActions('已放弃的日常目标', abandonedGoals, 'delete', '删除')}
       <button class="fab" id="add-goal" aria-label="新建目标">${window.icon('plus')}</button>
       <div class="fab-hint" id="fab-hint">长按「完成」= 秒打卡</div>
     `;
 
-    root.querySelector('#type-seg').addEventListener('click', (e) => {
-      const b = e.target.closest('button');
-      if (!b) return;
-      this.goalType = b.dataset.t;
-      this.draw(root);
-    });
+    this._bindGoalHeader(root);
     root.querySelector('#seg').addEventListener('click', (e) => {
       const b = e.target.closest('button');
       if (!b) return;
@@ -98,6 +95,14 @@ const GoalsPage = {
     });
     root.querySelector('#add-goal').addEventListener('click', () => {
       GoalForm.open({ onSaved: () => this.draw(root) });
+    });
+    root.querySelectorAll('[data-daily-act]').forEach((button) => {
+      const goal = dailyGoals.find((g) => g.id === Number(button.dataset.id));
+      if (!goal) return;
+      button.addEventListener('click', () => {
+        if (button.dataset.dailyAct === 'detail') return GoalForm.openDetail(goal, { onChanged: () => this.draw(root) });
+        return this.changeGoal(root, goal, button.dataset.dailyAct);
+      });
     });
 
     // 点格子：今天未打 → 打卡；已打 → 详情/撤销
@@ -138,6 +143,17 @@ const GoalsPage = {
     setTimeout(() => { if (hint) hint.classList.remove('show'); }, 6500);
   },
 
+  dailyActions(title, goals, action, label) {
+    if (!goals.length) return '';
+    return `<section class="sec">
+      <div class="sec-head"><h2>${title}</h2></div>
+      <div class="gd-list">${goals.map((g) => `<div class="gd-item">
+        <button type="button" class="sc-btn ghost" data-daily-act="detail" data-id="${g.id}">${UI.esc(g.emoji)} ${UI.esc(g.title)}</button>
+        <button type="button" class="sc-btn ghost danger" data-daily-act="${action}" data-id="${g.id}">${label}</button>
+      </div>`).join('')}</div>
+    </section>`;
+  },
+
   _shift(s, n) {
     const d = new Date(s + 'T00:00:00Z');
     d.setUTCDate(d.getUTCDate() + n);
@@ -166,7 +182,20 @@ const GoalsPage = {
       <button type="button" data-t="daily" class="${active === 'daily' ? 'on' : ''}">日常目标</button>
       <button type="button" data-t="stage" class="${active === 'stage' ? 'on' : ''}">小目标</button>
       <button type="button" data-t="big" class="${active === 'big' ? 'on' : ''}">大目标</button>
-    </div>`;
+    </div>
+    <button class="btn outline block" id="open-planning" type="button">和 zoowy 讨论目标</button>`;
+  },
+
+  _bindGoalHeader(root) {
+    root.querySelector('#type-seg').addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      this.goalType = b.dataset.t;
+      this.draw(root);
+    });
+    root.querySelector('#open-planning').addEventListener('click', () => ZoowyChat.open({
+      onApplied: () => { if (root.isConnected) this.render(root); },
+    }));
   },
 
   // 大目标视图：列表 + FAB 建大目标 + 卡片点开详情
@@ -183,7 +212,7 @@ const GoalsPage = {
         ${this._typeSeg('big')}
       </header>
       <div class="stage-list">
-        ${bigGoals.length ? bigGoals.map((b) => this.bigCard(b)).join('') : `
+        ${bigGoals.length ? bigGoals.filter((b) => b.status !== 'abandoned').map((b) => this.bigCard(b)).join('') : `
         <div class="empty">
           <div class="empty-emoji">🏔️</div>
           <div class="empty-title">还没有大目标</div>
@@ -191,14 +220,13 @@ const GoalsPage = {
           <button class="btn primary" id="bg-empty-add">建一个大目标</button>
         </div>`}
       </div>
+      ${bigGoals.some((b) => b.status === 'abandoned') ? `<section class="sec">
+        <div class="sec-head"><h2>已放弃的大目标</h2></div>
+        <div class="stage-list">${bigGoals.filter((b) => b.status === 'abandoned').map((b) => this.bigCard(b)).join('')}</div>
+      </section>` : ''}
       ${bigGoals.length ? `<button class="fab" id="add-biggoal" aria-label="新建大目标">${window.icon('plus')}</button>` : ''}
     `;
-    root.querySelector('#type-seg').addEventListener('click', (e) => {
-      const b = e.target.closest('button');
-      if (!b) return;
-      this.goalType = b.dataset.t;
-      this.draw(root);
-    });
+    this._bindGoalHeader(root);
     const emptyAdd = root.querySelector('#bg-empty-add');
     if (emptyAdd) emptyAdd.addEventListener('click', () => BigGoalForm.open({ onSaved: () => this.draw(root) }));
     const fab = root.querySelector('#add-biggoal');
@@ -210,8 +238,12 @@ const GoalsPage = {
       });
       card.querySelector('[data-act="zoowy"]')?.addEventListener('click', () => {
         const bg = bigGoals.find((b) => b.id === Number(card.dataset.id));
-        if (bg) ZoowyPlan.open({ bigGoal: bg, onConfirmed: () => this.draw(root) });
+        if (bg) ZoowyChat.open({ bigGoalId: bg.id, title: bg.title, onApplied: () => this.draw(root) });
       });
+      card.querySelectorAll('[data-act="abandon"], [data-act="delete"]').forEach((button) => button.addEventListener('click', () => {
+        const bg = bigGoals.find((b) => b.id === Number(card.dataset.id));
+        if (bg) BigGoalDetail.changeStatus(bg, button.dataset.act, () => this.draw(root));
+      }));
     });
   },
 
@@ -230,7 +262,9 @@ const GoalsPage = {
         <div class="bgd-bar"><i style="width:${pct}%"></i></div>
         ${b.progress_note ? `<div class="bgd-note">${UI.esc(b.progress_note)}</div>` : ''}
         <div class="sc-actions">
-          <button class="sc-btn primary" data-act="zoowy">🐾 让 zoowy 拆计划</button>
+          ${b.status === 'active' ? `<button class="sc-btn primary" data-act="zoowy">🐾 和 zoowy 讨论</button>
+            <button type="button" class="sc-btn ghost danger" data-act="abandon">放弃</button>` : ''}
+          ${b.status === 'abandoned' ? '<button type="button" class="sc-btn ghost danger" data-act="delete">删除</button>' : ''}
         </div>
       </div>`;
   },
@@ -260,12 +294,7 @@ const GoalsPage = {
       <button class="fab" id="add-goal" aria-label="新建小目标">${window.icon('plus')}</button>
     `;
 
-    root.querySelector('#type-seg').addEventListener('click', (e) => {
-      const b = e.target.closest('button');
-      if (!b) return;
-      this.goalType = b.dataset.t;
-      this.draw(root);
-    });
+    this._bindGoalHeader(root);
     root.querySelector('#add-goal').addEventListener('click', () => {
       StageGoalForm.open({ onSaved: () => this.draw(root) });
     });
@@ -283,6 +312,8 @@ const GoalsPage = {
       card.querySelector('[data-act="start"]')?.addEventListener('click', () => this.startStage(root, g));
       card.querySelector('[data-act="edit"]')?.addEventListener('click', () => StageGoalForm.open({ goal: g, onSaved: () => this.draw(root) }));
       card.querySelector('[data-act="abandon"]')?.addEventListener('click', () => this.abandonStage(root, g));
+      card.querySelector('[data-act="withdraw"]')?.addEventListener('click', () => this.changeGoal(root, g, 'withdraw'));
+      card.querySelector('[data-act="delete"]')?.addEventListener('click', () => this.changeGoal(root, g, 'delete'));
     });
   },
 
@@ -299,15 +330,17 @@ const GoalsPage = {
           <button class="sc-btn ghost danger" data-act="abandon">放弃</button>
         </div>`;
     } else if (g.status === 'reviewing') {
-      foot = `<div class="sc-wait">${window.icon('clock')} 等待对方验收…</div>`;
+      foot = `<div class="sc-wait">${window.icon('clock')} 等待对方验收…</div>
+        <div class="sc-actions"><button type="button" class="sc-btn ghost danger" data-act="withdraw">撤回验收</button></div>`;
     } else if (g.status === 'achieved') {
       foot = `<div class="sc-credit">${window.icon('check')} +${UI.fmtNum(points)} 分已入账</div>`;
     } else if (g.status === 'abandoned') {
-      foot = `<div class="sc-wait gray">已放弃</div>`;
+      foot = '<div class="sc-actions"><button type="button" class="sc-btn ghost danger" data-act="delete">删除</button></div>';
     } else if (g.status === 'draft') {
       foot = `
+        ${g.prerequisite_pending ? `<div class="sc-wait">${window.icon('clock')} 等待前置小目标验收</div>` : ''}
         <div class="sc-actions">
-          <button class="sc-btn primary" data-act="start">开始</button>
+          ${g.prerequisite_pending ? '' : '<button class="sc-btn primary" data-act="start">开始</button>'}
           <button class="sc-btn ghost" data-act="edit">编辑</button>
           <button class="sc-btn ghost danger" data-act="abandon">放弃</button>
         </div>`;
@@ -329,17 +362,24 @@ const GoalsPage = {
   },
 
   abandonStage(root, g) {
-    UI.confirm(`确定放弃「${UI.esc(g.title)}」吗？<br/>放弃后不能再提交验收，记录保留。`, { danger: true, okLabel: '放弃' })
-      .then(async (yes) => {
-        if (!yes) return;
-        try {
-          await api.post(`/api/goals/${g.id}/abandon`);
-          UI.toast('已放弃', 'warn');
-          this.draw(root);
-        } catch (e) {
-          UI.toast(e.message, 'err');
-        }
-      });
+    return this.changeGoal(root, g, 'abandon');
+  },
+
+  async changeGoal(root, g, action) {
+    const [label, detail] = {
+      abandon: ['放弃', '该目标会停止进行，原有记录和积分会保留。'],
+      delete: ['删除', '条目会从目标列表移除，原有记录和积分会保留。'],
+      withdraw: ['撤回验收', '小目标会回到进行中，可以稍后重新提交。'],
+    }[action];
+    if (!await UI.confirm(`确定${label}「${UI.esc(g.title)}」吗？<br/>${detail}`, { danger: true, okLabel: label })) return;
+    try {
+      if (action === 'delete') await api.delete(`/api/goals/${g.id}`);
+      else await api.post(`/api/goals/${g.id}/${action}`);
+      UI.toast(`已${label}`, 'ok');
+      await this.draw(root);
+    } catch (e) {
+      UI.toast(e.message, 'err');
+    }
   },
 
   // 草稿 → 进行中
@@ -361,6 +401,7 @@ const GoalsPage = {
       const body = document.createElement('div');
       body.className = 'stage-detail';
       const badge = STAGE_BADGE[g.status] || STAGE_BADGE.active;
+      const prerequisitePending = g.status === 'draft' && (g.prerequisite_pending ?? goal.prerequisite_pending);
       body.innerHTML = `
         <div class="sd-head">
           <div class="sd-emoji">${g.emoji || '🎯'}</div>
@@ -372,6 +413,7 @@ const GoalsPage = {
         </div>
         ${g.accept_criteria ? `<div class="sd-block"><div class="sd-label">验收标准</div><div class="sd-crit">${UI.esc(g.accept_criteria)}</div></div>` : ''}
         ${g.description ? `<div class="sd-block"><div class="sd-label">备注</div><p class="sd-desc">${UI.esc(g.description)}</p></div>` : ''}
+        ${prerequisitePending ? `<div class="sc-wait">${window.icon('clock')} 等待前置小目标验收</div>` : ''}
         <div class="sd-meta-row">
           <span>预估 ${UI.fmtNum(Number(g.est_total_min) || 0)} 分钟</span>
           <span>难度 ${g.difficulty || 3}</span>
@@ -385,9 +427,15 @@ const GoalsPage = {
         actions.push({ label: '编辑', onClick: (close) => { close(); StageGoalForm.open({ goal: g, onSaved: () => this.draw(root) }); } });
         actions.push({ label: '放弃', kind: 'danger', onClick: (close) => { close(); this.abandonStage(root, g); } });
       } else if (g.status === 'draft') {
-        actions.push({ label: '开始', kind: 'primary', onClick: (close) => { close(); this.startStage(root, g); } });
+        if (!prerequisitePending) {
+          actions.push({ label: '开始', kind: 'primary', onClick: (close) => { close(); this.startStage(root, g); } });
+        }
         actions.push({ label: '编辑', onClick: (close) => { close(); StageGoalForm.open({ goal: g, onSaved: () => this.draw(root) }); } });
         actions.push({ label: '放弃', kind: 'danger', onClick: (close) => { close(); this.abandonStage(root, g); } });
+      } else if (g.status === 'reviewing' || g.status === 'abandoned') {
+        const action = g.status === 'reviewing' ? 'withdraw' : 'delete';
+        actions.push({ label: g.status === 'reviewing' ? '撤回验收' : '删除', kind: 'danger',
+          onClick: (close) => { close(); this.changeGoal(root, g, action); } });
       } else {
         actions.push({ label: '知道了', onClick: (close) => close() });
       }
@@ -948,7 +996,7 @@ const GoalForm = {
         kind: g.status === 'active' || g.status === 'draft' ? 'danger' : '',
         async onClick(close) {
           if (g.status !== 'active' && g.status !== 'draft') return close();
-          const yes = await UI.confirm(`确定放弃「${UI.esc(g.title)}」吗？<br/>已得的积分保留，记录还在，30 天内不能重建同名目标。`, { danger: true, okLabel: '放弃' });
+          const yes = await UI.confirm(`确定放弃「${UI.esc(g.title)}」吗？<br/>停止打卡，原有记录和积分会保留。`, { danger: true, okLabel: '放弃' });
           close();
           if (!yes) return;
           try {
@@ -1042,7 +1090,7 @@ const StageGoalForm = {
       <div class="gf-preview sf-preview" id="sf-preview"></div>
       ${!editing ? `
       <div class="gf-row zf-entry">
-        <button type="button" class="ghost-btn" id="sf-zoowy">🐾 不知道怎么定？让 zoowy 按大目标帮你拆</button>
+        <button type="button" class="ghost-btn" id="sf-zoowy">🐾 和 zoowy 讨论这个想法</button>
       </div>` : ''}
     `;
 
@@ -1133,7 +1181,7 @@ const StageGoalForm = {
     });
     preview();
     const zfEntry = body.querySelector('#sf-zoowy');
-    if (zfEntry) zfEntry.addEventListener('click', () => ZoowyPlan.open({ onConfirmed: onSaved }));
+    if (zfEntry) zfEntry.addEventListener('click', () => ZoowyChat.open({ onApplied: onSaved }));
 
     let saving = false;
     UI.sheet({

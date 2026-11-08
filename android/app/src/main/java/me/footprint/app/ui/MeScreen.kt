@@ -21,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,6 +83,11 @@ private fun sizeOf(bytes: Long): String {
 
 @Composable
 fun MeScreen(vm: AppViewModel) {
+  var showZoowy by rememberSaveable { mutableStateOf(false) }
+  if (showZoowy) {
+    ZoowyScreen(onBack = { showZoowy = false })
+    return
+  }
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
 
@@ -162,6 +168,9 @@ fun MeScreen(vm: AppViewModel) {
         avatar = myAvatar,
       )
 
+      Spacer(Modifier.height(16.dp))
+
+      PixelButton("和 zoowy 聊聊", onClick = { showZoowy = true }, modifier = Modifier.fillMaxWidth())
       Spacer(Modifier.height(16.dp))
 
       if (error != null) {

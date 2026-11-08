@@ -13,6 +13,7 @@ const WishPage = {
   async draw(root) {
     const data = await api.get('/api/wish');
     const active = data.items.filter((i) => i.status === 'active');
+    const cancelled = data.items.filter((i) => i.status === 'archived');
 
     root.innerHTML = `
       <header class="page-head wish-head">
@@ -30,6 +31,11 @@ const WishPage = {
         </div>
         <div class="wb-yuan">≈ ¥${UI.fmtYuan(data.balance)}<span> · 1 元 = 10 分</span></div>
       </section>
+
+      ${cancelled.length ? `<section class="sec">
+        <div class="sec-head"><h2>已取消的愿望</h2></div>
+        <div class="wish-list">${cancelled.map((i) => this.itemCard(i, data.balance)).join('')}</div>
+      </section>` : ''}
 
       <section class="sec">
         <div class="sec-head"><h2>想要的东西</h2>${active.length ? `<span class="sec-count">${active.length} 件</span>` : ''}</div>
@@ -59,17 +65,23 @@ const WishPage = {
         if (item) this.redeem(item, data.balance, root);
       });
     });
+    root.querySelectorAll('[data-wish-act]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const item = data.items.find((x) => x.id === Number(btn.dataset.id));
+        if (item) this.changeStatus(item, btn.dataset.wishAct, root);
+      });
+    });
     root.querySelectorAll('.wish-card').forEach((card) => {
       const open = (e) => {
-        if (e.target.closest('.btn-redeem')) return;
+        if (e.target.closest('button')) return;
         const item = data.items.find((x) => x.id === Number(card.dataset.id));
-        if (item) WishForm.open({ item, onSaved: () => this.draw(root) });
+        if (item?.status === 'active') WishForm.open({ item, onSaved: () => this.draw(root) });
       };
       card.setAttribute('role', 'button');
       card.setAttribute('tabindex', '0');
       card.addEventListener('click', open);
       card.addEventListener('keydown', (e) => {
-        if ((e.key === 'Enter' || e.key === ' ') && !e.target.closest('.btn-redeem')) {
+        if ((e.key === 'Enter' || e.key === ' ') && !e.target.closest('button')) {
           e.preventDefault(); open(e);
         }
       });
@@ -93,15 +105,30 @@ const WishPage = {
         : `<button class="btn-redeem disabled" disabled>差 ${UI.fmtNum(lack)} 分</button>`;
     return `
       <div class="wish-card" data-id="${i.id}">
-        <div class="wc-emoji">${i.emoji}</div>
+        <div class="wc-emoji">${UI.esc(i.emoji)}</div>
         <div class="wc-main">
           <div class="wc-title">${UI.esc(i.title)}</div>
           <div class="wc-price">${UI.fmtNum(i.points_cost)} 分 <span>≈ ¥${Number(i.price_cny).toLocaleString('zh-CN')}</span></div>
           ${i.description ? `<div class="wc-desc">${UI.esc(i.description)}</div>` : ''}
           ${i.cooldownMsg ? `<div class="wc-cool">${UI.esc(i.cooldownMsg)}</div>` : ''}
         </div>
-        <div class="wc-side">${btn}</div>
+        <div class="wc-side">${i.status === 'active'
+          ? `${btn}<button type="button" class="mini-btn danger" data-wish-act="cancel" data-id="${i.id}">取消</button>`
+          : `<button type="button" class="mini-btn danger" data-wish-act="delete" data-id="${i.id}">删除</button>`}</div>
       </div>`;
+  },
+
+  async changeStatus(item, action, root) {
+    const deleting = action === 'delete';
+    const label = deleting ? '删除' : '取消';
+    const detail = deleting ? '愿望会从列表移除，已有兑换记录和积分会保留。' : '取消后不再提供兑换，已有兑换记录和积分会保留。';
+    if (!await UI.confirm(`确定${label}「${UI.esc(item.title)}」吗？<br/>${detail}`, { danger: true, okLabel: label })) return;
+    try {
+      if (deleting) await api.delete(`/api/wish/${item.id}`);
+      else await api.post(`/api/wish/${item.id}/cancel`);
+      UI.toast(`已${label}`, 'ok');
+      await this.draw(root);
+    } catch (e) { UI.toast(e.message, 'err'); }
   },
 
   redRow(r) {

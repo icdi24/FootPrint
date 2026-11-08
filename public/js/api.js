@@ -1,7 +1,7 @@
 // API 封装：同源 Cookie 会话，JSON 请求。
 const api = {
-  async req(method, url, body) {
-    const opt = { method, headers: {}, credentials: 'same-origin' };
+  async req(method, url, body, { signal } = {}) {
+    const opt = { method, headers: {}, credentials: 'same-origin', signal };
     if (body !== undefined) {
       opt.headers['Content-Type'] = 'application/json';
       opt.body = JSON.stringify(body);
@@ -19,12 +19,13 @@ const api = {
     if (!res.ok) {
       const err = new Error((data && data.error) || `请求失败（${res.status}）`);
       err.status = res.status;
+      err.code = data?.code;
       throw err;
     }
     return data;
   },
   get(url) { return this.req('GET', url); },
-  post(url, body) { return this.req('POST', url, body); },
+  post(url, body, options) { return this.req('POST', url, body, options); },
   put(url, body) { return this.req('PUT', url, body); },
   patch(url, body) { return this.req('PATCH', url, body); },
   delete(url) { return this.req('DELETE', url); },

@@ -65,12 +65,7 @@ const BigGoalDetail = {
     const body = document.createElement('div');
     body.className = 'bgd-body';
     const pct = Math.max(0, Math.min(100, Number(bg.progress) || 0));
-    const PLAN_BADGE = {
-      planned: { label: '未启动', cls: 'gray' },
-      released: { label: '进行中', cls: 'active' },
-      done: { label: '已达成', cls: 'achieved' },
-    };
-    const statusText = { active: '推进中', done: '已达成', archived: '已归档' };
+    const statusText = { active: '推进中', done: '已达成', abandoned: '已放弃' };
     body.innerHTML = `
       <div class="bgd-head">
         <div class="bgd-emoji">${UI.esc(bg.emoji)}</div>
@@ -89,7 +84,7 @@ const BigGoalDetail = {
       ${bg.description ? `<p class="bgd-desc">${UI.esc(bg.description)}</p>` : ''}
       <div class="bgd-list-title">整条路线（含未启动）</div>
       <div class="bgd-chain" id="bgd-chain">
-        ${data.chain.length ? data.chain.map((g) => this.chainItem(g)).join('') : '<div class="gd-empty">还没有小目标，点下面「让 zoowy 帮忙拆」或手动添加</div>'}
+        ${data.chain.length ? data.chain.map((g) => this.chainItem(g, bg.status !== 'abandoned')).join('') : '<div class="gd-empty">还没有小目标。</div>'}
       </div>
     `;
 
@@ -116,20 +111,44 @@ const BigGoalDetail = {
     UI.sheet({
       title: '大目标',
       body,
-      actions: [
-        { label: '和 zoowy 讨论', kind: 'primary', onClick: () => { ZoowyPlan.open({ bigGoal: bg, onConfirmed: changed }); } },
+      actions: bg.status === 'abandoned'
+        ? [{ label: '删除', kind: 'danger', onClick: (close) => { close(); this.changeStatus(bg, 'delete', onChanged); } }]
+        : [
+        { label: '和 zoowy 讨论', kind: 'primary', onClick: () => { ZoowyChat.open({ bigGoalId: bg.id, title: bg.title, onApplied: changed }); } },
         { label: '加个小目标', onClick: () => { this.addChainGoal(bgId, data.chain.length, changed); } },
         { label: '整体顺延 / 提前', onClick: () => { this.shiftSheet(bgId, changed); } },
         { label: '编辑', onClick: () => { BigGoalForm.open({ bigGoal: bg, onSaved: changed }); } },
+        ...(bg.status === 'active' ? [{ label: '放弃', kind: 'danger',
+          onClick: (close) => { close(); this.changeStatus(bg, 'abandon', onChanged); } }] : []),
       ],
     });
   },
 
-  chainItem(g) {
-    const badge = PLAN_BADGE[g.plan_status] || PLAN_BADGE.planned;
+  async changeStatus(bg, action, onChanged) {
+    const deleting = action === 'delete';
+    const label = deleting ? '删除' : '放弃';
+    const detail = deleting ? '大目标会从列表移除，历史记录和积分会保留。' : '进行中和未开始的小目标会一并放弃，已完成记录和积分会保留。';
+    if (!await UI.confirm(`确定${label}「${UI.esc(bg.title)}」吗？<br/>${detail}`, { danger: true, okLabel: label })) return;
+    try {
+      if (deleting) await api.delete(`/api/biggoals/${bg.id}`);
+      else await api.post(`/api/biggoals/${bg.id}/abandon`);
+      UI.toast(`已${label}`, 'ok');
+      if (onChanged) await onChanged();
+    } catch (e) {
+      UI.toast(e.message, 'err');
+    }
+  },
+
+  chainItem(g, allowEdits = true) {
+    const badges = {
+      planned: { label: '未启动', cls: 'gray' },
+      released: { label: '进行中', cls: 'active' },
+      done: { label: '已达成', cls: 'achieved' },
+    };
+    const badge = badges[g.plan_status] || badges.planned;
     const st = g.status;
     const stateLabel = st === 'achieved' ? '已达成 ✓' : st === 'reviewing' ? '待验收' : st === 'abandoned' ? '已放弃' : '';
-    const editable = st !== 'achieved' && st !== 'abandoned';
+    const editable = allowEdits && st !== 'achieved' && st !== 'abandoned';
     const overdue = g.planned_date && g.plan_status !== 'done' && st !== 'achieved' && g.planned_date < new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
     return `
       <div class="bgd-item ${st === 'achieved' ? 'is-done' : ''}" data-id="${g.id}">
@@ -139,6 +158,7 @@ const BigGoalDetail = {
             ${g.planned_date ? `计划 ${UI.fmtDate(g.planned_date)}${overdue ? ' <b class="warn-txt">已逾期</b>' : ''}` : '未排日期'}
             · <span class="sc-badge ${badge.cls}">${badge.label}</span>
             ${stateLabel ? ` · ${stateLabel}` : ''}
+            ${st === 'draft' && g.prerequisite_pending ? ' · 等待前置小目标验收' : ''}
           </div>
           ${g.accept_criteria ? `<div class="bgd-item-crit">${UI.esc(g.accept_criteria)}</div>` : ''}
         </div>
@@ -289,173 +309,6 @@ const BigGoalDetail = {
           },
         },
       ],
-    });
-  },
-};
-
-// zoowy 规划：两路启动 → 信息不够一次问一个（带建议答案）→ 候选勾选 → 一次确认创建
-const ZoowyPlan = {
-  async open({ bigGoal, bigGoalId, onConfirmed }) {
-    const bgId = bigGoal ? bigGoal.id : bigGoalId;
-    if (!bgId) {
-      // 没有大目标：先选一个
-      try {
-        const list = (await api.get('/api/biggoals')).bigGoals.filter((b) => b.status === 'active');
-        if (!list.length) return UI.toast('先建一个大目标，再让 zoowy 拆', 'err');
-        const body = document.createElement('div');
-        body.innerHTML = list.map((b) => `
-          <button class="bgd-pick" data-id="${b.id}">${UI.esc(b.emoji)} ${UI.esc(b.title)}</button>`).join('');
-        UI.sheet({
-          title: '拆哪个大目标？',
-          body,
-          actions: [{ label: '取消', onClick: (close) => close() }],
-        }).then(() => {});
-        body.addEventListener('click', (e) => {
-          const b = e.target.closest('.bgd-pick');
-          if (!b) return;
-          document.querySelector('.sheet-wrap:last-child .sheet-backdrop')?.click();
-          this.open({ bigGoalId: Number(b.dataset.id), onConfirmed });
-        });
-      } catch (e) { UI.toast(e.message, 'err'); }
-      return;
-    }
-
-    const body = document.createElement('div');
-    body.className = 'zoowy-plan';
-    body.innerHTML = `
-      <div class="zp-intro">
-        <div class="zp-avatar">🐾</div>
-        <div class="zp-text">我来帮你把大目标拆成一条能验收的小目标路线。两条路：</div>
-      </div>
-      <div class="zp-choices">
-        <button class="zp-choice" id="zp-idea">✍️ 我先说说想法</button>
-        <button class="zp-choice" id="zp-auto">🐾 按已有信息直接来</button>
-      </div>
-      <div class="zp-idea-extra hidden" id="zp-idea-extra">
-        <textarea id="zp-idea-text" rows="3" maxlength="1000" placeholder="说说你的想法：想分几步、大概节奏、卡在哪…（会喂给 zoowy）"></textarea>
-        <button class="btn primary" id="zp-idea-go">就这么聊</button>
-      </div>
-      <div class="zp-flow hidden" id="zp-flow"></div>
-    `;
-    const flow = body.querySelector('#zp-flow');
-    body.querySelector('#zp-idea').addEventListener('click', () => {
-      body.querySelector('.zp-choices').classList.add('hidden');
-      body.querySelector('#zp-idea-extra').classList.remove('hidden');
-    });
-    body.querySelector('#zp-idea-go').addEventListener('click', () => {
-      const text = body.querySelector('#zp-idea-text').value.trim();
-      this.runFlow(flow, { bgId, mode: 'idea', message: text, onConfirmed });
-    });
-    body.querySelector('#zp-auto').addEventListener('click', () => {
-      body.querySelector('.zp-choices').classList.add('hidden');
-      this.runFlow(flow, { bgId, mode: 'auto', onConfirmed });
-    });
-
-    UI.sheet({ title: `zoowy 帮忙拆：${bigGoal ? UI.esc(bigGoal.title) : ''}`, body, actions: [{ label: '关闭', onClick: (close) => close() }] });
-  },
-
-  // 主流程：intro → （可能追问）→ 候选勾选 → confirm
-  async runFlow(flow, { bgId, mode, message, history = [], forcePlan = false, onConfirmed }) {
-    flow.classList.remove('hidden');
-    flow.innerHTML = '<div class="zp-loading">zoowy 正在想…</div>';
-    let out;
-    try {
-      out = await api.post('/api/zoowy/plan/intro', { big_goal_id: bgId, mode, message, history, force: forcePlan });
-    } catch (e) {
-      flow.innerHTML = `<div class="zp-err">🐾 ${UI.esc(e.message)}</div>`;
-      return;
-    }
-
-    if (!out.enough && forcePlan) {
-      flow.innerHTML = '<div class="zp-err">🐾 zoowy 觉得信息还是不够，但你说不用再问了。去大目标详情页手动「加个小目标」，或者回来跟它聊聊。</div>';
-      return;
-    }
-
-    if (!out.enough) {
-      // 一次只问一个问题，带建议答案
-      flow.innerHTML = `
-        <div class="zp-q">
-          <div class="zp-avatar">🐾</div>
-          <div class="zp-bubble">${UI.esc(out.question || '再说说你的情况？')}</div>
-        </div>
-        ${out.suggestion ? `<button class="zp-suggest" id="zp-use-suggest">💡 建议：${UI.esc(out.suggestion)}（点我直接用）</button>` : ''}
-        <textarea id="zp-answer" rows="3" maxlength="1000" placeholder="用一句话回答就行"></textarea>
-        <div class="zp-btn-row">
-          <button class="btn primary" id="zp-send">回它</button>
-          <button class="btn ghost" id="zp-skip">答不上，硬出计划</button>
-        </div>
-      `;
-      const send = (forced) => {
-        const answer = forced || flow.querySelector('#zp-answer').value.trim();
-        if (!forced && !answer) return UI.toast('写一句再发', 'err');
-        this.runFlow(flow, {
-          bgId, mode: 'idea', message: answer,
-          history: [...history, { q: out.question, a: answer }],
-          onConfirmed,
-        });
-      };
-      flow.querySelector('#zp-send').addEventListener('click', () => send(false));
-      const useSuggest = flow.querySelector('#zp-use-suggest');
-      if (useSuggest) useSuggest.addEventListener('click', () => send(out.suggestion));
-      flow.querySelector('#zp-skip').addEventListener('click', () => {
-        this.runFlow(flow, { bgId, mode: 'auto', history, forcePlan: true, onConfirmed });
-      });
-      return;
-    }
-
-    // 出候选：勾选 = 一次确认
-    const cands = (out.candidates || []).map((c, i) => ({ ...c, _i: i, _on: true }));    flow.innerHTML = `
-      <div class="zp-q">
-        <div class="zp-avatar">🐾</div>
-        <div class="zp-bubble">拆好了 ${cands.length} 步。勾掉不要的，也可以改日期：</div>
-      </div>
-      <div class="zp-cands">
-        ${cands.map((c) => `
-          <label class="zp-cand ${c._on ? 'on' : ''}" data-i="${c._i}">
-            <input type="checkbox" checked data-i="${c._i}"/>
-            <div class="zp-cand-main">
-              <div class="zp-cand-title">${c._i + 1}. ${UI.esc(c.title)}</div>
-              <div class="zp-cand-meta">
-                <input type="date" class="zp-cand-date" data-i="${c._i}" value="${c.planned_date || ''}"/>
-                难度 ${c.difficulty || 3} · 约 ${UI.fmtNum(Number(c.est_total_min) || 600)} 分钟
-              </div>
-              ${c.accept_criteria ? `<div class="zp-cand-crit">${UI.esc(c.accept_criteria)}</div>` : ''}
-            </div>
-          </label>`).join('')}
-      </div>
-      <div class="zp-btn-row">
-        <button class="btn ghost" id="zp-add-one">手动补一个</button>
-        <button class="btn primary" id="zp-confirm">就这些，建出来</button>
-      </div>
-    `;
-    flow.querySelectorAll('.zp-cand input[type=checkbox]').forEach((cb) => {
-      cb.addEventListener('change', () => cb.closest('.zp-cand').classList.toggle('on', cb.checked));
-    });
-    flow.querySelector('#zp-confirm').addEventListener('click', async () => {
-      const items = cands
-        .filter((c) => flow.querySelector(`.zp-cand input[data-i="${c._i}"]`).checked)
-        .map((c) => ({
-          ...c,
-          planned_date: flow.querySelector(`.zp-cand-date[data-i="${c._i}"]`).value || c.planned_date,
-        }));
-      if (!items.length) return UI.toast('至少留一个', 'err');
-      const btn = flow.querySelector('#zp-confirm');
-      btn.disabled = true;
-      btn.textContent = '创建中…';
-      try {
-        const r = await api.post('/api/zoowy/plan/confirm', { big_goal_id: bgId, items });
-        const n = (r.created || []).filter((x) => !x.duplicate).length;
-        UI.toast(`建了 ${n} 个小目标 🎉`, 'ok');
-        document.querySelector('.sheet-wrap:last-child .sheet-backdrop')?.click();
-        if (onConfirmed) onConfirmed();
-      } catch (e) {
-        UI.toast(e.message, 'err');
-        btn.disabled = false;
-        btn.textContent = '就这些，建出来';
-      }
-    });
-    flow.querySelector('#zp-add-one').addEventListener('click', () => {
-      BigGoalDetail.addChainGoal(bgId, cands.length, () => {});
     });
   },
 };

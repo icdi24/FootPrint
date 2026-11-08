@@ -102,6 +102,7 @@ fun GoalsScreen(vm: AppViewModel) {
   var monthAnchor by remember { mutableStateOf(YearMonth.now(ZONE)) }
   var week by remember { mutableStateOf<WeekView?>(null) }
   var month by remember { mutableStateOf<MonthView?>(null) }
+  var dailyGoals by remember { mutableStateOf<List<GoalDetail>>(emptyList()) }
   // 小目标列表
   var stageGoals by remember { mutableStateOf<List<GoalDetail>?>(null) }
   // 大目标列表（P1-#8）
@@ -124,6 +125,9 @@ fun GoalsScreen(vm: AppViewModel) {
 
   // 放弃确认弹层（id + 标题即可）
   var abandonTarget by remember { mutableStateOf<Pair<Long, String>?>(null) }
+  var followUp by remember { mutableStateOf<Pair<GoalDetail, Boolean>?>(null) }
+  var bigGoalAction by remember { mutableStateOf<BigGoalDto?>(null) }
+  var changingBigGoal by remember { mutableStateOf(false) }
 
   // 一次性提示
   var toast by remember { mutableStateOf<String?>(null) }
@@ -147,6 +151,7 @@ fun GoalsScreen(vm: AppViewModel) {
         } else {
           month = Api.getMonth(token, monthAnchor.format(DateTimeFormatter.ofPattern("yyyy-MM")))
         }
+        if (mode == 0) dailyGoals = Api.listGoals(token, "daily")
       } catch (e: ApiException) {
         error = e.message ?: "加载失败"
       } catch (e: Exception) {
@@ -354,6 +359,8 @@ fun GoalsScreen(vm: AppViewModel) {
             onAbandon = { g ->
               abandonTarget = g.id to g.title
             },
+            onWithdraw = { g -> followUp = g to false },
+            onDelete = { g -> followUp = g to true },
           )
         } else if (mode == 2) {
           BigGoalsView(
@@ -364,6 +371,7 @@ fun GoalsScreen(vm: AppViewModel) {
               showBigEditor = true
             },
             onOpen = { bigDetailId = it },
+            onLifecycle = { if (!changingBigGoal) bigGoalAction = it },
           )
         } else if (tab == 0) {
           WeekView(
@@ -379,6 +387,23 @@ fun GoalsScreen(vm: AppViewModel) {
           )
         } else {
           MonthView(month = month, loading = loading)
+        }
+        if (mode == 0) {
+          val managing = dailyGoals.filter { it.status == "active" || it.status == "draft" }
+          val abandoned = dailyGoals.filter { it.status == "abandoned" }
+          for ((title, goals) in listOf("管理日常目标" to managing, "已放弃的日常目标" to abandoned)) {
+            if (goals.isEmpty()) continue
+            Spacer(Modifier.height(12.dp))
+            Text(title, style = PixelType.Title, color = PixelColors.Ink)
+            for (goal in goals) {
+              Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("${goal.emoji} ${goal.title}", style = PixelType.Body, color = PixelColors.Ink, modifier = Modifier.weight(1f))
+                PixelSmallButton(text = if (goal.status == "abandoned") "删除" else "放弃", filled = false, onClick = {
+                  if (goal.status == "abandoned") followUp = goal to true else abandonTarget = goal.id to goal.title
+                })
+              }
+            }
+          }
         }
         Spacer(Modifier.height(24.dp))
       }
@@ -430,6 +455,7 @@ fun GoalsScreen(vm: AppViewModel) {
       context = context,
       onDismiss = { bigDetailId = null },
       onChanged = { reload() },
+      onLifecycle = { if (!changingBigGoal) bigGoalAction = it },
       onEdit = { bg ->
         bigEditorTarget = bg
         showBigEditor = true
@@ -467,11 +493,65 @@ fun GoalsScreen(vm: AppViewModel) {
   if (abandonTarget != null) {
     ConfirmDialog(
       title = "放弃目标",
-      message = "确定要放弃「${abandonTarget!!.second}」吗？放弃后无法恢复打卡记录。",
+      message = "确定要放弃「${abandonTarget!!.second}」吗？原有记录和积分会保留。",
       confirmText = "放弃",
       danger = true,
       onDismiss = { abandonTarget = null },
       onConfirm = { doAbandon(abandonTarget!!.first) },
+    )
+  }
+  bigGoalAction?.let { goal ->
+    val deleting = goal.status == "abandoned"
+    val action = if (deleting) "删除" else "放弃"
+    ConfirmDialog(
+      title = "${action}大目标",
+      message = if (deleting) "「${goal.title}」会从列表移除，原有记录和积分会保留。"
+        else "放弃「${goal.title}」会停止路线中未完成的小目标，原有记录和积分会保留。",
+      confirmText = action,
+      danger = true,
+      onDismiss = { bigGoalAction = null },
+      onConfirm = {
+        val token = Session.token(context)
+        if (token != null && !changingBigGoal) {
+          changingBigGoal = true
+          bigGoalAction = null
+          scope.launch {
+            try {
+              if (deleting) Api.deleteBigGoal(token, goal.id) else Api.abandonBigGoal(token, goal.id)
+              if (bigDetailId == goal.id) bigDetailId = null
+              toast = "已${action}大目标"
+              reload()
+            } catch (e: Exception) {
+              toast = e.message ?: "操作失败"
+            } finally {
+              changingBigGoal = false
+            }
+          }
+        }
+      },
+    )
+  }
+  followUp?.let { (goal, deleting) ->
+    val label = if (deleting) "删除" else "撤回验收"
+    ConfirmDialog(
+      title = label,
+      message = if (deleting) "删除「${goal.title}」后，条目从列表移除，原有记录和积分会保留。" else "撤回「${goal.title}」后，小目标回到进行中。",
+      confirmText = label,
+      danger = true,
+      onDismiss = { followUp = null },
+      onConfirm = {
+        followUp = null
+        scope.launch {
+          val token = Session.token(context) ?: return@launch
+          try {
+            if (deleting) Api.deleteGoal(token, goal.id) else Api.withdrawGoal(token, goal.id)
+            toast = "已$label"
+            reload()
+          } catch (e: Exception) {
+            toast = e.message ?: "操作失败"
+          }
+        }
+      },
     )
   }
 }
@@ -1110,7 +1190,7 @@ private fun CheckinDialog(
 // ==================== 通用确认弹层 ====================
 
 @Composable
-private fun ConfirmDialog(
+internal fun ConfirmDialog(
   title: String,
   message: String,
   confirmText: String,
@@ -1181,6 +1261,8 @@ private fun StageListView(
   onStart: (GoalDetail) -> Unit,
   onSubmit: (GoalDetail) -> Unit,
   onAbandon: (GoalDetail) -> Unit,
+  onWithdraw: (GoalDetail) -> Unit,
+  onDelete: (GoalDetail) -> Unit,
 ) {
   if (loading && goals == null) {
     Text("加载中…", style = PixelType.Small, color = PixelColors.Ink3)
@@ -1209,7 +1291,7 @@ private fun StageListView(
 
   for (g in list) {
     Spacer(Modifier.height(12.dp))
-    StageCard(g, onEdit, onStart, onSubmit, onAbandon)
+    StageCard(g, onEdit, onStart, onSubmit, onAbandon, onWithdraw, onDelete)
   }
 }
 
@@ -1220,6 +1302,8 @@ private fun StageCard(
   onStart: (GoalDetail) -> Unit,
   onSubmit: (GoalDetail) -> Unit,
   onAbandon: (GoalDetail) -> Unit,
+  onWithdraw: (GoalDetail) -> Unit,
+  onDelete: (GoalDetail) -> Unit,
 ) {
   val badge = stageBadge(g.status)
   val points = g.total_points ?: 0
@@ -1267,15 +1351,19 @@ private fun StageCard(
             PixelSmallButton(text = "开始", onClick = { onStart(g) }, modifier = Modifier.weight(1f))
             Spacer(Modifier.width(8.dp))
             PixelSmallButton(text = "编辑", filled = false, onClick = { onEdit(g) })
+            Spacer(Modifier.width(8.dp))
+            PixelSmallButton(text = "放弃", filled = false, onClick = { onAbandon(g) })
           }
           "reviewing" -> {
             Text("等待对方验收…", style = PixelType.Small, color = PixelColors.OrangeDeep)
+            Spacer(Modifier.width(8.dp))
+            PixelSmallButton(text = "撤回验收", filled = false, onClick = { onWithdraw(g) })
           }
           "achieved" -> {
             Text("+$points 分已入账", style = PixelType.Small, color = PixelColors.GreenDeep)
           }
           "abandoned" -> {
-            Text("已放弃", style = PixelType.Small, color = PixelColors.Ink3)
+            PixelSmallButton(text = "删除", filled = false, onClick = { onDelete(g) })
           }
         }
       }

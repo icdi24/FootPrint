@@ -59,10 +59,10 @@ data class PartnerResponse(
 
 /** 后端统一用 { error: "..." } 返回错误信息 */
 @Serializable
-data class ApiErrorBody(val error: String? = null)
+data class ApiErrorBody(val error: String? = null, val code: String? = null)
 
 /** 把后端的 HTTP 错误变成可读异常，UI 直接展示 message */
-class ApiException(message: String, val code: Int = 0) : IOException(message)
+class ApiException(message: String, val code: Int = 0, val serverCode: String? = null) : IOException(message)
 
 // ---------------- 客户端 ----------------
 
@@ -113,6 +113,18 @@ object Api {
             .build()
     }
 
+    private val zoowyPrivateClient: OkHttpClient by lazy {
+        client.newBuilder().followRedirects(false).followSslRedirects(false).build()
+    }
+
+    private val zoowyChatClient: OkHttpClient by lazy {
+        zoowyPrivateClient.newBuilder()
+            .readTimeout(75, TimeUnit.SECONDS)
+            .callTimeout(80, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(false)
+            .build()
+    }
+
     fun baseUrl(): String = Session.baseUrl()
 
     /** 拼完整地址；BASE_URL 必须带结尾 "/"，这里再兜一层 */
@@ -128,6 +140,7 @@ object Api {
         path: String,
         body: String? = null,
         token: String? = null,
+        requestClient: OkHttpClient = client,
         onSetCookie: ((Map<String, String>) -> Unit)? = null,
     ): String = withContext(Dispatchers.IO) {
         val builder = Request.Builder().url(url(path))
@@ -140,7 +153,7 @@ object Api {
         builder.header("Accept", "application/json")
 
         val response = try {
-            client.newCall(builder.build()).execute()
+            requestClient.newCall(builder.build()).execute()
         } catch (e: IOException) {
             // 网络不通（没连 Wi-Fi / 地址填错 / 后端没起）统一成一句话
             Log.w(TAG, "$method $path 网络失败", e)
@@ -160,14 +173,62 @@ object Api {
             }
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {
-                val msg = runCatching {
-                    json.decodeFromString(ApiErrorBody.serializer(), text).error
+                val error = runCatching {
+                    json.decodeFromString(ApiErrorBody.serializer(), text)
                 }.getOrNull()
-                throw ApiException(msg?.takeIf { it.isNotBlank() } ?: "HTTP ${resp.code}", resp.code)
+                throw ApiException(error?.error?.takeIf { it.isNotBlank() } ?: "HTTP ${resp.code}", resp.code, error?.code)
             }
             text
         }
     }
+
+    suspend fun zoowyMessages(token: String): List<ZoowyMessage> =
+        json.decodeFromString(ZoowyHistory.serializer(), send("GET", "api/zoowy/messages", token = token)).messages
+
+    suspend fun zoowyChat(token: String, message: ZoowyRequest): ZoowyReply =
+        json.decodeFromString(ZoowyReply.serializer(), send(
+            "POST", "api/zoowy/chat", json.encodeToString(ZoowyRequest.serializer(), message), token, requestClient = zoowyChatClient,
+        ))
+
+    suspend fun compactZoowy(token: String, requestId: String): ZoowyCompactReply =
+        json.decodeFromString(ZoowyCompactReply.serializer(), send(
+            "POST", "api/zoowy/compact", json.encodeToString(ZoowyOperationRequest.serializer(), ZoowyOperationRequest(requestId)),
+            token, requestClient = zoowyChatClient,
+        ))
+
+    suspend fun cancelZoowyTurn(token: String, requestId: String): Boolean =
+        json.decodeFromString(ZoowyCancellation.serializer(), send(
+            "POST", "api/zoowy/turns/$requestId/cancel", "{}", token, requestClient = zoowyPrivateClient,
+        )).cancelled
+
+    suspend fun zoowyModel(token: String): ZoowyModel =
+        json.decodeFromString(ZoowyModel.serializer(), send("GET", "api/zoowy/model", token = token))
+
+    suspend fun saveZoowyModel(token: String, apiKey: String, model: String): ZoowyModel =
+        json.decodeFromString(ZoowyModel.serializer(), send(
+            "PUT", "api/zoowy/model", json.encodeToString(ZoowyModelRequest.serializer(), ZoowyModelRequest(apiKey, model)), token,
+            requestClient = zoowyPrivateClient,
+        ))
+
+    suspend fun removeZoowyModel(token: String): ZoowyModel =
+        json.decodeFromString(ZoowyModel.serializer(), send("DELETE", "api/zoowy/model", token = token))
+
+    suspend fun acceptZoowyOffer(token: String, id: Long, requestId: String): ZoowyCard =
+        json.decodeFromString(ZoowyCardResponse.serializer(), send(
+            "POST", "api/zoowy/offers/$id/accept", json.encodeToString(ZoowyOperationRequest.serializer(), ZoowyOperationRequest(requestId)),
+            token, requestClient = zoowyChatClient,
+        )).card
+
+    suspend fun confirmZoowyDraft(token: String, id: Long, revision: Int): ZoowyCard =
+        json.decodeFromString(ZoowyCardResponse.serializer(), send(
+            "POST", "api/zoowy/drafts/$id/confirm", json.encodeToString(ZoowyConfirm.serializer(), ZoowyConfirm(revision)), token,
+        )).card
+
+    suspend fun uploadZoowyImage(token: String, dataUrl: String): Long =
+        json.decodeFromString(ZoowyAttachment.serializer(), send(
+            "POST", "api/zoowy/attachments", json.encodeToString(ZoowyImage.serializer(), ZoowyImage(dataUrl)), token,
+            requestClient = zoowyPrivateClient,
+        )).attachmentId
 
     // ---------------- 登录 ----------------
 
@@ -308,6 +369,14 @@ object Api {
         send("POST", "api/goals/$goalId/abandon", "{}", token)
     }
 
+    suspend fun deleteGoal(token: String, goalId: Long) {
+        send("DELETE", "api/goals/$goalId", token = token)
+    }
+
+    suspend fun withdrawGoal(token: String, goalId: Long) {
+        send("POST", "api/goals/$goalId/withdraw", "{}", token)
+    }
+
     /** POST /api/goals/{id}/submit —— 小目标提交验收 */
     suspend fun submitGoal(token: String, goalId: Long, selfStatement: String) {
         send(
@@ -342,6 +411,14 @@ object Api {
     suspend fun updateBigGoal(token: String, id: Long, body: BigGoalPayload): BigGoalDto {
         val text = send("PATCH", "api/biggoals/$id", json.encodeToString(BigGoalPayload.serializer(), body), token)
         return json.decodeFromString(BigGoalCreated.serializer(), text).bigGoal
+    }
+
+    suspend fun abandonBigGoal(token: String, id: Long) {
+        send("POST", "api/biggoals/$id/abandon", "{}", token)
+    }
+
+    suspend fun deleteBigGoal(token: String, id: Long) {
+        send("DELETE", "api/biggoals/$id", token = token)
     }
 
     /** PATCH /api/biggoals/{id}/goals/{goalId} —— 手改链上小目标（手改优先于 AI 重排） */
@@ -396,6 +473,14 @@ object Api {
     suspend fun updateWish(token: String, wishId: Long, body: WishPayload): WishItem {
         val text = send("PUT", "api/wish/$wishId", json.encodeToString(WishPayload.serializer(), body), token)
         return json.decodeFromString(WishCreated.serializer(), text).item
+    }
+
+    suspend fun cancelWish(token: String, wishId: Long) {
+        send("POST", "api/wish/$wishId/cancel", "{}", token)
+    }
+
+    suspend fun deleteWish(token: String, wishId: Long) {
+        send("DELETE", "api/wish/$wishId", token = token)
     }
 
     /** POST /api/wish/{id}/redeem —— 兑换（锁分） */

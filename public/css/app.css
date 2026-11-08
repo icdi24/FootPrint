@@ -1256,51 +1256,15 @@ code { background: var(--bg-2); border: 1px solid var(--line-strong); padding: 1
 .pc-title { font-size: 13px; font-family: var(--font-px-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pc-meta { font-size: 11px; color: var(--ink-2); margin-top: 3px; display: flex; align-items: center; gap: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* zoowy 规划弹层 */
-.zoowy-plan { min-width: 0; }
-.zp-intro, .zp-q { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px; }
-.zp-avatar { font-size: 22px; flex: none; }
-.zp-text { font-size: 12px; color: var(--ink-2); line-height: 1.7; }
-.zp-bubble {
-  flex: 1; background: var(--green-soft); border: 2px solid var(--green);
-  padding: 10px 12px; font-size: 12px; line-height: 1.8;
-}
-.zp-choices { display: flex; gap: 8px; margin-bottom: 10px; }
-.zp-choice {
-  flex: 1; background: var(--card); border: 2px solid var(--line-strong); box-shadow: var(--sh-px-sm);
-  padding: 12px 8px; font-size: 12px; font-family: var(--font-px-mono); cursor: pointer;
-}
-.zp-choice:active { transform: translateY(2px); box-shadow: none; }
-.zp-idea-extra textarea, .zp-q + textarea, #zp-answer {
-  width: 100%; margin-bottom: 8px;
-}
-.zp-suggest {
-  display: block; width: 100%; text-align: left; margin-bottom: 8px;
-  background: var(--orange-soft); border: 2px dashed var(--orange);
-  padding: 10px 12px; font-size: 12px; line-height: 1.7; cursor: pointer;
-}
-.zp-btn-row { display: flex; gap: 8px; }
-.zp-btn-row .btn { flex: 1; }
-.zp-loading { text-align: center; font-size: 12px; color: var(--ink-2); padding: 20px 0; }
-.zp-err { font-size: 12px; color: var(--orange-deep); line-height: 1.7; padding: 8px 0; }
-.zp-cands { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
-.zp-cand {
-  display: flex; gap: 8px; align-items: flex-start;
-  background: var(--card); border: 2px solid var(--line); padding: 10px 12px; cursor: pointer;
-}
-.zp-cand.on { border-color: var(--green); background: var(--green-soft); }
-.zp-cand input[type="checkbox"] { margin-top: 3px; flex: none; }
-.zp-cand-main { flex: 1; min-width: 0; }
-.zp-cand-title { font-size: 12px; font-family: var(--font-px-mono); line-height: 1.6; }
-.zp-cand-meta { font-size: 11px; color: var(--ink-2); margin-top: 4px; display: flex; gap: 8px; align-items: center; }
-.zp-cand-date { font-size: 11px; padding: 2px 4px; border: 1px solid var(--line-strong); background: var(--card); max-width: 120px; }
-.zp-cand-crit { font-size: 11px; color: var(--ink-2); margin-top: 4px; line-height: 1.7; }
 .zf-entry { border-top: 2px dashed var(--line); padding-top: 10px; }
 .hidden { display: none !important; }
 
-/* ===== zoowy 聊天 / 画像 / 日报（P2-#14）===== */
-.zc-body { display: flex; flex-direction: column; height: 60vh; min-height: 380px; }
-.zc-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 12px; }
+/* zoowy 聊天、设置、画像和日报 */
+.zc-body { display: flex; flex-direction: column; height: 60dvh; min-height: 300px; }
+.zc-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.zc-toolbar span { overflow-wrap: anywhere; color: var(--ink-2); }
+.zc-toolbar button { flex: none; }
+.zc-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 12px; }
 .zc-msg { display: flex; gap: 8px; align-items: flex-start; }
 .zc-msg.me { justify-content: flex-end; }
 .zc-msg .zc-text {
@@ -1310,10 +1274,38 @@ code { background: var(--bg-2); border: 1px solid var(--line-strong); padding: 1
 }
 .zc-msg.me .zc-text { background: var(--green-soft); border-color: var(--green); }
 .zc-avatar { font-size: 20px; flex: none; }
-.zc-tools { margin-top: 6px; font-size: 10px; color: var(--ink-2); border-top: 1px dashed var(--line-strong); padding-top: 4px; }
-.zc-input-row { display: flex; gap: 8px; align-items: flex-end; border-top: 2px dashed var(--line-strong); padding-top: 10px; }
-.zc-input-row textarea { flex: 1; resize: none; max-height: 90px; }
+.zc-card { white-space: normal; border-top: 2px dashed var(--line-strong); margin-top: 8px; padding-top: 8px; }
+.zc-card:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.zc-card p { margin: 4px 0; }
+.zc-card ol, .zc-card ul { padding-inline-start: 20px; margin: 8px 0; }
+.zc-card li + li { margin-top: 8px; }
+.zc-card .btn { margin-top: 8px; height: auto; min-height: 44px; padding: 8px 12px; white-space: normal; }
+.zc-detail { color: var(--ink-2); }
+.zc-next { display: inline-block; margin-inline-start: 4px; padding-inline: 4px; color: var(--green-deep); background: var(--green-soft); }
+.zc-composer { border-top: 2px dashed var(--line-strong); padding-top: 8px; }
+.zc-modes { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.zc-modes .btn { min-height: 44px; padding-inline: 10px; }
+.zc-modes .btn[aria-pressed="true"] { background: var(--green-soft); border-color: var(--green-deep); color: var(--green-deep); }
+.zc-input-row { display: flex; gap: 8px; align-items: center; }
+.zc-input-row textarea { flex: 1; min-width: 0; resize: none; min-height: 44px; max-height: 90px; }
+.zc-input-row .btn { flex: none; min-height: 44px; padding-inline: 10px; }
+.zc-sources a { color: var(--green-deep); text-decoration: underline; overflow-wrap: anywhere; }
 .zc-empty { text-align: center; font-size: 12px; color: var(--ink-2); padding: 30px 10px; line-height: 1.8; }
+.zc-error { color: var(--red-deep); padding: 8px 0; overflow-wrap: anywhere; }
+.zc-operation-status { color: var(--ink-2); padding: 8px 0; overflow-wrap: anywhere; }
+.zc-attachment:not([hidden]) { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }
+.zc-attachment span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.zc-attachment button { flex: none; }
+.zc-settings input, .zc-settings select {
+  display: block; width: 100%; min-height: 44px; margin-top: 4px; padding: 8px 12px;
+  border: 2px solid var(--line-strong); background: var(--card); color: var(--ink); font: inherit;
+}
+.zc-settings-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.zc-settings-actions [hidden] { display: none; }
+.zc-preferences { margin-top: 16px; padding-top: 12px; border-top: 2px dashed var(--line-strong); }
+.zc-preferences ul { list-style: none; margin-top: 8px; }
+.zc-preferences li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.zc-preferences li button { flex: none; }
 
 .diary-card {
   background: var(--card); border: 2px solid var(--line-strong); box-shadow: var(--sh-px-sm);
