@@ -162,7 +162,7 @@ const IMPLEMENTATIONS = {
   },
 
   read_big_goal: {
-    desc: '读自己的某个大目标：描述、AI 进度、客观计数 done/total、链上全部小目标（含未启动的）',
+    desc: '读自己的某个大目标（需先由 list_big_goals 拿 id）：描述、AI 进度、客观计数 done/total、链上全部小目标（含未启动的）',
     readOnly: true,
     params: { type: 'object', properties: { id: { type: 'integer' } }, required: ['id'] },
     async run(ctx, args) {
@@ -175,6 +175,29 @@ const IMPLEMENTATIONS = {
       );
       const done = chain.filter((g) => g.status === 'achieved').length;
       return ok({ big_goal: bg, chain, done, total: chain.length });
+    },
+  },
+
+  list_big_goals: {
+    desc: '列出自己的全部大目标（id、标题、描述、AI 进度、客观 done/total、状态）。想读某个大目标详情或给它加小目标前，先用这个拿 id',
+    readOnly: true,
+    params: { type: 'object', properties: {}, required: [] },
+    async run(ctx) {
+      const rows = await ctx.db.all(
+        `SELECT b.id, b.title, b.emoji, b.description, b.progress, b.progress_note, b.status, b.created_at,
+                (SELECT COUNT(*) FROM goals g WHERE g.big_goal_id = b.id AND g.owner_id = ? AND g.status != 'archived') AS total,
+                (SELECT COUNT(*) FROM goals g WHERE g.big_goal_id = b.id AND g.owner_id = ? AND g.status = 'achieved') AS done
+         FROM big_goals b WHERE b.owner_id = ? AND b.status != 'archived'
+         ORDER BY b.id DESC LIMIT 50`,
+        [ctx.userId, ctx.userId, ctx.userId]
+      );
+      return ok({
+        bigGoals: rows.map((r) => ({
+          id: Number(r.id), title: r.title, emoji: r.emoji, description: r.description,
+          progress: Number(r.progress), progressNote: r.progress_note, status: r.status,
+          done: Number(r.done), total: Number(r.total), createdAt: r.created_at,
+        })),
+      });
     },
   },
 
@@ -240,6 +263,51 @@ const IMPLEMENTATIONS = {
   },
 
   // ===== 写 =====
+  create_big_goal: {
+    desc: '给自己创建一个大目标（长期方向，不能直接打卡）。用户明确要立目标时才用；建之前先用 list_big_goals 查是否已有同名的。幂等：同名且未归档的不重复建',
+    readOnly: false,
+    params: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: '大目标名称，1–40 字' },
+        description: { type: 'string', description: '描述 / 现状 / 重点，≤500 字' },
+        deadline: { type: 'string', description: '可选截止日期 YYYY-MM-DD；当前大目标没有独立截止字段，会写进描述末尾' },
+        emoji: { type: 'string' },
+      },
+      required: ['title'],
+    },
+    async run(ctx, args) {
+      const b = args || {};
+      const title = String(b.title || '').trim();
+      if (!title || title.length > 40) return fail('名称需为 1–40 字');
+      let desc = String(b.description || '').trim().slice(0, 500);
+      const deadline = String(b.deadline || '').trim();
+      if (deadline) {
+        if (!isValidDate(deadline)) return fail('deadline 需为 YYYY-MM-DD');
+        // 大目标表暂无独立截止列，把日期落到描述末尾，信息不丢
+        const tag = `【截止】${deadline}`;
+        if (!desc.includes(deadline)) {
+          desc = (desc ? desc.slice(0, Math.max(0, 500 - tag.length - 1)) + '\n' : '') + tag;
+        }
+      }
+      // 幂等：同名未归档的大目标不重复建（防 loop 里模型反复调用）
+      const dup = await ctx.db.get(
+        "SELECT id, title FROM big_goals WHERE owner_id = ? AND title = ? AND status != 'archived' LIMIT 1",
+        [ctx.userId, title]
+      );
+      if (dup) return ok({ big_goal_id: Number(dup.id), duplicate: true, note: '已存在同名大目标，未重复创建' });
+      const info = await ctx.db.run(
+        `INSERT INTO big_goals (owner_id, title, emoji, description, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+        [ctx.userId, title, String(b.emoji || '🏔️').slice(0, 8), desc, nowIso(), nowIso()]
+      );
+      return ok({
+        big_goal_id: Number(info.id), title, description: desc,
+        deadlineStoredInDescription: Boolean(deadline),
+      });
+    },
+  },
+
   create_plan_goal: {
     desc: '在大目标计划链上创建一个小目标（未启动状态，不会出现在首页）。幂等：同大目标下同名同日期不会重复建',
     readOnly: false,
@@ -417,8 +485,8 @@ const WHITELIST = {
   plan: ['read_my_profile', 'read_big_goal', 'read_my_goals', 'create_plan_goal', 'shift_plan_dates', 'patch_my_profile'],
   progress: ['read_my_goals', 'read_big_goal', 'read_checkins', 'write_big_goal_progress', 'patch_my_profile'],
   daily: ['read_my_goals', 'read_big_goal', 'read_checkins', 'read_my_profile', 'read_my_usage', 'read_my_diaries', 'write_my_diary', 'patch_my_profile'],
-  // chat 保留调用能力，但同一套白名单机制：读全 + 排计划相关写；不给写日报/写进度（防伪造）
-  chat: ['read_my_profile', 'read_my_goals', 'read_big_goal', 'read_checkins', 'read_my_usage', 'read_my_diaries', 'create_plan_goal', 'shift_plan_dates', 'patch_my_profile'],
+  // chat 保留调用能力，但同一套白名单机制：读全 + 大目标/计划/画像写；不给写日报/写进度（防伪造）
+  chat: ['read_my_profile', 'read_my_goals', 'read_big_goal', 'list_big_goals', 'read_checkins', 'read_my_usage', 'read_my_diaries', 'create_big_goal', 'create_plan_goal', 'shift_plan_dates', 'patch_my_profile'],
 };
 
 // 工具名 → OpenAI tools 格式

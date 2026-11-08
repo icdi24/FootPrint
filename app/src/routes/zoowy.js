@@ -38,6 +38,7 @@ module.exports = function zoowyRoutes(db) {
             content: m.content,
             tools: meta.tools || null,
             profileChanges: meta.profileChanges || null,
+            failed: meta.failed || null,
             createdAt: m.created_at,
           };
         }),

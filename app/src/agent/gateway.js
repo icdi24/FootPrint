@@ -1,7 +1,7 @@
 // agent/gateway.js —— zoowy 统一网关（P0-4）
 // 一个网关 + 4 个专业工作流（plan/progress/daily/chat），不搞多个独立 agent。
 // 网关只负责三件事：
-//  1. loop 控制：单次工作流最多 6 轮工具调用、总超时 60s，超了中断并记失败原因
+//  1. loop 控制：单次工作流最多 6 轮工具调用、总超时 60s；轮次超限降级返回，超时中断并记失败原因
 //  2. 白名单执行：模型要的工具必须在 WHITELIST[workflow] 内，userId 由服务端注入
 //  3. ai_calls 记账：模型调用在 ai.js 里记，网关中断/失败在这里补记
 const ai = require('../ai');
@@ -12,7 +12,7 @@ const { nowIso } = require('../tz');
 const MAX_TOOL_ROUNDS = 6;
 const TOTAL_TIMEOUT_MS = 60000;
 
-// 跑一轮 agent loop。messages 需含 system 提示词；返回 { content, toolRounds, toolLog, messages }
+// 跑一轮 agent loop。messages 需含 system 提示词；返回 { content, toolRounds, toolLog, messages, degraded?, reason? }
 async function runAgentLoop({ db, userId, workflow, action, messages, idempotencyKey = null }) {
   const started = Date.now();
   const tools = toolsFor(workflow);
@@ -50,17 +50,29 @@ async function runAgentLoop({ db, userId, workflow, action, messages, idempotenc
       break;
     }
 
-    // assistant 消息必须原样回填（OpenAI 格式要求 tool 结果跟在带 tool_calls 的 assistant 消息后）
-    convo.push({ role: 'assistant', content: resp.content || '', tool_calls: calls });
     toolRounds += 1;
     if (toolRounds > MAX_TOOL_ROUNDS) {
       await recordCall(db, {
         userId, workflow, action, status: 'fail',
-        detail: JSON.stringify({ reason: 'max_tool_rounds', limit: MAX_TOOL_ROUNDS }),
+        detail: JSON.stringify({ reason: 'max_tool_rounds', limit: MAX_TOOL_ROUNDS, degraded: true }),
         idempotencyKey,
       });
-      throw new ai.AiError(`${workflow} 工作流工具调用超过 ${MAX_TOOL_ROUNDS} 轮上限，已中断`, { kind: 'loop_limit' });
+      // 降级：不抛 500。把本轮已有内容 + 一句提示正常返回，保证用户拿到响应。
+      const partial = String(resp.content || '').trim();
+      finalContent = [partial, '这轮查得有点多，先说到这儿。'].filter(Boolean).join('\n\n');
+      convo.push({ role: 'assistant', content: finalContent });
+      return {
+        content: finalContent,
+        toolRounds: MAX_TOOL_ROUNDS,
+        toolLog,
+        messages: convo,
+        degraded: true,
+        reason: 'max_tool_rounds',
+      };
     }
+
+    // assistant 消息必须原样回填（OpenAI 格式要求 tool 结果跟在带 tool_calls 的 assistant 消息后）
+    convo.push({ role: 'assistant', content: resp.content || '', tool_calls: calls });
 
     for (const call of calls) {
       const fn = call.function || {};

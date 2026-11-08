@@ -5,9 +5,9 @@
 | 适用范围 | 服务端 `app/src/agent/`、`app/src/ai.js` + 触发路由 + Web / Android 入口 |
 | 唯一真源 | `app/src/agent/` 下的实现（本文描述代码实际行为，不是设计稿） |
 | 拓扑 | 1 个网关 + 4 个工作流 `plan` / `progress` / `daily` / `chat` |
-| 规模 | 11 个工具（6 读 + 5 写）、4 份白名单；仅 `chat` 走 tool-calling loop；4 个工作流均可更新画像 |
+| 规模 | 13 个工具（7 读 + 6 写）、4 份白名单；仅 `chat` 走 tool-calling loop；4 个工作流均可更新画像 |
 | 画像变更 | `profile_changes` 留痕 + `profile_versions` 可回滚，`reportChanges` 控制告知，见 §5.4 / §7 |
-| 文档状态 | 与代码同步，最后核对 2026-11-07（v1.2，分支 `agent-icdi`） |
+| 文档状态 | 与代码同步，最后核对 2026-11-08（v1.4，分支 `agent-icdi`） |
 | 校验命令 | `node app/scripts/check-agent-doc.js`（工具清单 / 工作流清单一致性，见 §5.3、§5.4） |
 | 表结构校验 | 见 [数据库设计实现文档.md](数据库设计实现文档.md) 的 `check-schema-doc.js` |
 
@@ -39,6 +39,7 @@
 | 改提示词、`PERSONA`、输出要求 | §5.6、§6 对应工作流 |
 | 改 JSON 输出 schema（字段 / 枚举 / 必填 / 上限） | §6 对应工作流、§9 |
 | 改 loop 参数（轮次上限、总超时、单次超时） | §5.2、§9 |
+| 改 loop 中断 / 降级与会话落库行为 | §5.2、§6.4、§9、§11 |
 | 改模型客户端（重试、解析、记账、`AiError`） | §2、§5.1、§10 |
 | 改触发点（路由、定时器、事件挂钩） | §6、§7、§8 |
 | 改数据库表 / 字段 / 约束 / 索引 | §4 |
@@ -121,12 +122,12 @@ zoowy **不是通用 Agent，也不是多个 Agent**，而是自研的一套轻�
 
 | 文件 | 行数 | 职责 |
 |---|---:|---|
-| [gateway.js](app/src/agent/gateway.js) | 82 | **唯一的 agent loop**：轮次/超时控制、白名单执行、中断补记 |
-| [tools.js](app/src/agent/tools.js) | 448 | 11 个工具实现 + `WHITELIST` + 画像补丁（diff/摘要/留痕） + 计划快照 |
+| [gateway.js](app/src/agent/gateway.js) | 94 | **唯一的 agent loop**：轮次/超时控制、白名单执行、**轮次超限降级返回**、中断补记 |
+| [tools.js](app/src/agent/tools.js) | 516 | 13 个工具实现（含 `list_big_goals` / `create_big_goal`） + `WHITELIST` + 画像补丁（diff/摘要/留痕） + 计划快照 |
 | [workflows/plan.js](app/src/agent/workflows/plan.js) | 121 | 规划：自检访谈 → 候选 + 画像补丁提议 → 确认创建并 apply |
 | [workflows/progress.js](app/src/agent/workflows/progress.js) | 80 | 进度：先判 `need_change`，不动就跳过 |
 | [workflows/daily.js](app/src/agent/workflows/daily.js) | 142 | 日报：23:30 定时 + 幂等生成 |
-| [workflows/chat.js](app/src/agent/workflows/chat.js) | 103 | 常驻问答：拼用户快照 + 走 loop + 主动记画像 / 送达变更摘要 |
+| [workflows/chat.js](app/src/agent/workflows/chat.js) | 129 | 常驻问答：拼用户快照 + 走 loop + 主动记画像 / 送达变更摘要 + **直接建读大目标** + 先落用户消息 / 失败补记录 |
 | [session.js](app/src/agent/session.js) | 37 | 服务端会话（Web / Android 同一份） |
 | [persona.js](app/src/agent/persona.js) | 9 | 4 个工作流共用的人设与铁律 |
 | [index.js](app/src/agent/index.js) | 19 | 统一导出，纯 re-export，无逻辑 |
@@ -198,39 +199,51 @@ zoowy **不是通用 Agent，也不是多个 Agent**，而是自研的一套轻�
 调 ai.chat(messages, tools)
  ├─ 无 tool_calls → content 为最终答案，break
  └─ 有 tool_calls
-      → convo.push(assistant 原样带 tool_calls)   ← OpenAI 协议硬要求
       → toolRounds += 1
-      → 逐个 executeTool()（白名单校验）
-      → 结果 JSON.stringify 后截 4000 字，以 role:'tool' 回灌
-      → 回到循环顶部
+      ├─ > MAX_TOOL_ROUNDS → 记 fail 留痕，降级返回（不抛错）
+      │    content = 本轮已有 content + 「这轮查得有点多，先说到这儿。」
+      │    返回 { ..., degraded: true, reason: 'max_tool_rounds' }
+      └─ 未超限
+           → convo.push(assistant 原样带 tool_calls)   ← OpenAI 协议硬要求
+           → 逐个 executeTool()（白名单校验）
+           → 结果 JSON.stringify 后截 4000 字，以 role:'tool' 回灌
+           → 回到循环顶部
 ```
 
 | 闸 | 值 | 行为 |
 |---|---|---|
-| `MAX_TOOL_ROUNDS` | 6 | 先自增后判断；第 7 轮直接记账抛错，**该轮工具不执行** |
+| `MAX_TOOL_ROUNDS` | 6 | 先自增后判断；第 7 轮**不抛错**，记 `fail(max_tool_rounds, degraded)` 后降级返回，该轮工具不执行 |
 | `TOTAL_TIMEOUT_MS` | 60000 | 每轮开头检查，超了记 `fail(total_timeout)` 并中断 |
 | 单次模型超时 | `min(45000, 剩余时间 + 1000)` | 给总超时留余量 |
 
-中断 / 超限时都会补一条 `ai_calls` 的 `status:'fail'`，带 `reason: total_timeout | max_tool_rounds`。工具结果回灌统一截 4000 字，防止上下文膨胀。
+两种中断的差别：
+
+- **轮次超限**（`max_tool_rounds`）：记 `ai_calls` 的 `fail` 留痕（detail 带 `degraded: true`），**降级返回** `{ content, degraded: true, reason }`，不抛错、不返回 500。降级时不会把带 `tool_calls` 却没有工具结果的悬空消息留在 `messages` 里。
+- **总超时**（`total_timeout`）：记 `fail` 后仍抛 `AiError(kind:'timeout')`，由 `chat.js : runChat()` 的 catch 兜住（见 §6.4），降级成友好响应并补落会话记录。
+
+工具结果回灌统一截 4000 字，防止上下文膨胀。
 
 ### 5.3 工具注册表 `tools.js : IMPLEMENTATIONS / executeTool()`
 
-**11 个工具 = 6 读 + 5 写。**
+**13 个工具 = 7 读 + 6 写。**
 
 | 读 | 写 |
 |---|---|
-| `read_my_profile` | `create_plan_goal` |
-| `read_my_goals` | `shift_plan_dates` |
-| `read_big_goal` | `write_big_goal_progress` |
+| `read_my_profile` | `create_big_goal` |
+| `read_my_goals` | `create_plan_goal` |
+| `read_big_goal` | `shift_plan_dates` |
+| `list_big_goals` | `write_big_goal_progress` |
 | `read_checkins` | `write_my_diary` |
 | `read_my_diaries` | `patch_my_profile` |
 | `read_my_usage` | |
 
 <!-- AGENT_TOOLS:START -->
-`read_my_profile` `read_my_goals` `read_big_goal` `read_checkins` `read_my_diaries` `read_my_usage` `create_plan_goal` `shift_plan_dates` `write_big_goal_progress` `write_my_diary` `patch_my_profile`
+`read_my_profile` `read_my_goals` `read_big_goal` `list_big_goals` `read_checkins` `read_my_diaries` `read_my_usage` `create_big_goal` `create_plan_goal` `shift_plan_dates` `write_big_goal_progress` `write_my_diary` `patch_my_profile`
 <!-- AGENT_TOOLS:END -->
 
 > 上面这对标记块是**机器可读清单**，由 [app/scripts/check-agent-doc.js](app/scripts/check-agent-doc.js) 与 `tools.js : IMPLEMENTATIONS` 比对。增删 / 改名工具时必须同步改这里，否则校验脚本非零退出。
+
+**`list_big_goals` / `create_big_goal`（v1.4）**：前者按 `owner_id` 列自己的大目标（含 `id`、`progress`、客观 `done/total`），让模型先拿到 id 再调 `read_big_goal`；后者在用户明确要立长期方向时直接建大目标，参数 `title`（1–40 字）/ `description`（≤500）/ `deadline`（可选 `YYYY-MM-DD`）/ `emoji`。`big_goals` 表暂无独立截止列，`deadline` 会写成描述末尾的 `【截止】YYYY-MM-DD`，信息不丢但不可按日期查询（见 §11-9）。同名且未归档的大目标视为重复，返回 `duplicate: true` 不重复建。
 
 每个工具是 `{ desc, readOnly, params(JSON Schema), run(ctx, args) }`；`ctx = { db, userId, workflow }`，**`userId` 由服务端会话注入，工具参数里不存在该字段**。`workflow` 供 `patch_my_profile` 写变更留痕时标明来源。`toolsFor()` 把白名单转成 OpenAI `tools` 格式。
 
@@ -255,7 +268,7 @@ zoowy **不是通用 Agent，也不是多个 Agent**，而是自研的一套轻�
 | `plan` | 6 | `read_my_profile`, `read_big_goal`, `read_my_goals`, `create_plan_goal`, `shift_plan_dates`, `patch_my_profile` |
 | `progress` | 5 | `read_my_goals`, `read_big_goal`, `read_checkins`, `write_big_goal_progress`, `patch_my_profile` |
 | `daily` | 8 | `read_my_goals`, `read_big_goal`, `read_checkins`, `read_my_profile`, `read_my_usage`, `read_my_diaries`, `write_my_diary`, `patch_my_profile` |
-| `chat` | 9 | 读 6 个 + `create_plan_goal`, `shift_plan_dates`, `patch_my_profile` |
+| `chat` | 11 | 读 7 个 + `create_big_goal`, `create_plan_goal`, `shift_plan_dates`, `patch_my_profile` |
 
 <!-- AGENT_WORKFLOWS:START -->
 `plan` `progress` `daily` `chat`
@@ -398,15 +411,17 @@ zoowy **不是通用 Agent，也不是多个 Agent**，而是自研的一套轻�
 |---|---|
 | 触发 | `POST /api/zoowy/chat`（「我」页 zoowy 弹层），可带 `big_goal_id` |
 | 模型 | `runAgentLoop(workflow:'chat', action:'chat_reply')` —— **唯一走 loop 的工作流** |
-| 工具 | `chat` 白名单 9 个 |
+| 工具 | `chat` 白名单 11 个（含 `list_big_goals` / `create_big_goal`） |
 
 流程：
 
 1. `recentMessages()` 拉 40 条历史，取后 30 条拼进 convo；
-2. `buildUserContext()` **每次对话前刷新**，拼进 system：画像 active 块、进行中目标（≤20）、今日 `credited` 打卡、最近 3 篇日报（各切 150 字）、近 7 天手机时长；带 `big_goal_id` 时再追加该大目标 + 链上小目标（快捷入口不是空聊）；
-3. `runAgentLoop()` 带工具跑，回答要求一般 ≤150 字；提示词要求**主动识别对话里的新事实**（能力 / 偏好 / 方向变化 / 重要事件 / 约束）并调 `patch_my_profile`，每条带 `reason` + `evidence`，拿不准不改；用户没明确要改计划时不动计划；
-4. 成功后按 `getUserSettings()` 的 `reportChanges` 收集本轮 `patch_my_profile` 的摘要 → `appendMessage()` 落 user / assistant 两条，`meta` 记 `tools` 与 `profileChanges` → 返回 `{ reply, sessionId, toolCalls, profileChanges }`；
-5. 前端气泡显示「📝 更新了画像：xxx」；`GET /zoowy/messages` 也返回历史里的 `profileChanges`。
+2. **先落 user 消息**（`appendMessage()`，在 `runAgentLoop()` 之前）——即使后续失败，这句也不会从会话历史里消失；
+3. `buildUserContext()` **每次对话前刷新**，拼进 system：画像 active 块、进行中目标（≤20）、今日 `credited` 打卡、最近 3 篇日报（各切 150 字）、近 7 天手机时长；带 `big_goal_id` 时再追加该大目标 + 链上小目标（快捷入口不是空聊）；
+4. `runAgentLoop()` 带工具跑，回答要求一般 ≤150 字；提示词要求**主动识别对话里的新事实**（能力 / 偏好 / 方向变化 / 重要事件 / 约束）并调 `patch_my_profile`，每条带 `reason` + `evidence`，拿不准不改；**用户明确想立长期方向时用 `create_big_goal` 直接建好（先 `list_big_goals` 查重），要读详情或配小目标时 `list_big_goals` → `read_big_goal` → `create_plan_goal`**；用户没明确要建 / 改时只给建议；
+5. **失败兜底**：`runAgentLoop()` 抛 `AiError`（超时 / 模型错误）时，补落一条 assistant 错误记录（`meta: { failed: true, kind }`，正文「🐾 这轮想太久断开了 / 这轮没答上来，可以再问一次。」），并**返回正常响应** `{ reply, ..., failed: true, reason }`，不抛 500；非 `AiError` 的意外错误仍抛出便于排查；
+6. 成功后按 `getUserSettings()` 的 `reportChanges` 收集本轮 `patch_my_profile` 的摘要 → 只落 assistant 消息（user 已在第 2 步落库），`meta` 记 `tools` / `profileChanges` / `degraded` → 返回 `{ reply, sessionId, toolCalls, profileChanges, degraded?, reason? }`；
+7. 前端气泡显示「📝 更新了画像：xxx」；`GET /zoowy/messages` 也返回历史里的 `profileChanges` 与 `failed` 标记。
 
 **入口校验**：`AI_API_KEY` 未配置 → 503；消息 1–2000 字。`GET /api/zoowy/messages` 拉自己会话（`limit` 1–100，默认 40）。
 
@@ -479,15 +494,15 @@ zoowy **不是通用 Agent，也不是多个 Agent**，而是自研的一套轻�
 | 边界 | 实现位置 / 手段 |
 |---|---|
 | 越权 | `userId` 服务端注入、工具参数无该字段；SQL 强制 owner/user 过滤；会话 `session_id + user_id` 双重过滤 |
-| 最小授权 | 4 份 `WHITELIST`；高危能力（验收、删目标、改积分、改口令）**根本不注册** |
+| 最小授权 | 4 份 `WHITELIST`；新增的 `create_big_goal` 只进 `chat`，`plan`/`progress`/`daily` 仍无此能力；高危能力（验收、删目标、改积分、改口令）**根本不注册** |
 | 防伪造 | `chat` 不给写日报/写进度；`response_format: json_object` + 解析失败不写库 |
 | 可回滚 | `profile_versions`（首次真实变更前全量快照，已开放列表 + 回滚接口）、`plan_versions`（每次写链后快照） |
 | 留痕 | `ai_calls` 记 ok/skip/fail + tokens + 耗时；`profile_changes` 记每次画像变更（含 before/after、reason/evidence）；`recordSkip()` 专记「判断不用改」 |
 | 服务端裁决 | `applyProfilePatch()` 做 diff 跳过无变化、块名 / `reason` 校验、≤8 条与 ≤4000 字上限，模型提议不直接写库 |
 | 汇报开关 | `reportChanges` 只控制推送 / 未读 / 同步摘要；留痕与版本快照无条件写（不汇报 ≠ 不留痕） |
-| 幂等 | 业务查重 + `UNIQUE(user_id, diary_date)` + 只动 `plan_status='planned'` |
-| 成本 / 失控 | 6 轮 / 60s / 45s 三道超时；只 `bad_json` 重试一次；`AI_DAILY_LIMIT` 默认 50 |
-| 失败降级 | 记账 best-effort；progress 异步且失败不影响验收；daily 单用户失败不影响他人 |
+| 幂等 | 业务查重（含 `create_big_goal` 的同名未归档查重）+ `UNIQUE(user_id, diary_date)` + 只动 `plan_status='planned'` |
+| 成本 / 失控 | 6 轮 / 60s / 45s 三道超时，第 7 轮不再执行工具、立即降级返回；只 `bad_json` 重试一次；`AI_DAILY_LIMIT` 默认 50 |
+| 失败降级 | 记账 best-effort；**轮次超限降级返回不抛 500**（§5.2）；**chat 失败先落 user 消息 + 补 assistant 错误记录，AI 类错误返回友好响应**（§6.4）；progress 异步且失败不影响验收；daily 单用户失败不影响他人 |
 | 密钥 | 只在服务器 `.env`，`aiConfig()` 从 env 读；不下发 Web / Android；出站 HTTPS |
 | 隐私 | 画像 / 日报 / 聊天默认仅自己；`shared` 主动分享后才在「我们」页出现摘要 |
 | 手改优先 | `shift_plan_dates` 只碰 `plan_status='planned'`；手改与 AI 重排共用 `snapshotPlan` |
@@ -524,10 +539,10 @@ zoowy **不是通用 Agent，也不是多个 Agent**，而是自研的一套轻�
 | 3 | 待办计划 P0-4 说「写工具带 `idempotency_key`」，实际它只是 `ai_calls` 的记账字段（仅 `daily` 传值，gateway 透传 `null`） | 幂等效果由查重 + UNIQUE 达成，机制与文档描述不符 | 二选一：统一实现 key 去重，或把设计与本文统一改成「业务查重 + 约束」 |
 | 4 | `daily_enabled` 默认 0（关）、`AI_DAILY_LIMIT` 默认 50 均为设计外新增 | 不主动开启就不出日报，与「每晚 23:30 两人各一份」不一致 | 明确为产品决策并同步待办计划 / README，或改默认值 |
 | 5 | Android 端仍无 zoowy 聊天 / 拆计划入口（**v1.2 已补齐画像变更、版本回滚、AI 设置**） | 待办计划 #9 / #14 要求双端都有聊天与拆计划；目前「改了什么 / 版本回滚 / 开关」双端一致，聊天与拆计划仍只 Web 有 | 补 `Api.kt` 的 chat / plan 接口 + Compose 页面 |
-| 6 | `chat` 的 `appendMessage()` 在 `runAgentLoop()` 成功之后才执行 | loop 超时 / 超限时，这一轮问答在会话历史里凭空消失（前端显示错误气泡，刷新即无） | 先落 user 消息；失败时补一条 assistant 错误或标记 |
-| 7 | [app/scripts/verify-smoke.js](app/scripts/verify-smoke.js) 只清理 `zoowy_messages` / `zoowy_sessions` / `plan_versions`，未真正跑工作流 | 57 项回归未覆盖 agent 行为（需真实 key 与模型，离线冒烟测不了） | 补一组 mock `ai.chat` 的工作流单测，覆盖白名单拒绝、幂等、JSON 失败不写库 |
-| 8 | 定时任务为单进程 `setInterval` | 多实例会重复触发与重复计费 | 上分布式锁，或明确约束单实例部署 |
-| 9 | `/zoowy/plan/intro` 传不存在的大目标、`/confirm` 传空 `items` 都返回 500「服务器开小差了」 | 拒绝与不写库都生效，但客户端错误被统一错误处理吞成 500，前端看不到真实原因（2026-11-07 接口联调发现） | 在 plan 两个入口把业务 `throw` 映射成 400 / 404 |
+| 6 | [app/scripts/verify-smoke.js](app/scripts/verify-smoke.js) 只清理 `zoowy_messages` / `zoowy_sessions` / `plan_versions`，未真正跑工作流 | 57 项回归未覆盖 agent 行为（需真实 key 与模型，离线冒烟测不了） | 补一组 mock `ai.chat` 的工作流单测，覆盖白名单拒绝、幂等、JSON 失败不写库 |
+| 7 | 定时任务为单进程 `setInterval` | 多实例会重复触发与重复计费 | 上分布式锁，或明确约束单实例部署 |
+| 8 | `/zoowy/plan/intro` 传不存在的大目标、`/confirm` 传空 `items` 都返回 500「服务器开小差了」 | 拒绝与不写库都生效，但客户端错误被统一错误处理吞成 500，前端看不到真实原因（2026-11-07 接口联调发现） | 在 plan 两个入口把业务 `throw` 映射成 400 / 404 |
+| 9 | `big_goals` 表没有独立截止日期字段 | 用户给大目标填的「截止 YYYY-MM-DD」目前只能由 `create_big_goal` 写进 `description` 末尾（`【截止】…`），无法按日期查询或提醒（v1.4 的临时处理） | 给 `big_goals` 加 `deadline TEXT` 列，并同步《数据库设计实现文档.md》§4 / §5 / §11 |
 
 ---
 
@@ -538,3 +553,5 @@ zoowy **不是通用 Agent，也不是多个 Agent**，而是自研的一套轻�
 | v1.0 | 2026-11-07 | `agent-icdi` | 初始建立：完整梳理 zoowy 实现与技术栈；写入 §0 维护约定与触发清单；新增 `check-agent-doc.js` + 两处机器可读标记块做自动兜底；登记 §11 八条已知差距 | 全文 |
 | v1.1 | 2026-11-07 | `agent-icdi` | 打开 4 个工作流的画像自动更新（chat 提示词主动识别、plan 白名单加 `patch_my_profile` + intro 提议 / confirm apply）；新增 `settings.js`、`profileChanges.js`、`profile_changes` 表；`reportChanges` 接线，变更摘要同步送达 +「我」页红点 / 明细 / 版本回滚；`profile_versions` 不再只写不读；`applyProfilePatch()` 增加服务端 diff 裁决与懒写快照。接口联调 23 项全绿 | §1、§3、§4、§5.3/5.4、§6、§7、§8、§9、§11、§12 |
 | v1.2 | 2026-11-07 | `agent-icdi` | 双端补齐「改完告诉用户改了什么」：Android `Api.kt` 新增 5 个方法 + DTO、`MeScreen.kt` 新增画像变更区块 / 明细 / 版本回滚 / AI 设置弹层，`UserSettings` 补 `dailyEnabled`；`app/.smoke/p0-check.js` 补 6 组行为断言（开关接线、diff 裁决、留痕、版本可读 / 回滚、4 工作流权限）与 `profile_changes` 清理。P0 冒烟 48 项全绿 | §3.3、§7、§11、§12 |
+| v1.3 | 2026-11-08 | `agent-icdi` | 修掉 §11 原第 6 条：`gateway.js` 轮次超限不再抛 500，改为记 `fail` 留痕 + 返回「本轮已有内容 + 这轮查得有点多，先说到这儿」的降级响应（`degraded`/`reason`），并不再留下悬空的 `tool_calls` 消息；`chat.js` 先落 user 消息，`AiError` 失败补 assistant 错误记录并返回友好响应，`GET /zoowy/messages` 增加 `failed` 标记；总超时仍抛错但由 chat 兜住。mock 联调 15 项全绿 | §0.2、§3.1、§5.2、§6.4、§9、§11、§12 |
+| v1.4 | 2026-11-08 | `agent-icdi` | 让 zoowy 能直接建 / 读大目标：新增 `list_big_goals`（按 owner 列大目标，含 id / 进度 / 客观 done,total）与 `create_big_goal`（title / description / deadline / emoji，归属校验、同名未归档幂等、1–40 字与日期校验）；`chat` 白名单 9→11 并加提示词引导（先 list 查重 / 拿 id → read 详情 → 再 create_plan_goal）；`AGENT_TOOLS` 标记块同步。`deadline` 因表无独立列暂写入描述，登记为 §11-9 | §3.1、§5.3/5.4、§6.4、§9、§11、§12 |
