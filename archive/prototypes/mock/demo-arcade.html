@@ -1,0 +1,1622 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>脚印 · 潮玩街机像素版 Demo</title>
+<style>
+@font-face {
+  font-family: "FusionPixel";
+  src: url("../fonts/fusion-pixel-12px-proportional-zh_hans.otf.woff2") format("woff2");
+  font-display: swap;
+}
+@font-face {
+  font-family: "FusionPixelMono";
+  src: url("../fonts/fusion-pixel-12px-monospaced-zh_hans.otf.woff2") format("woff2");
+  font-display: swap;
+}
+
+:root {
+  /* 高级潮玩配色方案：克制、温润、留白 */
+  --bg-wall: #F0F2F5;       /* 降噪背景：从刺眼紫改为柔和的复古灰泥白 */
+  --arcade-yellow: #FFD43B; /* 点睛黄：调低饱和度，更加耐看 */
+  --arcade-green: #2ECC71;  /* 语义绿：更清爽的薄荷绿，用于主要行动 */
+  --arcade-pink: #FF6B81;   /* 语义粉：降低荧光感，用于警告/强调用 */
+  --card-bg: #FFFFFF;
+  --card-sub: #FFFBF0;      /* 卡片副色：温暖的黄油奶昔白 */
+  --stroke: #181512;        /* 经典硬核描边：保留不变 */
+  --text-main: #181512;
+  --text-muted: #7D766E;    /* 次级文字：稍微柔和一点，降低阅读疲劳 */
+  --line-soft: #DED9C9;
+  --shadow-hard: 3.5px 3.5px 0px var(--stroke);
+  --shadow-btn: 2.5px 2.5px 0px var(--stroke);
+  --shadow-btn-pressed: 1px 1px 0px var(--stroke);
+  --font-px: "FusionPixel", "Courier New", monospace;
+  --font-mono: "FusionPixelMono", monospace;
+  --font-sans: "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-tap-highlight-color: transparent; }
+
+body {
+  background-color: var(--bg-wall);
+  background-image: 
+    radial-gradient(rgba(0,0,0,0.04) 1px, transparent 1px);
+  background-size: 20px 20px;
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 16px 0;
+}
+
+/* 手机外壳容器 (390×844) */
+.device-frame {
+  width: 390px;
+  height: 844px;
+  background: #F7F5EB;
+  background-image: radial-gradient(#E2DEC9 1.5px, transparent 1.5px);
+  background-size: 16px 16px;
+  border: 4px solid var(--stroke);
+  border-radius: 36px;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.45), 10px 10px 0px #0F0A38;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 顶部状态栏与刘海 */
+.status-bar {
+  height: 44px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 24px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--text-main);
+  z-index: 50;
+}
+.notch {
+  width: 120px;
+  height: 22px;
+  background: var(--stroke);
+  border-radius: 0 0 14px 14px;
+  position: absolute;
+  top: 0;
+  left: calc(50% - 60px);
+}
+
+/* 滚动内容区 */
+.screen-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 16px 84px 16px;
+  scroll-behavior: smooth;
+}
+.screen-scroll::-webkit-scrollbar { width: 0; display: none; }
+
+/* 街机像素按钮通用 */
+.pixel-btn {
+  background: var(--arcade-yellow);
+  border: 2px solid var(--stroke);
+  box-shadow: var(--shadow-btn);
+  border-radius: 8px;
+  font-family: var(--font-px);
+  font-size: 13px;
+  font-weight: bold;
+  padding: 6px 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+  color: var(--stroke);
+  text-decoration: none;
+}
+.pixel-btn:active {
+  transform: translate(1.5px, 1.5px) scale(0.96);
+  box-shadow: var(--shadow-btn-pressed);
+}
+.pixel-btn.green { background: var(--arcade-green); color: #000; }
+.pixel-btn.cyan { background: var(--arcade-cyan); }
+.pixel-btn.pink { background: var(--arcade-pink); color: #FFF; }
+.pixel-btn.orange { background: var(--arcade-orange); color: #FFF; }
+.pixel-btn.white { background: #FFFFFF; }
+.pixel-btn.sm { font-size: 11px; padding: 4px 10px; border-width: 1.5px; }
+
+/* 像素 SVG 图标通用 */
+.px-icon {
+  width: 28px;
+  height: 28px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  object-fit: contain;
+  flex-shrink: 0;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.px-icon.lg { width: 40px; height: 40px; }
+.px-icon.sm { width: 20px; height: 20px; }
+.px-fallback-emoji {
+  user-select: none;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 顶部 HUD 用户栏 */
+.hud-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.hud-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hud-avatar-frame {
+  width: 38px;
+  height: 38px;
+  background: var(--arcade-yellow);
+  border: 2px solid var(--stroke);
+  border-radius: 9px;
+  box-shadow: 2px 2px 0px var(--stroke);
+  display: grid;
+  place-items: center;
+  transition: transform 0.2s ease;
+}
+.hud-avatar-frame:hover { transform: scale(1.05) rotate(-3deg); }
+.hud-user-title {
+  font-family: var(--font-px);
+  font-size: 15px;
+  font-weight: bold;
+}
+
+/* 街机 HUD 数据条 (带金光闪烁微动效) */
+.arcade-hud-banner {
+  background: linear-gradient(135deg, var(--arcade-yellow) 0%, #FFC107 100%);
+  border: 2.5px solid var(--stroke);
+  border-radius: 12px;
+  box-shadow: var(--shadow-hard);
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  position: relative;
+  overflow: hidden;
+}
+.arcade-hud-banner::after {
+  content: "";
+  position: absolute;
+  top: -50%;
+  left: -70%;
+  width: 45%;
+  height: 200%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent);
+  transform: rotate(25deg);
+  animation: goldGlint 4.5s infinite cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+@keyframes goldGlint {
+  0%, 70% { left: -70%; }
+  100% { left: 150%; }
+}
+
+.hud-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.hud-score-value {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 900;
+  color: var(--stroke);
+  line-height: 1;
+}
+.hud-stat-pill {
+  background: #FFF;
+  border: 1.5px solid var(--stroke);
+  border-radius: 6px;
+  box-shadow: 1.5px 1.5px 0px var(--stroke);
+  padding: 3px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.hud-progress-wrap {
+  margin-top: 8px;
+  background: rgba(0,0,0,0.1);
+  border: 1.5px solid var(--stroke);
+  border-radius: 5px;
+  height: 9px;
+  overflow: hidden;
+}
+.hud-progress-fill {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--arcade-green),
+    var(--arcade-green) 6px,
+    #18BD5D 6px,
+    #18BD5D 12px
+  );
+  width: 72%;
+  height: 100%;
+}
+
+/* 二级子 Tab 胶囊切换栏 (Q弹果冻交互动效) */
+.sub-tab-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  background: #EAE6D6;
+  border: 2px solid var(--stroke);
+  border-radius: 12px;
+  padding: 4px;
+}
+.sub-tab-btn {
+  flex: 1;
+  text-align: center;
+  padding: 7px 0;
+  font-family: var(--font-px);
+  font-size: 12px;
+  font-weight: bold;
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  color: var(--text-muted);
+}
+.sub-tab-btn.active {
+  background: var(--arcade-yellow);
+  color: var(--stroke);
+  border-color: var(--stroke);
+  box-shadow: 2px 2px 0px var(--stroke);
+  transform: translateY(-2px);
+}
+.sub-tab-btn:active {
+  transform: translateY(0) scale(0.96);
+  box-shadow: 1px 1px 0px var(--stroke);
+}
+
+/* 内容转场动效 (切换 Tab 触发平滑上浮) */
+.tab-content-anim {
+  animation: tabFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes tabFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 模拟切换微缓冲 / 转场像素加载动效 (解决卡顿感知) */
+.loading-wobble-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 0;
+  font-family: var(--font-px);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.wobble-dot {
+  width: 10px;
+  height: 10px;
+  background: var(--arcade-yellow);
+  border: 2px solid var(--stroke);
+  border-radius: 2px;
+  animation: dotJump 0.5s infinite ease-in-out alternate;
+}
+.wobble-dot:nth-child(2) { animation-delay: 0.15s; background: var(--arcade-green); }
+.wobble-dot:nth-child(3) { animation-delay: 0.3s; background: var(--arcade-pink); }
+@keyframes dotJump {
+  from { transform: translateY(0); }
+  to { transform: translateY(-10px); }
+}
+
+/* 主卡 (Hero Card) - 唯一重卡设计 */
+.hero-card {
+  background: #FFFFFF;
+  border: 2.5px solid var(--stroke);
+  border-radius: 12px;
+  box-shadow: var(--shadow-hard);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  position: relative;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.hero-tag {
+  position: absolute;
+  top: -9px;
+  left: 12px;
+  background: var(--arcade-pink);
+  color: #FFF;
+  border: 1.5px solid var(--stroke);
+  font-family: var(--font-px);
+  font-size: 10px;
+  font-weight: bold;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+/* 轻量内容行 */
+.clean-item-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1.5px dashed var(--line-soft);
+}
+.clean-item-row:last-child {
+  border-bottom: none;
+}
+.clean-item-title {
+  font-size: 14px;
+  font-weight: bold;
+  flex: 1;
+}
+
+/* 周网格卡片 (Pixelife Matrix) */
+.weekly-matrix-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+}
+.weekly-matrix-table th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 2px;
+  text-align: center;
+}
+.weekly-matrix-table th.today-col {
+  background: var(--arcade-yellow);
+  color: var(--stroke);
+  border-radius: 4px;
+  border: 1.5px solid var(--stroke);
+}
+.weekly-matrix-table td {
+  padding: 4px 2px;
+  text-align: center;
+}
+.weekly-matrix-table td.today-cell {
+  background: rgba(255, 230, 0, 0.18);
+}
+.matrix-cell {
+  width: 24px;
+  height: 24px;
+  margin: 0 auto;
+  border-radius: 5px;
+  border: 1.5px solid var(--stroke);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+.matrix-cell:active { transform: scale(0.85); }
+.matrix-cell.done {
+  background: var(--arcade-green);
+  color: #000;
+}
+.matrix-cell.miss {
+  background: #FFD4DF;
+  color: var(--arcade-pink);
+}
+.matrix-cell.today-target {
+  background: var(--arcade-yellow);
+  box-shadow: 1.5px 1.5px 0px var(--stroke);
+}
+
+/* 月历卡片 (30天日历) */
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-top: 8px;
+}
+.cal-head {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: bold;
+  color: var(--text-muted);
+  padding-bottom: 4px;
+}
+.cal-cell {
+  aspect-ratio: 1/1;
+  border: 1.5px solid var(--stroke);
+  border-radius: 6px;
+  background: #FFF;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+.cal-cell:active { transform: scale(0.9); }
+.cal-cell.done { background: var(--arcade-green); }
+.cal-cell.miss { background: #FFD4DF; }
+.cal-cell.today { border: 2.5px solid var(--arcade-orange); background: var(--arcade-yellow); }
+
+/* 底部战报固定状态带 (三指标) */
+.fixed-stat-bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  text-align: center;
+  background: #FFF;
+  border: 2px solid var(--stroke);
+  border-radius: 10px;
+  box-shadow: var(--shadow-btn);
+  padding: 8px 4px;
+  margin-top: 14px;
+}
+
+/* 街机分段跑马灯血槽 (愿望单进度条) */
+.arcade-health-bar {
+  height: 9px;
+  background: #E8E4D5;
+  border: 1.5px solid var(--stroke);
+  border-radius: 5px;
+  overflow: hidden;
+  position: relative;
+  margin-top: 6px;
+}
+.arcade-health-fill {
+  height: 100%;
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--arcade-yellow),
+    var(--arcade-yellow) 6px,
+    #F39C12 6px,
+    #F39C12 12px
+  );
+  background-size: 17px 17px;
+  animation: healthConveyor 1.6s linear infinite;
+}
+@keyframes healthConveyor {
+  from { background-position: 0 0; }
+  to { background-position: 17px 0; }
+}
+
+/* Zoowy Agent 对话区块 (完全对齐原版 18-Agent-打开.png) */
+.agent-card {
+  background: #FFF;
+  border: 2px solid var(--stroke);
+  border-radius: 12px;
+  box-shadow: var(--shadow-btn);
+  padding: 12px;
+  margin-top: 14px;
+}
+.agent-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1.5px dashed var(--line-soft);
+  font-size: 12px;
+  font-weight: bold;
+}
+.agent-bubble {
+  background: #F8F3E4;
+  border: 1.5px solid var(--stroke);
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-top: 10px;
+  box-shadow: 1.5px 1.5px 0px var(--stroke);
+}
+.agent-quick-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+.agent-chip {
+  background: #FFF;
+  border: 1.5px solid var(--stroke);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 1.5px 1.5px 0px var(--stroke);
+  transition: all 0.1s ease;
+  text-align: left;
+}
+.agent-chip:active {
+  transform: translate(1px, 1px);
+  box-shadow: none;
+  background: var(--arcade-yellow);
+}
+.agent-input-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+.agent-input {
+  flex: 1;
+  height: 36px;
+  border: 1.5px solid var(--stroke);
+  border-radius: 6px;
+  padding: 0 10px;
+  font-size: 12px;
+  outline: none;
+  background: #FAF7EE;
+}
+
+/* 底部 5-Tab 导航栏 */
+.arcade-tabbar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 72px;
+  background: #FFFFFF;
+  border-top: 3px solid var(--stroke);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 0 10px;
+  z-index: 40;
+}
+.tab-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-family: var(--font-px);
+  font-size: 11px;
+  font-weight: bold;
+  padding: 4px 10px;
+  border-radius: 8px;
+  transition: all 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.tab-btn.active {
+  color: var(--stroke);
+  background: var(--arcade-yellow);
+  border: 2px solid var(--stroke);
+  box-shadow: 2px 2px 0px var(--stroke);
+  transform: translateY(-4px);
+}
+
+/* 浮动通知 Toast */
+.arcade-toast {
+  position: absolute;
+  top: 54px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-20px);
+  background: var(--arcade-yellow);
+  border: 2.5px solid var(--stroke);
+  box-shadow: 4px 4px 0px var(--stroke);
+  padding: 8px 16px;
+  border-radius: 10px;
+  font-family: var(--font-px);
+  font-size: 12px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 100;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+}
+.arcade-toast.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+
+/* 弹窗：发起新挑战 / 许愿窗口 */
+.modal-layer {
+  position: absolute;
+  inset: 0;
+  background: rgba(24, 21, 18, 0.65);
+  backdrop-filter: blur(2px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 80;
+}
+.modal-layer.open { display: flex; }
+.modal-box {
+  width: 100%;
+  background: #FFF;
+  border: 3px solid var(--stroke);
+  border-radius: 16px;
+  box-shadow: 5px 5px 0px var(--stroke);
+  padding: 16px;
+}
+</style>
+</head>
+<body>
+
+<div class="device-frame">
+  <!-- iPhone 状态栏 -->
+  <div class="notch"></div>
+  <div class="status-bar">
+    <span>9:41</span>
+    <div style="display:flex; gap:6px;"><span>5G</span><span>100%</span></div>
+  </div>
+
+  <!-- 浮动 Toast -->
+  <div class="arcade-toast" id="toast">
+    <span id="toast-icon">⚡</span>
+    <span id="toast-msg">打卡成功！+34 PTS</span>
+  </div>
+
+  <!-- 动态滚动页面 -->
+  <div class="screen-scroll" id="screen-content"></div>
+
+  <!-- 底部街机 5-Tab 导航 -->
+  <nav class="arcade-tabbar">
+    <div class="tab-btn active" onclick="switchTabWithAnim('home')">
+      <img src="./icons/star.svg" class="px-icon sm" alt="" onerror="handleIconError(this, 'star')"/>
+      <span>今天</span>
+    </div>
+    <div class="tab-btn" onclick="switchTabWithAnim('goals')">
+      <img src="./icons/target.svg" class="px-icon sm" alt="" onerror="handleIconError(this, 'target')"/>
+      <span>目标</span>
+    </div>
+    <div class="tab-btn" onclick="switchTabWithAnim('wish')">
+      <img src="./icons/gift.svg" class="px-icon sm" alt="" onerror="handleIconError(this, 'gift')"/>
+      <span>愿望单</span>
+    </div>
+    <div class="tab-btn" onclick="switchTabWithAnim('coop')">
+      <img src="./icons/cat.svg" class="px-icon sm" alt="" onerror="handleIconError(this, 'cat')"/>
+      <span>我们</span>
+    </div>
+    <div class="tab-btn" onclick="switchTabWithAnim('me')">
+      <img src="./icons/trophy.svg" class="px-icon sm" alt="" onerror="handleIconError(this, 'trophy')"/>
+      <span>我的</span>
+    </div>
+  </nav>
+
+  <!-- 弹窗：发起新挑战 -->
+  <div class="modal-layer" id="new-goal-modal">
+    <div class="modal-box">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid var(--stroke); padding-bottom:8px; margin-bottom:12px;">
+        <span style="font-family:var(--font-px); font-size:15px; font-weight:bold;">⚔️ 发起新挑战</span>
+        <button class="pixel-btn sm white" onclick="closeModal()">✕</button>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <input type="text" id="goal-input-name" placeholder="例如: 雅思真题刷题" 
+          style="width:100%; height:38px; border:2px solid var(--stroke); border-radius:8px; padding:0 10px; font-size:13px; font-weight:bold; outline:none;"/>
+        <div style="display:flex; gap:8px;">
+          <div class="px-icon-pick active" style="padding:4px; border:2px solid var(--stroke); background:var(--arcade-yellow); border-radius:8px; cursor:pointer;" onclick="selectIcon(this, 'book')">
+            <img src="./icons/book.svg" class="px-icon sm" alt="" onerror="handleIconError(this, 'book')"/>
+          </div>
+          <div class="px-icon-pick" style="padding:4px; border:2px solid var(--stroke); background:#FFF; border-radius:8px; cursor:pointer;" onclick="selectIcon(this, 'piano')">
+            <img src="./icons/piano.svg" class="px-icon sm" alt="" onerror="handleIconError(this, 'piano')"/>
+          </div>
+          <div class="px-icon-pick" style="padding:4px; border:2px solid var(--stroke); background:#FFF; border-radius:8px; cursor:pointer;" onclick="selectIcon(this, 'gym')">
+            <img src="./icons/gym.svg" class="px-icon sm" alt="" onerror="handleIconError(this, 'gym')"/>
+          </div>
+          <div class="px-icon-pick" style="padding:4px; border:2px solid var(--stroke); background:#FFF; border-radius:8px; cursor:pointer;" onclick="selectIcon(this, 'run')">
+            <img src="./icons/run.svg" class="px-icon sm" alt="" onerror="handleIconError(this, 'run')"/>
+          </div>
+        </div>
+        <button class="pixel-btn green" style="width:100%; height:42px; margin-top:6px;" onclick="confirmAddGoal()">
+          确认发布 ⚡
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ========================================================
+   潮玩像素引擎：纯前端响应式高保真交互模拟
+   ======================================================== */
+const ICON_EMOJI_MAP = {
+  cat: '🐱', sprout: '🌱', book: '📖', piano: '🎹', gym: '🏋️',
+  sleep: '💤', coin: '🪙', hotpot: '🍲', headphone: '🎧', gamepad: '🎮',
+  star: '⭐', target: '🎯', gift: '🎁', trophy: '🏆', medal: '🎖️',
+  rocket: '🚀', ring: '💍', run: '🏃', laptop: '💻'
+};
+
+window.handleIconError = function(img, iconName) {
+  if (!img.dataset.retried) {
+    img.dataset.retried = '1';
+    img.src = './icons/' + iconName + '.svg';
+    return;
+  }
+  img.style.display = 'none';
+  if (img.nextElementSibling && img.nextElementSibling.classList.contains('px-fallback-emoji')) return;
+  const emoji = ICON_EMOJI_MAP[iconName] || '✨';
+  const span = document.createElement('span');
+  span.className = img.className + ' px-fallback-emoji';
+  span.style.fontSize = img.classList.contains('lg') ? '28px' : (img.classList.contains('sm') ? '16px' : '20px');
+  span.innerText = emoji;
+  img.parentNode.insertBefore(span, img.nextSibling);
+};
+
+function pxIcon(name, cls = '') {
+  return `<img src="./icons/${name}.svg" class="px-icon ${cls}" alt="" onerror="handleIconError(this, '${name}')"/>`;
+}
+
+const state = {
+  currentTab: 'home',
+  goalsSubTab: 'daily',     // 'daily' | 'small' | 'big'
+  goalsDailyView: 'week',   // 'week' | 'month'
+  wishSubTab: 'active',     // 'active' | 'history'
+  coopSubTab: 'interact',   // 'interact' | 'stats'
+  agentStep: 'open',        // 'open' | 'asking' | 'proposing' | 'done'
+  selectedNewIcon: 'book',
+  user: {
+    name: '栗子',
+    coins: 1318,
+    streak: 12,
+    todayFinished: 2,
+    todayTotal: 5
+  },
+  partner: {
+    name: '阿白',
+    streak: 12,
+    lastAction: '晨跑 5.2km 已打卡',
+    pendingVerification: {
+      id: 'v1',
+      title: '连续 8 周力量训练',
+      points: 450,
+      time: '昨天 21:30 提交'
+    }
+  },
+  quests: [
+    { id: 'q1', title: '高数真题强化刷题', points: 34, streak: 12, icon: 'book', isHero: true, done: false },
+    { id: 'q2', title: '肖邦夜曲钢琴练习', points: 25, streak: 4, icon: 'piano', isHero: false, done: false },
+    { id: 'q3', title: '全身力量拉伸健身', points: 40, streak: 8, icon: 'gym', isHero: false, done: false },
+    { id: 'q4', title: '英语核心词汇 100', points: 14, streak: 14, icon: 'book', isHero: false, done: true },
+    { id: 'q5', title: '规律早睡 23:30', points: 20, streak: 5, icon: 'sleep', isHero: false, done: true }
+  ],
+  smallGoals: [
+    { id: 'sg1', title: '考过雅思 6.5', stage: '4/5 阶段', status: '待验收', points: 450, isHero: true },
+    { id: 'sg2', title: '连续 8 周力量训练', stage: '本周 2/3', status: '进行中', points: 300, isHero: false },
+    { id: 'sg3', title: '读完《深度学习入门》', stage: '已完成 10/28', status: '已达成', points: 100, isHero: false }
+  ],
+  bigGoals: [
+    { id: 'bg1', title: '2027 考研上岸全链计划', progress: 65, nextStep: '政治历年真题分类精做', isHero: true },
+    { id: 'bg2', title: '半程马拉松 21KM 冲刺', progress: 40, nextStep: '周末突破单次 10KM 耐力跑', isHero: false }
+  ],
+  prizes: [
+    { id: 'p1', title: '🧋 霸气生椰芋泥奶茶', cost: 250, canRedeem: true, desc: '达到 250 分即可兑换' },
+    { id: 'p2', title: '🍲 老北京铜锅涮羊肉', cost: 1500, canRedeem: false, progress: 88, desc: '还差 182 分' },
+    { id: 'p3', title: '🎧 降噪耳机自律升级包', cost: 1990, canRedeem: false, progress: 66, desc: '还差 672 分' }
+  ],
+  prizeHistory: [
+    { title: '🧋 霸气生椰芋泥奶茶', cost: 250, date: '11月4日', payer: '阿白已买单' },
+    { title: '🎮 休息日单人电玩 2h', cost: 400, date: '10月28日', payer: '自由兑现' }
+  ]
+};
+
+function showToast(text, icon = '⚡') {
+  const el = document.getElementById('toast');
+  document.getElementById('toast-msg').innerText = text;
+  document.getElementById('toast-icon').innerText = icon;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+// 模拟街机切换缓冲动效 (带有专属点阵动画，消除卡顿感)
+function switchTabWithAnim(tabKey) {
+  if (state.currentTab === tabKey) return;
+  
+  // 1. 立即清空内容，并显示 Loading 动画
+  const container = document.getElementById('screen-content');
+  container.innerHTML = `
+    <div class="loading-wobble-bar">
+      <div class="wobble-dot"></div><div class="wobble-dot"></div><div class="wobble-dot"></div>
+      <span style="margin-left:6px;">LOADING...</span>
+    </div>
+  `;
+  
+  // 2. 更新底部按钮状态
+  document.querySelectorAll('.tab-btn').forEach((btn, idx) => {
+    btn.classList.toggle('active', ['home','goals','wish','coop','me'][idx] === tabKey);
+  });
+
+  // 3. 模拟“缓冲”时间 (300ms 左右最顺手)
+  setTimeout(() => {
+    state.currentTab = tabKey;
+    render();
+  }, 300);
+}
+
+function setGoalsSubTabWithAnim(tab) {
+  if (state.goalsSubTab === tab) return;
+  const container = document.getElementById('goals-dynamic-zone');
+  if (container) {
+    container.innerHTML = `
+      <div class="loading-wobble-bar">
+        <div class="wobble-dot"></div><div class="wobble-dot"></div><div class="wobble-dot"></div>
+        <span style="margin-left:4px;">STAGE LOADING...</span>
+      </div>
+    `;
+    setTimeout(() => {
+      state.goalsSubTab = tab;
+      render();
+    }, 150);
+  } else {
+    state.goalsSubTab = tab;
+    render();
+  }
+}
+
+function setWishSubTabWithAnim(tab) {
+  if (state.wishSubTab === tab) return;
+  const container = document.getElementById('wish-content-zone');
+  if (container) {
+    container.innerHTML = `
+      <div class="loading-wobble-bar">
+        <div class="wobble-dot"></div><div class="wobble-dot"></div><div class="wobble-dot"></div>
+        <span style="margin-left:4px;">PRIZES SYNCING...</span>
+      </div>
+    `;
+    setTimeout(() => {
+      state.wishSubTab = tab;
+      render();
+    }, 150);
+  } else {
+    state.wishSubTab = tab;
+    render();
+  }
+}
+
+function setGoalsDailyView(view) {
+  state.goalsDailyView = view;
+  render();
+}
+function setCoopSubTab(tab) {
+  state.coopSubTab = tab;
+  render();
+}
+
+function triggerCheckin(questId) {
+  const q = state.quests.find(x => x.id === questId);
+  if (!q) return;
+  q.done = !q.done;
+  if (q.done) {
+    state.user.coins += q.points;
+    state.user.todayFinished += 1;
+    showToast(`战斗胜利！+${q.points} PTS 已入账 ⚡`, '🎉');
+  } else {
+    state.user.coins -= q.points;
+    state.user.todayFinished -= 1;
+    showToast(`已撤销打卡，积分已退还。`, '↩️');
+  }
+  render();
+}
+
+function sendNudge(phrase) {
+  showToast(`⚡ 已向搭子发送「${phrase}」！`, '💬');
+}
+
+function approvePartnerTask() {
+  state.partner.pendingVerification = null;
+  state.user.coins += 50;
+  showToast('🎉 验收通过！搭子获得积分，你获得监督奖励 +50 PTS', '👑');
+  render();
+}
+
+function redeemPrize(prizeId) {
+  const p = state.prizes.find(x => x.id === prizeId);
+  if (!p || state.user.coins < p.cost) return;
+  state.user.coins -= p.cost;
+  state.prizeHistory.unshift({
+    title: p.title,
+    cost: p.cost,
+    date: '刚刚',
+    payer: '待搭子买单'
+  });
+  showToast(`🎉 兑换成功！搭子 [阿白] 已收到提醒！`, '🎁');
+  render();
+}
+
+function openNewGoalModal() {
+  document.getElementById('new-goal-modal').classList.add('open');
+}
+function closeModal() {
+  document.getElementById('new-goal-modal').classList.remove('open');
+}
+function selectIcon(el, iconName) {
+  document.querySelectorAll('.px-icon-pick').forEach(item => {
+    item.classList.remove('active');
+    item.style.background = '#FFF';
+  });
+  el.classList.add('active');
+  el.style.background = 'var(--arcade-yellow)';
+  state.selectedNewIcon = iconName;
+}
+function confirmAddGoal() {
+  const input = document.getElementById('goal-input-name');
+  const val = input.value.trim();
+  if (!val) return;
+  state.quests.splice(1, 0, {
+    id: 'q_' + Date.now(),
+    title: val,
+    points: 25,
+    streak: 0,
+    icon: state.selectedNewIcon,
+    isHero: false,
+    done: false
+  });
+  input.value = "";
+  closeModal();
+  showToast("🌟 新挑战已发布到任务板！");
+  render();
+}
+
+/* ========================================================
+   Agent (Zoowy) 交互处理函数
+   ======================================================== */
+function triggerAgentChoice(choiceText) {
+  const agentCard = document.getElementById('zoowy-agent-card');
+  if (agentCard) {
+    agentCard.innerHTML = `
+      <div class="loading-wobble-bar" style="padding:16px 0;">
+        <div class="wobble-dot"></div><div class="wobble-dot"></div><div class="wobble-dot"></div>
+        <span style="margin-left:4px;">ZOOWY THINKING...</span>
+      </div>
+    `;
+  }
+  setTimeout(() => {
+    if (choiceText.includes('雅思') || choiceText.includes('工作') || choiceText.includes('体脂')) {
+      state.agentStep = 'asking';
+    } else if (choiceText.includes('小时') || choiceText.includes('冲刺')) {
+      state.agentStep = 'proposing';
+    } else if (choiceText.includes('确认') || choiceText.includes('建挑战')) {
+      state.agentStep = 'done';
+      // 真实建入小目标
+      state.smallGoals.unshift({
+        id: 'sg_' + Date.now(),
+        title: '雅思真题精听精做',
+        stage: '每周 10h 计划',
+        status: '进行中',
+        points: 350,
+        isHero: true
+      });
+      showToast('🎉 Zoowy 已为你新建小目标并加入日常任务！', '✨');
+    } else if (choiceText.includes('重置')) {
+      state.agentStep = 'open';
+    }
+    render();
+  }, 220);
+}
+
+function handleAgentSend() {
+  const input = document.getElementById('agent-user-input');
+  if (!input || !input.value.trim()) return;
+  const val = input.value.trim();
+  input.value = '';
+  triggerAgentChoice(val);
+}
+
+/* ========================================================
+   核心视图渲染
+   ======================================================== */
+function render() {
+  const container = document.getElementById('screen-content');
+  if (state.currentTab === 'home') renderHome(container);
+  else if (state.currentTab === 'goals') renderGoals(container);
+  else if (state.currentTab === 'wish') renderWish(container);
+  else if (state.currentTab === 'coop') renderCoop(container);
+  else if (state.currentTab === 'me') renderMe(container);
+}
+
+// 1. 首页 (今天 / Home)
+function renderHome(container) {
+  const heroQuest = state.quests.find(q => q.isHero) || state.quests[0];
+  const pendingQuests = state.quests.filter(q => q !== heroQuest && !q.done);
+  const doneQuests = state.quests.filter(q => q.done);
+
+  container.innerHTML = `
+    <div class="tab-content-anim">
+      <!-- 顶部问候 -->
+      <div class="hud-header">
+        <div class="hud-user">
+          <div class="hud-avatar-frame">${pxIcon('cat')}</div>
+          <div class="hud-user-title">晚上好，${state.user.name} 🐾</div>
+        </div>
+        <button class="pixel-btn sm cyan" onclick="openNewGoalModal()">＋ 挑战</button>
+      </div>
+
+      <!-- HUD 积分看板 (带金光闪烁微动效) -->
+      <div class="arcade-hud-banner">
+        <div class="hud-top-row">
+          <div>
+            <div style="font-size:10px; font-family:var(--font-mono); font-weight:bold; color:#705B00;">AVAILABLE PTS 储备</div>
+            <div class="hud-score-value">${state.user.coins.toLocaleString()} <span style="font-size:13px;">PTS</span></div>
+          </div>
+          <div class="hud-stat-pill" style="color:var(--arcade-orange);">
+            <span>🔥 ${state.user.streak} DAYS</span>
+          </div>
+        </div>
+        <div class="hud-progress-wrap">
+          <div class="hud-progress-fill"></div>
+        </div>
+      </div>
+
+      <!-- 搭子快捷微互动条 -->
+      <div style="background:#FFF; border:2px solid var(--stroke); border-radius:10px; padding:8px 10px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+        <div style="font-size:12px; font-weight:bold; display:flex; align-items:center; gap:5px;">
+          ${pxIcon('sprout', 'sm')}
+          <span>阿白：${state.partner.lastAction}</span>
+        </div>
+        <div style="display:flex; gap:4px;">
+          <button class="pixel-btn sm white" onclick="sendNudge('拍了拍')">🥊 拍</button>
+          <button class="pixel-btn sm white" onclick="sendNudge('加油')">🔥 冲</button>
+        </div>
+      </div>
+
+      <!-- BOSS QUEST (今日主力挑战：唯一重卡) -->
+      <div class="hero-card">
+        <div class="hero-tag">PRIORITY TASK · 主力</div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="width:42px; height:42px; background:#FFEBEF; border:2px solid var(--stroke); border-radius:8px; display:grid; place-items:center;">
+              ${pxIcon(heroQuest.icon, 'lg')}
+            </div>
+            <div>
+              <div style="font-size:15px; font-weight:bold;">${heroQuest.title}</div>
+              <div style="font-size:11px; font-family:var(--font-mono); color:var(--text-muted); margin-top:2px;">连续通关 ${heroQuest.streak} 天</div>
+            </div>
+          </div>
+          <div style="font-family:var(--font-mono); font-size:22px; font-weight:900; color:var(--arcade-orange);">+${heroQuest.points}</div>
+        </div>
+        <button class="pixel-btn ${heroQuest.done ? 'white' : 'green'}" style="width:100%; height:40px; margin-top:10px;" onclick="triggerCheckin('${heroQuest.id}')">
+          ${heroQuest.done ? '✓ 已通关完成' : '⚡ 立即打卡'}
+        </button>
+      </div>
+
+      <!-- 待攻克清单 -->
+      <div style="font-family:var(--font-px); font-size:13px; font-weight:bold; margin:14px 2px 6px 2px;">
+        ⚔️ ACTIVE QUESTS · 待攻克 (${pendingQuests.length})
+      </div>
+      <div style="background:#FFF; border:2px solid var(--stroke); border-radius:10px; padding:2px 12px; margin-bottom:12px;">
+        ${pendingQuests.map(q => `
+          <div class="clean-item-row">
+            ${pxIcon(q.icon, 'sm')}
+            <span class="clean-item-title">${q.title}</span>
+            <button class="pixel-btn green sm" onclick="triggerCheckin('${q.id}')">+${q.points}</button>
+          </div>
+        `).join('')}
+      </div>
+
+      <!-- 今日已完成 -->
+      ${doneQuests.length ? `
+        <div style="font-family:var(--font-px); font-size:12px; color:var(--text-muted); margin:12px 2px 6px 2px;">
+          🏆 CLEARED TODAY · 今日已通关 (${doneQuests.length})
+        </div>
+        <div style="background:#EFEFEF; border:1.5px solid #CCC; border-radius:10px; padding:2px 12px;">
+          ${doneQuests.map(q => `
+            <div class="clean-item-row" style="opacity:0.75;">
+              ${pxIcon(q.icon, 'sm')}
+              <span class="clean-item-title" style="text-decoration:line-through; font-size:13px;">${q.title}</span>
+              <button class="pixel-btn sm white" style="font-size:10px;" onclick="triggerCheckin('${q.id}')">撤销</button>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+// 2. 目标 (Goals: 日常/小目标/大目标 + 底部固定战绩带 + Zoowy Agent 常驻对话)
+function renderGoals(container) {
+  container.innerHTML = `
+    <div class="tab-content-anim">
+      <div class="hud-header">
+        <div class="hud-user-title">目标攻坚阵地 🎯</div>
+        <button class="pixel-btn sm cyan" onclick="openNewGoalModal()">＋ 新建</button>
+      </div>
+
+      <!-- 三大核心子 Tab 胶囊 -->
+      <div class="sub-tab-bar">
+        <div class="sub-tab-btn ${state.goalsSubTab === 'daily' ? 'active' : ''}" onclick="setGoalsSubTabWithAnim('daily')">日常</div>
+        <div class="sub-tab-btn ${state.goalsSubTab === 'small' ? 'active' : ''}" onclick="setGoalsSubTabWithAnim('small')">小目标</div>
+        <div class="sub-tab-btn ${state.goalsSubTab === 'big' ? 'active' : ''}" onclick="setGoalsSubTabWithAnim('big')">大目标</div>
+      </div>
+
+      <div id="goals-dynamic-zone"></div>
+
+      <!-- 底部固定街机战绩带 (三个 Tab 骨架固定不动) -->
+      <div class="fixed-stat-bar">
+        <div>
+          <div style="font-size:10px; font-family:var(--font-mono); color:var(--text-muted);">最长连击</div>
+          <div style="font-family:var(--font-mono); font-size:17px; font-weight:900; color:var(--arcade-orange);">21 天</div>
+        </div>
+        <div>
+          <div style="font-size:10px; font-family:var(--font-mono); color:var(--text-muted);">本月胜率</div>
+          <div style="font-family:var(--font-mono); font-size:17px; font-weight:900; color:var(--arcade-green);">86%</div>
+        </div>
+        <div>
+          <div style="font-size:10px; font-family:var(--font-mono); color:var(--text-muted);">累计自习</div>
+          <div style="font-family:var(--font-mono); font-size:17px; font-weight:900;">148.5h</div>
+        </div>
+      </div>
+
+      <!-- Zoowy Agent 常驻对话区块 (完全对齐原版 18-Agent-打开.png 视觉) -->
+      <div class="agent-card" id="zoowy-agent-card">
+        <div class="agent-header">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span style="font-size:15px;">✨</span>
+            <span style="font-family:var(--font-px); font-size:13px;">zoowy 目标拆解助手</span>
+          </div>
+          <span style="font-size:11px; font-family:var(--font-mono); color:var(--text-muted);">
+            ${state.agentStep === 'open' ? '刚打开' : (state.agentStep === 'asking' ? '分析中' : (state.agentStep === 'proposing' ? '出方案' : '已就绪'))}
+          </span>
+        </div>
+
+        ${renderAgentContent()}
+
+        <!-- 输入栏 -->
+        <div class="agent-input-row">
+          <input type="text" id="agent-user-input" class="agent-input" placeholder="说说你想做成什么大目标..." onkeydown="if(event.key==='Enter')handleAgentSend()"/>
+          <button class="pixel-btn sm yellow" style="padding:0 12px;" onclick="handleAgentSend()">›</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const zone = container.querySelector('#goals-dynamic-zone');
+  if (state.goalsSubTab === 'daily') renderGoalsDaily(zone);
+  else if (state.goalsSubTab === 'small') renderGoalsSmall(zone);
+  else if (state.goalsSubTab === 'big') renderGoalsBig(zone);
+}
+
+// Agent 内容生成 (4 个阶段状态机)
+function renderAgentContent() {
+  if (state.agentStep === 'open') {
+    return `
+      <div class="agent-bubble">
+        ✨ 想做成什么事？说个大概就行，我帮你排成每周做的小目标。
+      </div>
+      <div class="agent-quick-chips">
+        <button class="agent-chip" onclick="triggerAgentChoice('找 Agent 开发的工作')">⚡ 找 Agent 开发的工作</button>
+        <button class="agent-chip" onclick="triggerAgentChoice('三个月考过雅思 6.5')">🎯 三个月考过雅思 6.5</button>
+        <button class="agent-chip" onclick="triggerAgentChoice('体脂降到 18%')">🏃 体脂降到 18%</button>
+      </div>
+    `;
+  } else if (state.agentStep === 'asking') {
+    return `
+      <div class="agent-bubble">
+        🎯 收到！针对「三个月考过雅思 6.5」，你每周大概能拿出多少时间准备？
+      </div>
+      <div class="agent-quick-chips">
+        <button class="agent-chip" onclick="triggerAgentChoice('每周 5 小时')">⏳ 每周 5 小时 · 稳步推进</button>
+        <button class="agent-chip" onclick="triggerAgentChoice('每周 10 小时')">⚡ 每周 10 小时 · 黄金节奏</button>
+        <button class="agent-chip" onclick="triggerAgentChoice('全力冲刺 20h')">🔥 全力冲刺 20h · 极限突破</button>
+      </div>
+    `;
+  } else if (state.agentStep === 'proposing') {
+    return `
+      <div class="agent-bubble" style="background:#FFF9E6;">
+        💡 方案已生成！基于「每周 10 小时」为你拆解为 3 项攻坚动作：<br/>
+        1. <strong>雅思真题精听精做</strong> (45min/天 · +34 PTS)<br/>
+        2. <strong>高频学术词汇 100</strong> (30min/天 · +14 PTS)<br/>
+        3. <strong>周六大作文批改诊断</strong> (60min/周 · +40 PTS)
+      </div>
+      <div style="display:flex; gap:6px; margin-top:10px;">
+        <button class="pixel-btn green sm" style="flex:1;" onclick="triggerAgentChoice('确认建挑战')">⚡ 就按这个一键建挑战</button>
+        <button class="pixel-btn white sm" onclick="triggerAgentChoice('重置')">再改改</button>
+      </div>
+    `;
+  } else {
+    return `
+      <div class="agent-bubble" style="background:#EBFDF1; border-color:var(--arcade-green);">
+        🎉 3 项小目标已建立并排进任务板！已在上方目标网格高亮，今天就可以开始第一战啦！
+      </div>
+      <div style="margin-top:8px;">
+        <button class="pixel-btn sm white" onclick="triggerAgentChoice('重置')">🔄 规划新目标</button>
+      </div>
+    `;
+  }
+}
+
+// 2.1 日常视图
+function renderGoalsDaily(container) {
+  container.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+      <span style="font-family:var(--font-mono); font-size:12px; font-weight:bold;">11/2 - 11/8 · 第 45 周</span>
+      <div style="display:flex; gap:4px;">
+        <button class="pixel-btn sm ${state.goalsDailyView === 'week' ? 'yellow' : 'white'}" onclick="setGoalsDailyView('week')">周</button>
+        <button class="pixel-btn sm ${state.goalsDailyView === 'month' ? 'yellow' : 'white'}" onclick="setGoalsDailyView('month')">月</button>
+      </div>
+    </div>
+
+    ${state.goalsDailyView === 'week' ? `
+      <div class="hero-card" style="padding:10px;">
+        <table class="weekly-matrix-table">
+          <thead>
+            <tr>
+              <th style="text-align:left; width:70px;">挑战</th>
+              <th>一</th><th>二</th><th>三</th><th>四</th><th>五</th>
+              <th class="today-col">六</th>
+              <th>日</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${state.quests.map(q => `
+              <tr>
+                <td style="text-align:left; font-size:12px; font-weight:bold; white-space:nowrap; overflow:hidden;">
+                  ${q.title.slice(0,4)}
+                </td>
+                <td><div class="matrix-cell done">✓</div></td>
+                <td><div class="matrix-cell done">✓</div></td>
+                <td><div class="matrix-cell done">✓</div></td>
+                <td><div class="matrix-cell miss">✕</div></td>
+                <td><div class="matrix-cell done">✓</div></td>
+                <td class="today-cell">
+                  <div class="matrix-cell ${q.done ? 'done' : 'today-target'}" onclick="triggerCheckin('${q.id}')">
+                    ${q.done ? '✓' : '今'}
+                  </div>
+                </td>
+                <td><div class="matrix-cell" style="background:#FFF;"> </div></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        <div style="display:flex; justify-content:center; gap:12px; margin-top:10px; font-size:10px; font-family:var(--font-mono);">
+          <span>🟩 已通关</span>
+          <span>🟥 漏打</span>
+          <span>🟨 今日攻克</span>
+        </div>
+      </div>
+    ` : `
+      <div class="hero-card" style="padding:10px;">
+        <div style="font-family:var(--font-px); font-size:13px; font-weight:bold; text-align:center; margin-bottom:6px;">2026 年 11 月</div>
+        <div class="calendar-grid">
+          <div class="cal-head">一</div><div class="cal-head">二</div><div class="cal-head">三</div>
+          <div class="cal-head">四</div><div class="cal-head">五</div><div class="cal-head">六</div><div class="cal-head">日</div>
+          ${Array.from({length: 30}, (_, i) => {
+            const day = i + 1;
+            let cls = '';
+            if (day < 7) cls = (day % 4 === 0) ? 'miss' : 'done';
+            else if (day === 7) cls = 'today';
+            return `<div class="cal-cell ${cls}">${day}</div>`;
+          }).join('')}
+        </div>
+      </div>
+    `}
+  `;
+}
+
+// 2.2 小目标
+function renderGoalsSmall(container) {
+  container.innerHTML = `
+    ${state.smallGoals.map(sg => `
+      <div class="${sg.isHero ? 'hero-card' : ''}" style="${!sg.isHero ? 'background:#FFF; border:2px solid var(--stroke); border-radius:10px; padding:12px; margin-bottom:10px;' : ''}">
+        ${sg.isHero ? '<div class="hero-tag">FEATURED TASK</div>' : ''}
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:15px; font-weight:bold;">${sg.title}</div>
+            <div style="font-size:11px; font-family:var(--font-mono); color:var(--text-muted); margin-top:2px;">
+              进度: ${sg.stage} · 验收奖励: +${sg.points} PTS
+            </div>
+          </div>
+          <span class="pixel-btn sm ${sg.status === '待验收' ? 'pink' : (sg.status === '已达成' ? 'white' : 'yellow')}" style="cursor:default;">
+            ${sg.status}
+          </span>
+        </div>
+        ${sg.isHero ? `
+          <button class="pixel-btn green" style="width:100%; height:38px; margin-top:10px;" onclick="showToast('已向阿白发送验收请求！')">
+            ⚡ 提交验收
+          </button>
+        ` : ''}
+      </div>
+    `).join('')}
+  `;
+}
+
+// 2.3 大目标
+function renderGoalsBig(container) {
+  container.innerHTML = `
+    ${state.bigGoals.map(bg => `
+      <div class="${bg.isHero ? 'hero-card' : ''}" style="${!bg.isHero ? 'background:#FFF; border:2px solid var(--stroke); border-radius:10px; padding:12px; margin-bottom:10px;' : ''}">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="font-size:15px; font-weight:bold;">${bg.title}</div>
+          <span style="font-family:var(--font-mono); font-weight:bold; font-size:14px; color:var(--arcade-orange);">${bg.progress}%</span>
+        </div>
+        <div style="height:6px; background:#E5E5E5; border:1px solid var(--stroke); border-radius:3px; margin:8px 0; overflow:hidden;">
+          <div style="width:${bg.progress}%; height:100%; background:var(--arcade-green);"></div>
+        </div>
+        <div style="font-size:12px; color:var(--text-main); display:flex; justify-content:space-between; align-items:center;">
+          <span>下一步: ${bg.nextStep}</span>
+          <button class="pixel-btn sm yellow" onclick="triggerAgentChoice('考研大目标拆解')">让 Zoowy 拆解</button>
+        </div>
+      </div>
+    `).join('')}
+  `;
+}
+
+// 3. 愿望单 (Wish)
+// 用户指定顺序：① 积分余额卡 -> ② 可兑现Hero卡(立即兑换) -> ③ [还在攒 / 兑换记录]切换栏 -> ④ 慢慢攒清单/历史记录
+function renderWish(container) {
+  const canRedeemPrize = state.prizes.find(p => p.canRedeem && state.user.coins >= p.cost);
+  const otherPrizes = state.prizes.filter(p => p !== canRedeemPrize);
+
+  container.innerHTML = `
+    <div class="tab-content-anim">
+      <!-- 头部 -->
+      <div class="hud-header">
+        <div class="hud-user-title">战利品兑换铺 🎁</div>
+        <button class="pixel-btn sm yellow" onclick="openWishModal()">＋ 许愿</button>
+      </div>
+
+      <!-- ① 紧凑积分余额条 (置顶) -->
+      <div class="arcade-hud-banner" style="margin-bottom:12px;">
+        <div class="hud-top-row">
+          <div>
+            <div style="font-size:10px; font-family:var(--font-mono); color:#705B00; font-weight:bold;">AVAILABLE POINTS 余额</div>
+            <div class="hud-score-value">${state.user.coins.toLocaleString()} <span style="font-size:13px;">PTS</span></div>
+          </div>
+          <span class="pixel-btn sm green" style="cursor:default;">10 PTS = 1 元</span>
+        </div>
+      </div>
+
+      <!-- ② 置顶可兑换 Hero 卡片 (只要够分，始终常驻展示并带绿色兑换大按钮) -->
+      ${canRedeemPrize ? `
+        <div class="hero-card" style="margin-bottom:14px;">
+          <div class="hero-tag">READY TO CLAIM · 可兑现</div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+            <div>
+              <div style="font-size:16px; font-weight:bold;">${canRedeemPrize.title}</div>
+              <div style="font-size:11px; font-family:var(--font-mono); color:var(--text-muted); margin-top:2px;">
+                消耗 ${canRedeemPrize.cost} PTS · 兑换后还剩 ${state.user.coins - canRedeemPrize.cost} PTS
+              </div>
+            </div>
+            <div style="font-family:var(--font-mono); font-size:20px; font-weight:bold; color:var(--arcade-orange);">${canRedeemPrize.cost}</div>
+          </div>
+          <button class="pixel-btn green" style="width:100%; height:40px; margin-top:10px;" onclick="redeemPrize('${canRedeemPrize.id}')">
+            ⚡ 立即兑换请客
+          </button>
+        </div>
+      ` : ''}
+
+      <!-- ③ 愿望单双 Tab (准确放置在【立即兑换】正下方！) -->
+      <div class="sub-tab-bar" style="margin-bottom:12px;">
+        <div class="sub-tab-btn ${state.wishSubTab === 'active' ? 'active' : ''}" onclick="setWishSubTabWithAnim('active')">
+          还在攒 (${otherPrizes.length})
+        </div>
+        <div class="sub-tab-btn ${state.wishSubTab === 'history' ? 'active' : ''}" onclick="setWishSubTabWithAnim('history')">
+          兑换记录 (${state.prizeHistory.length})
+        </div>
+      </div>
+
+      <!-- ④ 动态内容区 (带平滑切换与缓冲动效) -->
+      <div id="wish-content-zone" class="tab-content-anim">
+        ${state.wishSubTab === 'active' ? `
+          <!-- 慢慢攒进度清单 (带街机跑马灯血槽) -->
+          <div style="background:#FFF; border:2px solid var(--stroke); border-radius:10px; padding:4px 12px;">
+            ${otherPrizes.map(p => `
+              <div class="clean-item-row" style="flex-direction:column; align-items:stretch; gap:6px;">
+                <div style="display:flex; justify-content:space-between; font-weight:bold; font-size:14px;">
+                  <span>${p.title}</span>
+                  <span style="font-family:var(--font-mono); color:var(--text-muted); font-size:12px;">${p.cost} PTS (${p.desc})</span>
+                </div>
+                <!-- 街机跑马灯血槽 -->
+                <div class="arcade-health-bar">
+                  <div class="arcade-health-fill" style="width:${p.progress}%;"></div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        ` : `
+          <!-- 兑换记录 Tab -->
+          <div style="background:#FFF; border:2px solid var(--stroke); border-radius:10px; padding:4px 12px;">
+            ${state.prizeHistory.map(h => `
+              <div class="clean-item-row">
+                <div style="flex:1;">
+                  <div style="font-weight:bold; font-size:14px;">${h.title}</div>
+                  <div style="font-size:11px; font-family:var(--font-mono); color:var(--text-muted);">${h.date} · ${h.payer}</div>
+                </div>
+                <span style="font-family:var(--font-mono); font-weight:bold; color:var(--arcade-pink); font-size:15px;">-${h.cost} PTS</span>
+              </div>
+            `).join('')}
+          </div>
+        `}
+      </div>
+    </div>
+  `;
+}
+
+function openWishModal() {
+  const modal = document.getElementById('new-goal-modal');
+  // 临时复用已有 Modal，后续可拆分为独立组件
+  modal.querySelector('span').innerText = '✨ 新增愿望';
+  modal.querySelector('input').placeholder = '例如: 奖励自己 1h 游戏';
+  modal.classList.add('open');
+}
+
+// 4. 我们 (Partner: 互动 / 数据对比)
+function renderCoop(container) {
+  container.innerHTML = `
+    <div class="tab-content-anim">
+      <div class="hud-header">
+        <div class="hud-user-title">双人联机学习舱 👥</div>
+      </div>
+
+      <!-- 我们双 Tab 切换 -->
+      <div class="sub-tab-bar">
+        <div class="sub-tab-btn ${state.coopSubTab === 'interact' ? 'active' : ''}" onclick="setCoopSubTab('interact')">
+          互动 ${state.partner.pendingVerification ? '<span style="background:var(--arcade-pink); color:#FFF; font-size:9px; padding:1px 5px; border-radius:4px;">1</span>' : ''}
+        </div>
+        <div class="sub-tab-btn ${state.coopSubTab === 'stats' ? 'active' : ''}" onclick="setCoopSubTab('stats')">数据对比</div>
+      </div>
+
+      ${state.coopSubTab === 'interact' ? `
+        <!-- 置顶待你验收专区 -->
+        ${state.partner.pendingVerification ? `
+          <div class="hero-card" style="background:#FFF8E8;">
+            <div class="hero-tag" style="background:var(--arcade-orange);">ACTION REQUIRED · 待你验收</div>
+            <div style="margin-top:4px;">
+              <div style="font-size:15px; font-weight:bold;">阿白 提交了「${state.partner.pendingVerification.title}」</div>
+              <div style="font-size:11px; font-family:var(--font-mono); color:var(--text-muted); margin-top:2px;">
+                ${state.partner.pendingVerification.time} · 奖励 +${state.partner.pendingVerification.points} PTS
+              </div>
+            </div>
+            <div style="display:flex; gap:8px; margin-top:10px;">
+              <button class="pixel-btn green" style="flex:1; height:38px;" onclick="approvePartnerTask()">⚡ 通过验收</button>
+              <button class="pixel-btn white sm" onclick="showToast('已暂缓验收')">稍后</button>
+            </div>
+          </div>
+        ` : ''}
+
+        <!-- 快捷投掷短语 -->
+        <div style="background:#FFF; border:2px solid var(--stroke); border-radius:10px; padding:10px; margin-bottom:12px;">
+          <div style="font-size:12px; font-weight:bold; margin-bottom:8px;">投掷轻互动弹幕:</div>
+          <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px;">
+            <button class="pixel-btn sm white" onclick="sendNudge('给你加油')">🔥 加油!</button>
+            <button class="pixel-btn sm white" onclick="sendNudge('拍一拍你')">🥊 拍一拍</button>
+            <button class="pixel-btn sm white" onclick="sendNudge('记得早点睡')">🌙 早点睡</button>
+            <button class="pixel-btn sm white" onclick="sendNudge('今天真棒')">👑 今天很棒</button>
+            <button class="pixel-btn sm white" onclick="sendNudge('不要太累了')">☕ 别太累</button>
+            <button class="pixel-btn sm white" onclick="sendNudge('辛苦啦')">✨ 辛苦了</button>
+          </div>
+        </div>
+
+        <!-- 阿白今日动态流 -->
+        <div style="background:#FFF; border:2px solid var(--stroke); border-radius:10px; padding:4px 12px;">
+          <div style="font-size:12px; font-weight:bold; padding:8px 0; border-bottom:1.5px dashed var(--line-soft);">
+            📢 阿白今日战况 (2/3 攻克)
+          </div>
+          <div class="clean-item-row">
+            ${pxIcon('book', 'sm')}
+            <span class="clean-item-title">背单词 · 09:18 完成</span>
+            <span style="font-family:var(--font-mono); font-weight:bold; color:var(--arcade-green);">+18</span>
+          </div>
+          <div class="clean-item-row">
+            ${pxIcon('gym', 'sm')}
+            <span class="clean-item-title">晨跑 5.2km · 07:42 完成</span>
+            <span style="font-family:var(--font-mono); font-weight:bold; color:var(--arcade-green);">+65</span>
+          </div>
+        </div>
+      ` : `
+        <!-- 数据对比 Tab: 三列纯净对齐表 -->
+        <div style="background:#FFF; border:2.5px solid var(--stroke); border-radius:12px; box-shadow:var(--shadow-hard); overflow:hidden; margin-bottom:12px;">
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; background:var(--stroke); color:#FFF; font-family:var(--font-mono); font-size:11px; font-weight:bold; padding:8px 12px; text-align:center;">
+            <span>战力属性</span>
+            <span>我 (${state.user.name})</span>
+            <span>搭子 (${state.partner.name})</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; padding:10px 12px; border-bottom:1px dashed var(--line-soft); font-size:12px; font-family:var(--font-mono); text-align:center;">
+            <span style="font-weight:bold; text-align:left;">本月得分</span>
+            <span style="color:var(--arcade-green); font-weight:bold;">+666</span>
+            <span style="color:var(--arcade-orange); font-weight:bold;">+338</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; padding:10px 12px; border-bottom:1px dashed var(--line-soft); font-size:12px; font-family:var(--font-mono); text-align:center;">
+            <span style="font-weight:bold; text-align:left;">连续天数</span>
+            <span>12 天</span>
+            <span>12 天</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; padding:10px 12px; border-bottom:1px dashed var(--line-soft); font-size:12px; font-family:var(--font-mono); text-align:center;">
+            <span style="font-weight:bold; text-align:left;">完成率</span>
+            <span>86%</span>
+            <span>75%</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; padding:10px 12px; font-size:12px; font-family:var(--font-mono); text-align:center;">
+            <span style="font-weight:bold; text-align:left;">自习时长</span>
+            <span>14.8h</span>
+            <span>8.2h</span>
+          </div>
+        </div>
+
+        <!-- 手机在谁手里 (亮屏时长对比) -->
+        <div style="background:#FFF; border:2px solid var(--stroke); border-radius:10px; padding:12px;">
+          <div style="font-size:12px; font-weight:bold; margin-bottom:6px;">📱 手机在谁手里 · 今日亮屏对比</div>
+          <div style="display:flex; justify-content:space-between; font-size:12px; font-family:var(--font-mono);">
+            <span>我: 2.1 小时</span>
+            <span>阿白: 1.8 小时</span>
+          </div>
+        </div>
+      `}
+    </div>
+  `;
+}
+
+// 5. 我的 (Me)
+function renderMe(container) {
+  container.innerHTML = `
+    <div class="tab-content-anim">
+      <div class="hud-header">
+        <div class="hud-user-title">勇者档案室 🛡️</div>
+      </div>
+
+      <!-- 用户卡 -->
+      <div class="hero-card" style="display:flex; align-items:center; gap:12px;">
+        <div class="hud-avatar-frame lg">${pxIcon('cat', 'lg')}</div>
+        <div style="flex:1;">
+          <div style="font-size:16px; font-weight:bold;">${state.user.name}</div>
+          <div style="font-size:11px; font-family:var(--font-mono); color:var(--text-muted); margin-top:2px;">
+            绑定搭子: ${state.partner.name} · 状态正常
+          </div>
+        </div>
+        <button class="pixel-btn sm white" onclick="showToast('改名维护中')">改名</button>
+      </div>
+
+      <!-- 解锁勋章墙 -->
+      <div style="font-size:12px; font-weight:bold; margin:12px 2px 6px 2px;">🎖️ BADGE WALL 已解锁像素勋章</div>
+      <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; text-align:center; margin-bottom:12px;">
+        <div style="background:#FFF; border:1.5px solid var(--stroke); border-radius:8px; padding:8px 2px;">
+          ${pxIcon('medal', 'sm')}
+          <div style="font-size:10px; font-family:var(--font-mono); margin-top:4px; font-weight:bold;">百折不挠</div>
+        </div>
+        <div style="background:#FFF; border:1.5px solid var(--stroke); border-radius:8px; padding:8px 2px;">
+          ${pxIcon('trophy', 'sm')}
+          <div style="font-size:10px; font-family:var(--font-mono); margin-top:4px; font-weight:bold;">破晓先锋</div>
+        </div>
+        <div style="background:#FFF; border:1.5px solid var(--stroke); border-radius:8px; padding:8px 2px;">
+          ${pxIcon('rocket', 'sm')}
+          <div style="font-size:10px; font-family:var(--font-mono); margin-top:4px; font-weight:bold;">自律飞升</div>
+        </div>
+        <div style="background:#FFF; border:1.5px solid var(--stroke); border-radius:8px; padding:8px 2px;">
+          ${pxIcon('ring', 'sm')}
+          <div style="font-size:10px; font-family:var(--font-mono); margin-top:4px; font-weight:bold;">百日契约</div>
+        </div>
+      </div>
+
+      <!-- 积分流水 -->
+      <div style="font-size:12px; font-weight:bold; margin:12px 2px 6px 2px;">📜 积分流水日志</div>
+      <div style="background:#FFF; border:2px solid var(--stroke); border-radius:10px; padding:4px 12px;">
+        <div class="clean-item-row">
+          <div style="flex:1;">
+            <div style="font-size:13px; font-weight:bold;">打卡 · 高数真题强化刷题</div>
+            <div style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono);">今天 09:44</div>
+          </div>
+          <span style="font-family:var(--font-mono); font-weight:900; color:var(--arcade-green); font-size:14px;">+34 PTS</span>
+        </div>
+        <div class="clean-item-row">
+          <div style="flex:1;">
+            <div style="font-size:13px; font-weight:bold;">达成 12 天连续打卡里程碑</div>
+            <div style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono);">昨天 21:30</div>
+          </div>
+          <span style="font-family:var(--font-mono); font-weight:900; color:var(--arcade-orange); font-size:14px;">+65 PTS</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// 首次启动渲染
+render();
+</script>
+</body>
+</html>

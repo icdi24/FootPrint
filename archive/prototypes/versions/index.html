@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>像素图标库 · 历代版本总览与演进对比</title>
+  <style>
+    :root {
+      --bg: #FAF3E3;
+      --card: #FFFDF6;
+      --ink: #46382B;
+      --ink-2: #6E5C46;
+      --line: #E9DFC7;
+      --outline: #3B2E22;
+      --green: #3F7C37;
+      --gold: #F2B84B;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      background: var(--bg);
+      background-image: radial-gradient(#e6dcc6 1px, transparent 1px);
+      background-size: 9px 9px;
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, "Microsoft YaHei", sans-serif;
+    }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    p.sub { color: var(--ink-2); margin: 0 0 24px; font-size: 14px; }
+    
+    .nav-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .nav-btn {
+      padding: 8px 16px;
+      border: 2px solid var(--outline);
+      background: var(--card);
+      color: var(--ink);
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 3px 0 rgba(59,46,34,.18);
+    }
+    .nav-btn.active {
+      background: var(--green);
+      color: #FFFDF6;
+      transform: translateY(2px);
+      box-shadow: 0 1px 0 rgba(59,46,34,.18);
+    }
+    .panel {
+      display: none;
+      background: var(--card);
+      border: 2px solid var(--outline);
+      box-shadow: 0 4px 0 rgba(59,46,34,.18);
+      padding: 20px;
+      margin-bottom: 30px;
+    }
+    .panel.active { display: block; }
+    .panel h2 { margin-top: 0; font-size: 16px; border-bottom: 2px dashed var(--line); padding-bottom: 8px; }
+    .panel img { max-width: 100%; height: auto; display: block; border: 1px solid var(--line); margin-top: 12px; }
+    .meta { font-size: 13px; color: var(--ink-2); line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <h1>像素图标库 · 历代版本总览与演进对比</h1>
+  <p class="sub">记录从最初纯手绘单色、到多色像素、再到 Gemini 生图与 Game-Icons 强化版的完整演进历程。</p>
+
+  <div class="nav-tabs">
+    <button class="nav-btn active" onclick="showTab('compare')">🔍 核心图标演进对比表</button>
+    <button class="nav-btn" onclick="showTab('v4')">⭐ V4: 最新精修终版 (全55枚)</button>
+    <button class="nav-btn" onclick="showTab('v3')">📦 V3: 初代混编版 (全55枚)</button>
+    <button class="nav-btn" onclick="showTab('v2')">🎨 V2: 16×16 多色手绘版</button>
+    <button class="nav-btn" onclick="showTab('v1')">🟢 V1: 16×16 单色纯绿版</button>
+  </div>
+
+  <div id="compare" class="panel active">
+    <h2>13 个核心图标跨版本演进对比 (问题图标逐一蜕变)</h2>
+    <div class="meta">
+      涵盖了鞋子、蛋糕、相机、飞机、火锅、跑步、健身、书本、牙齿、苹果、手表、艺术、单车的各代形态：
+    </div>
+    <img src="evolution-comparison.png" alt="核心图标演进对比表"/>
+  </div>
+
+  <div id="v4" class="panel">
+    <h2>V4: 最新精修终版 (55枚全家福)</h2>
+    <div class="meta">
+      <b>结构：</b>11 个 Gemini 32×32 顶级生图 + 35 个 Game-Icons 矢量像素化（包括全新动态冲刺跑者 sprint、高举杠铃力士 weight-lifting、三足鼎立铜火锅 cauldron）+ 9 个 32×32 精致手绘。<br>
+      <b>特点：</b>所有图标全部一眼可辨，16px 极限微缩下依然清晰！
+    </div>
+    <img src="v4-current-hybrid-refined.jpg" alt="V4 最新精修版"/>
+  </div>
+
+  <div id="v3" class="panel">
+    <h2>V3: 初代 32×32 混编版</h2>
+    <div class="meta">
+      <b>结构：</b>11 个 Gemini 生图 + 37 个 32×32 手绘 + 7 个 16×16 手绘。<br>
+      <b>当时的问题：</b>部分手绘图标（如跑步、健身哑铃、火锅、牙齿）被指出辨识度不够。
+    </div>
+    <img src="v3-gemini-and-hand32.jpg" alt="V3 初代混编版"/>
+  </div>
+
+  <div id="v2" class="panel">
+    <h2>V2: 16×16 多色手绘版</h2>
+    <div class="meta">
+      <b>结构：</b>项目色板 19 色着色，每格 1×1 rect 矢量。<br>
+      <b>当时的问题：</b>16×16 画布太小，像鞋子、口红、跑者、相机等容易变成色块泥潭。
+    </div>
+    <img src="v2-multicolor-16x16.jpg" alt="V2 多色手绘版"/>
+  </div>
+
+  <div id="v1" class="panel">
+    <h2>V1: 16×16 单色纯绿版</h2>
+    <div class="meta">
+      <b>结构：</b>继承项目原版 <code>icons.js</code> 单色 <code>currentColor</code>（纯绿）自绘机制。<br>
+      <b>当时的问题：</b>全是一片绿，没有游戏道具与插画的丰富质感。
+    </div>
+    <img src="v1-green-monochrome.jpg" alt="V1 单色纯绿版"/>
+  </div>
+
+  <script>
+    function showTab(id) {
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+      event.target.classList.add('active');
+    }
+  </script>
+</body>
+</html>

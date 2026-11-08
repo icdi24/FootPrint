@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Art Toy Wobbling Loading - 中间设计多款式展示</title>
+  <style>
+    :root {
+      /* 潮玩主题色调控变量 */
+      --toy-primary: #FF5E8E;    /* 盲盒主色：草莓泡泡粉 */
+      --toy-primary-dark: #E23D72;
+      --toy-accent: #00F0A0;     /* 潮流荧光绿 */
+      --toy-yellow: #FFD214;     /* 亮黄高光 */
+      --toy-purple: #5846FB;     /* 克莱因紫 */
+      --toy-cream: #FFF4E0;      /* 奶油底色 */
+      --toy-dark: #231F3D;       /* 潮玩经典粗描边深色 */
+      --toy-shadow: rgba(43, 37, 79, 0.22);
+      --bg-color: #F0F2F7;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-color);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+      user-select: none;
+    }
+
+    /* 顶部切换栏（方便选择对比） */
+    .style-switcher {
+      position: absolute;
+      top: 30px;
+      display: flex;
+      gap: 10px;
+      background: #FFFFFF;
+      padding: 8px 12px;
+      border-radius: 40px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+      border: 2px solid #E5E7EB;
+      z-index: 10;
+    }
+
+    .style-btn {
+      padding: 8px 16px;
+      border: none;
+      background: transparent;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #6B7280;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .style-btn.active {
+      background: var(--toy-dark);
+      color: #FFFFFF;
+      transform: scale(1.05);
+    }
+
+    /* 舞台容器 */
+    .loader-stage {
+      position: relative;
+      width: 240px;
+      height: 240px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ================= 盲盒整体容器与跳跃动画 ================= */
+    .blind-box-wrap {
+      position: relative;
+      width: 106px;
+      height: 110px;
+      z-index: 2;
+      transform-origin: bottom center;
+      animation: toyJump 1.9s cubic-bezier(0.28, 0.84, 0.42, 1) infinite;
+    }
+
+    /* 盒子本体：厚实搪胶材质 + 粗黑色描边 + 细腻高光 */
+    .blind-box {
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(145deg, #FF729F 0%, var(--toy-primary) 55%, var(--toy-primary-dark) 100%);
+      border-radius: 26px 26px 22px 22px;
+      border: 4px solid var(--toy-dark);
+      box-shadow: 
+        inset 0 4px 6px rgba(255, 255, 255, 0.6),
+        inset 0 -6px 12px rgba(0, 0, 0, 0.16),
+        0 14px 26px rgba(255, 94, 142, 0.35);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* 盲盒顶部的潮流提手/小耳朵 */
+    .box-handle {
+      position: absolute;
+      top: -10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 34px;
+      height: 16px;
+      background: var(--toy-yellow);
+      border: 3.5px solid var(--toy-dark);
+      border-radius: 12px 12px 0 0;
+      z-index: 1;
+    }
+
+    /* 搪胶表面的流光掠过 */
+    .vinyl-specular {
+      position: absolute;
+      top: -30%;
+      left: -60%;
+      width: 45%;
+      height: 180%;
+      background: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0) 0%,
+        rgba(255, 255, 255, 0.45) 50%,
+        rgba(255, 255, 255, 0) 100%
+      );
+      transform: rotate(26deg);
+      pointer-events: none;
+      animation: specularSweep 3.8s ease-in-out infinite;
+    }
+
+    /* 地面动态投影 */
+    .box-shadow {
+      position: absolute;
+      bottom: 34px;
+      width: 86px;
+      height: 16px;
+      background: var(--toy-shadow);
+      border-radius: 50%;
+      filter: blur(2.5px);
+      z-index: 1;
+      animation: shadowScale 1.9s cubic-bezier(0.28, 0.84, 0.42, 1) infinite;
+    }
+
+    /* 腾空星芒粒子 */
+    .sparkle {
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      pointer-events: none;
+      opacity: 0;
+      z-index: 3;
+    }
+
+    .sparkle-left {
+      top: 40px;
+      left: 20px;
+      animation: sparklePopLeft 1.9s ease-out infinite;
+    }
+
+    .sparkle-right {
+      top: 50px;
+      right: 22px;
+      animation: sparklePopRight 1.9s ease-out infinite 0.1s;
+    }
+
+    .sparkle svg path {
+      fill: var(--toy-accent);
+      stroke: var(--toy-dark);
+      stroke-width: 1.5;
+    }
+
+    /* ========================================================
+       中间核心设计（可切换 4 种典型潮玩风格）
+       全部带有撞击惯性的异步动画: innerImpactShake
+       ======================================================== */
+
+    .inner-content {
+      position: relative;
+      z-index: 3;
+      animation: innerImpactShake 1.9s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
+    }
+
+    /* 款式 1：【呆萌潮玩大眼表情】(Mascot Big Eyes & Blush) */
+    .face-eyes {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .eyes-row {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+
+    .toy-eye {
+      width: 18px;
+      height: 24px;
+      background: var(--toy-dark);
+      border-radius: 50%;
+      position: relative;
+      overflow: hidden;
+      box-shadow: inset 0 -3px 0 rgba(255, 255, 255, 0.15);
+    }
+
+    /* 大眼水汪汪的高光点 */
+    .toy-eye::before {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 7px;
+      height: 7px;
+      background: #FFFFFF;
+      border-radius: 50%;
+    }
+
+    .toy-eye::after {
+      content: "";
+      position: absolute;
+      bottom: 4px;
+      right: 4px;
+      width: 3px;
+      height: 3px;
+      background: rgba(255, 255, 255, 0.8);
+      border-radius: 50%;
+    }
+
+    /* 呆萌腮红与微小嘴巴 */
+    .blush-row {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      margin-top: -3px;
+    }
+
+    .blush {
+      width: 10px;
+      height: 5px;
+      background: #FFA1BD;
+      border-radius: 50%;
+      opacity: 0.9;
+    }
+
+    .mouth {
+      position: absolute;
+      bottom: -6px;
+      width: 8px;
+      height: 4px;
+      border-bottom: 2.5px solid var(--toy-dark);
+      border-radius: 0 0 10px 10px;
+    }
+
+    /* 款式 2：【神秘开箱胶带 + 3D立体问号】(Mystery Question Mark & Tape) */
+    .face-mystery {
+      width: 60px;
+      height: 60px;
+      background: var(--toy-cream);
+      border-radius: 18px;
+      border: 3.5px solid var(--toy-dark);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.1);
+    }
+
+    /* 潮流撕裂斜胶带装饰 */
+    .face-tape {
+      position: absolute;
+      top: -8px;
+      right: -10px;
+      background: var(--toy-accent);
+      color: var(--toy-dark);
+      font-size: 8px;
+      font-weight: 900;
+      padding: 1px 7px;
+      border: 2px solid var(--toy-dark);
+      border-radius: 3px;
+      transform: rotate(18deg);
+      letter-spacing: 0.5px;
+    }
+
+    .mystery-symbol {
+      font-size: 32px;
+      font-weight: 900;
+      color: var(--toy-purple);
+      text-shadow: 2px 2px 0px var(--toy-yellow);
+      transform: translateY(-2px);
+    }
+
+    /* 款式 3：【街头机能风 X_X 潮牌眼】(Hype Street X_X Eyes) */
+    .face-kaws {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .x-eye {
+      position: relative;
+      width: 22px;
+      height: 22px;
+    }
+
+    .x-eye::before, .x-eye::after {
+      content: "";
+      position: absolute;
+      top: 9px;
+      left: 1px;
+      width: 20px;
+      height: 5px;
+      background: var(--toy-dark);
+      border-radius: 3px;
+      box-shadow: 0 2px 0 rgba(255, 255, 255, 0.3);
+    }
+
+    .x-eye::before {
+      transform: rotate(45deg);
+    }
+
+    .x-eye::after {
+      transform: rotate(-45deg);
+    }
+
+    /* 款式 4：【透明亚克力橱窗 + 露头微缩公仔】(Transparent Window & Mini Figure) */
+    .face-window {
+      width: 62px;
+      height: 62px;
+      background: rgba(255, 255, 255, 0.35);
+      border-radius: 20px;
+      border: 3.5px solid var(--toy-dark);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      box-shadow: inset 0 2px 6px rgba(255, 255, 255, 0.8), inset 0 -3px 6px rgba(0, 0, 0, 0.2);
+    }
+
+    /* 橱窗反光条 */
+    .window-glass {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, rgba(255,255,255,0.7) 0%, rgba(255,255,255,0) 45%);
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    /* 里面的微缩手办脑袋 */
+    .mini-bear {
+      position: relative;
+      width: 38px;
+      height: 34px;
+      background: var(--toy-yellow);
+      border: 3px solid var(--toy-dark);
+      border-radius: 20px 20px 10px 10px;
+      margin-bottom: 2px;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .bear-ear {
+      position: absolute;
+      top: -8px;
+      width: 12px;
+      height: 12px;
+      background: var(--toy-yellow);
+      border: 2.5px solid var(--toy-dark);
+      border-radius: 50%;
+    }
+    .bear-ear.left { left: -3px; }
+    .bear-ear.right { right: -3px; }
+
+    .bear-face-inner {
+      display: flex;
+      gap: 10px;
+      margin-top: 2px;
+    }
+    .bear-dot {
+      width: 4px;
+      height: 4px;
+      background: var(--toy-dark);
+      border-radius: 50%;
+    }
+
+    /* 下方潮酷文字排版 */
+    .loading-text {
+      margin-top: 24px;
+      font-weight: 900;
+      font-size: 14px;
+      letter-spacing: 3px;
+      color: var(--toy-dark);
+      display: flex;
+      gap: 2px;
+    }
+
+    .loading-text span {
+      display: inline-block;
+      animation: textBob 1.9s ease-in-out infinite;
+    }
+    .loading-text span:nth-child(1) { animation-delay: 0.05s; }
+    .loading-text span:nth-child(2) { animation-delay: 0.10s; }
+    .loading-text span:nth-child(3) { animation-delay: 0.15s; }
+    .loading-text span:nth-child(4) { animation-delay: 0.20s; }
+    .loading-text span:nth-child(5) { animation-delay: 0.25s; }
+    .loading-text span:nth-child(6) { animation-delay: 0.30s; }
+    .loading-text span:nth-child(7) { animation-delay: 0.35s; }
+
+    /* 说明标签卡 */
+    .style-caption {
+      margin-top: 14px;
+      font-size: 12px;
+      color: #6B7280;
+      background: #E5E7EB;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-weight: 600;
+    }
+
+    /* ================= 动效核心：摇晃与钝感撞击 ================= */
+
+    @keyframes toyJump {
+      0% {
+        transform: translateY(0) rotate(0deg) scale(1, 1);
+      }
+      /* 摇晃阶段 1：左摇 (钝感撞击左侧) */
+      8% {
+        transform: translateY(0) rotate(-13deg) scale(1, 1);
+      }
+      /* 摇晃阶段 2：右晃 (钝感撞击右侧) */
+      18% {
+        transform: translateY(0) rotate(13deg) scale(1, 1);
+      }
+      /* 摇晃阶段 3：微弱回中震颤 */
+      26% {
+        transform: translateY(0) rotate(-3deg) scale(1, 1);
+      }
+      /* 蓄力蹲下压扁 (Squash) */
+      34% {
+        transform: translateY(7px) rotate(0deg) scale(1.18, 0.82);
+      }
+      /* 腾空起跳拉长 (Stretch) */
+      50% {
+        transform: translateY(-48px) rotate(-5deg) scale(0.88, 1.15);
+      }
+      /* 最高点滞空与转体微悬浮 */
+      58% {
+        transform: translateY(-52px) rotate(2deg) scale(1.02, 0.98);
+      }
+      /* 坠落触地前一刻拉长 */
+      70% {
+        transform: translateY(-3px) rotate(0deg) scale(0.92, 1.1);
+      }
+      /* 撞地深度压扁 (Squash) */
+      76% {
+        transform: translateY(8px) rotate(0deg) scale(1.22, 0.78);
+      }
+      /* 回弹过冲 (Overshoot) */
+      87% {
+        transform: translateY(-6px) rotate(0deg) scale(0.96, 1.05);
+      }
+      94% {
+        transform: translateY(1px) scale(1.02, 0.99);
+      }
+      100% {
+        transform: translateY(0) scale(1, 1);
+      }
+    }
+
+    /* 内部物品钝感反向震颤撞击（与盒子运动产生相对差） */
+    @keyframes innerImpactShake {
+      0%, 100% {
+        transform: translateX(0) scale(1);
+      }
+      /* 盒子向左倾斜时，重物因惯性滞后并猛烈撞击右侧内壁 */
+      8% {
+        transform: translateX(6px) scale(0.96, 1.04);
+      }
+      /* 盒子向右倾斜时，重物猛烈撞击左侧内壁 */
+      18% {
+        transform: translateX(-6px) scale(0.96, 1.04);
+      }
+      /* 回中震荡 */
+      26% {
+        transform: translateX(2px) scale(1);
+      }
+      /* 蓄力压扁 */
+      34% {
+        transform: translateY(2px) scale(1.08, 0.92);
+      }
+      /* 滞空微浮 */
+      50%, 58% {
+        transform: translateY(-4px) scale(0.96, 1.04);
+      }
+      /* 撞地顿挫 */
+      76% {
+        transform: translateY(4px) scale(1.12, 0.88);
+      }
+      87% {
+        transform: translateY(-2px) scale(1);
+      }
+    }
+
+    /* 阴影变化 */
+    @keyframes shadowScale {
+      0%, 34% {
+        transform: scale(1);
+        opacity: 0.9;
+        filter: blur(2.5px);
+      }
+      54% {
+        transform: scale(0.45);
+        opacity: 0.25;
+        filter: blur(6px);
+      }
+      76% {
+        transform: scale(1.26);
+        opacity: 1;
+        filter: blur(1.5px);
+      }
+      87% {
+        transform: scale(0.92);
+        opacity: 0.7;
+      }
+      100% {
+        transform: scale(1);
+        opacity: 0.9;
+      }
+    }
+
+    /* 扫光 */
+    @keyframes specularSweep {
+      0%, 45% { left: -60%; }
+      68%, 100% { left: 160%; }
+    }
+
+    /* 迸发星芒 */
+    @keyframes sparklePopLeft {
+      0%, 46% { opacity: 0; transform: translate(0, 0) scale(0.2); }
+      56% { opacity: 1; transform: translate(-14px, -18px) scale(1.1) rotate(-25deg); }
+      72%, 100% { opacity: 0; transform: translate(-22px, -30px) scale(0) rotate(-60deg); }
+    }
+
+    @keyframes sparklePopRight {
+      0%, 48% { opacity: 0; transform: translate(0, 0) scale(0.2); }
+      58% { opacity: 1; transform: translate(16px, -16px) scale(1) rotate(25deg); }
+      74%, 100% { opacity: 0; transform: translate(24px, -26px) scale(0) rotate(50deg); }
+    }
+
+    @keyframes textBob {
+      0%, 75%, 100% { transform: translateY(0); }
+      82% { transform: translateY(-4px); color: var(--toy-primary); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 款式切换工具栏 -->
+  <div class="style-switcher">
+    <button class="style-btn active" onclick="switchStyle('eyes', '款式 1：呆萌潮玩大眼表情 (Molly/Dimoo风格)')">大眼表情</button>
+    <button class="style-btn" onclick="switchStyle('mystery', '款式 2：神秘盲盒问号 + 潮玩封条')">神秘问号</button>
+    <button class="style-btn" onclick="switchStyle('kaws', '款式 3：街头潮牌 X_X 标志')">街头 X_X</button>
+    <button class="style-btn" onclick="switchStyle('window', '款式 4：半透亚克力橱窗 + 盒内微缩手办')">透明橱窗手办</button>
+  </div>
+
+  <div class="loader-stage">
+    <!-- 左上迸发星芒 -->
+    <div class="sparkle sparkle-left">
+      <svg viewBox="0 0 24 24"><path d="M12 0L14.8 9.2L24 12L14.8 14.8L12 24L9.2 14.8L0 12L9.2 9.2Z"/></svg>
+    </div>
+    <!-- 右上迸发星芒 -->
+    <div class="sparkle sparkle-right">
+      <svg viewBox="0 0 24 24"><path d="M12 0L14.8 9.2L24 12L14.8 14.8L12 24L9.2 14.8L0 12L9.2 9.2Z"/></svg>
+    </div>
+
+    <!-- 盲盒主包装 -->
+    <div class="blind-box-wrap">
+      <div class="box-handle"></div>
+      <div class="blind-box">
+        <!-- 搪胶表面扫光 -->
+        <div class="vinyl-specular"></div>
+
+        <!-- 中间可替换核心元素 -->
+        <div class="inner-content" id="innerSlot">
+          <!-- 默认显示款式 1：大眼表情 -->
+          <div class="face-eyes">
+            <div class="eyes-row">
+              <div class="toy-eye"></div>
+              <div class="toy-eye"></div>
+            </div>
+            <div class="blush-row">
+              <div class="blush"></div>
+              <div class="blush"></div>
+            </div>
+            <div class="mouth"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 地面动态投影 -->
+    <div class="box-shadow"></div>
+
+    <!-- 潮酷英文提示 -->
+    <div class="loading-text" aria-hidden="true">
+      <span>L</span><span>O</span><span>A</span><span>D</span><span>I</span><span>N</span><span>G</span>
+    </div>
+
+    <!-- 当前款式说明 -->
+    <div class="style-caption" id="styleCaption">款式 1：呆萌潮玩大眼表情 (Molly/Dimoo风格)</div>
+  </div>
+
+  <script>
+    // 4 种中间核心设计的模板库
+    const styleTemplates = {
+      // 款式 1：呆萌潮玩大眼表情（高光大眼 + 腮红 + 微笑）
+      eyes: `
+        <div class="face-eyes">
+          <div class="eyes-row">
+            <div class="toy-eye"></div>
+            <div class="toy-eye"></div>
+          </div>
+          <div class="blush-row">
+            <div class="blush"></div>
+            <div class="blush"></div>
+          </div>
+          <div class="mouth"></div>
+        </div>
+      `,
+
+      // 款式 2：立体发光问号 + 潮玩撕裂斜胶带
+      mystery: `
+        <div class="face-mystery">
+          <div class="face-tape">LUCKY</div>
+          <div class="mystery-symbol">?</div>
+        </div>
+      `,
+
+      // 款式 3：街头潮牌 X_X 潮流双眼
+      kaws: `
+        <div class="face-kaws">
+          <div class="x-eye"></div>
+          <div class="x-eye"></div>
+        </div>
+      `,
+
+      // 款式 4：亚克力透明天窗 + 盒内微缩手办脑袋
+      window: `
+        <div class="face-window">
+          <div class="window-glass"></div>
+          <div class="mini-bear">
+            <div class="bear-ear left"></div>
+            <div class="bear-ear right"></div>
+            <div class="bear-face-inner">
+              <div class="bear-dot"></div>
+              <div class="bear-dot"></div>
+            </div>
+          </div>
+        </div>
+      `
+    };
+
+    function switchStyle(type, name) {
+      document.getElementById('innerSlot').innerHTML = styleTemplates[type];
+      document.getElementById('styleCaption').innerText = name;
+      
+      // 更新按钮高亮
+      document.querySelectorAll('.style-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<meta name="color-scheme" content="light"/>
+<title>脚印 · 新版 Demo</title>
+<style>
+@font-face{font-family:"FusionPixel";font-display:swap;src:url("../fonts/fusion-pixel-12px-proportional-latin.otf.woff2") format("woff2");unicode-range:U+0000-00FF,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;}
+@font-face{font-family:"FusionPixel";font-display:swap;src:url("../fonts/fusion-pixel-12px-proportional-zh_hans.otf.woff2") format("woff2");unicode-range:U+2E80-9FFF,U+FF00-FFEF,U+F900-FAFF;}
+@font-face{font-family:"FusionPixelMono";font-display:swap;src:url("../fonts/fusion-pixel-12px-monospaced-latin.otf.woff2") format("woff2");unicode-range:U+0000-00FF,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;}
+@font-face{font-family:"FusionPixelMono";font-display:swap;src:url("../fonts/fusion-pixel-12px-monospaced-zh_hans.otf.woff2") format("woff2");unicode-range:U+2E80-9FFF,U+FF00-FFEF,U+F900-FAFF;}
+
+:root{
+  --bg:#F6EFE1;
+  --bg-2:#EEE5D3;
+  --paper:#FFFDF7;
+  --paper-2:#FBF5E9;
+  --ink:#3A3026;
+  --ink-2:#6C5D4B;
+  --ink-3:#95866F;
+  --line:#E3D7C2;
+  --line-2:#F0E7D6;
+  --edge:#3A2E20;
+  --green:#5E8F6E;
+  --green-deep:#3C6A4B;
+  --green-soft:#DDEBDD;
+  --clay:#D79A5E;
+  --clay-deep:#9A5D25;
+  --clay-soft:#F8E8D2;
+  --rose:#B97F88;
+  --rose-soft:#F1E2E5;
+  --r-card:18px;
+  --r-ctl:12px;
+  --r-cell:9px;
+  --shadow-hard:0 3px 0 var(--edge);
+  --shadow-soft:0 8px 20px -12px rgba(74,54,30,.5);
+  --font-px:"FusionPixel","PingFang SC","Microsoft YaHei",sans-serif;
+  --font-mono:"FusionPixelMono","FusionPixel",monospace;
+  --font-body:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --tab-h:72px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow:hidden}
+button,input,textarea{font:inherit;color:inherit}
+button{border:0;background:none;cursor:pointer}
+:focus-visible{outline:3px solid var(--clay);outline-offset:2px}
+.ic{display:inline-flex;width:16px;height:16px;flex:none}
+.ic svg{width:100%;height:100%;display:block}
+
+/* 手机壳 */
+#app{width:390px;height:844px;margin:0 auto;position:relative;background:var(--bg);overflow:hidden;display:flex;flex-direction:column}
+@media (max-height:844px){#app{height:100dvh}}
+.view{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;padding:0 16px calc(var(--tab-h) + 16px)}
+.view::-webkit-scrollbar{width:0}
+
+/* 顶栏 */
+.head{padding:22px 2px 2px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.kicker{font-family:var(--font-px);font-size:11px;color:var(--ink-3);letter-spacing:.06em}
+.title{margin:6px 0 0;font-size:22px;font-weight:700;letter-spacing:-.02em;line-height:1.28}
+.sub{margin-top:4px;font-size:12px;color:var(--ink-3)}
+.avatar{width:36px;height:36px;border-radius:11px;background:var(--paper-2);border:1px solid var(--line);display:grid;place-items:center;font-size:18px;flex:none}
+
+/* 区块 */
+.sec{margin-top:16px}
+.sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:0 2px;margin-bottom:9px}
+.sec-title{margin:0;font-size:15px;font-weight:700}
+.sec-note{font-family:var(--font-mono);font-size:11px;color:var(--ink-3)}
+
+/* 卡片 */
+.card{background:var(--paper);border:1px solid var(--line);border-radius:var(--r-card);box-shadow:var(--shadow-soft)}
+.pad{padding:15px}
+.list{background:var(--paper);border:1px solid var(--line);border-radius:var(--r-card);overflow:hidden;box-shadow:var(--shadow-soft)}
+.li{display:flex;align-items:center;gap:11px;padding:12px 15px;border-top:1px solid var(--line-2)}
+.li:first-child{border-top:0}
+.li-main{flex:1;min-width:0}
+.li-title{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.li-meta{margin-top:2px;font-size:12px;color:var(--ink-3)}
+.li-val{font-family:var(--font-mono);font-size:15px;color:var(--green-deep);white-space:nowrap}
+.li-val.dim{color:var(--ink-3)}
+.li-side{display:flex;align-items:center;gap:8px}
+
+/* 积分 */
+.balance{border-radius:20px;padding:16px 17px;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;
+  background:linear-gradient(140deg,#6E9C7E 0%,#4E7C62 100%);color:#FFFCF5;box-shadow:0 14px 26px -18px rgba(60,105,75,.95)}
+.balance-label{font-size:11px;opacity:.85;letter-spacing:.04em}
+.balance-num{font-family:var(--font-mono);font-size:32px;line-height:1.1;margin-top:2px}
+.balance-conv{font-size:11px;opacity:.8;margin-top:2px}
+.balance-tags{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.pill{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:999px;font-size:11px;white-space:nowrap;background:rgba(255,255,255,.18)}
+.pill.light{background:#FFFBF2;color:var(--green-deep)}
+
+/* 主任务 */
+.focus{background:var(--paper);border:1px solid var(--line);border-radius:var(--r-card);box-shadow:var(--shadow-soft);padding:15px}
+.focus-top{display:flex;gap:12px;align-items:flex-start}
+.ico{width:46px;height:46px;border-radius:13px;background:var(--paper-2);border:1px solid var(--line);display:grid;place-items:center;font-size:22px;flex:none}
+.ico.sm{width:34px;height:34px;border-radius:10px;font-size:17px}
+.focus-title{margin:0;font-size:18px;font-weight:700;line-height:1.3}
+.focus-meta{margin-top:3px;font-size:12px;color:var(--ink-3)}
+.focus-points{margin-left:auto;font-family:var(--font-mono);font-size:19px;color:var(--clay-deep);white-space:nowrap}
+.focus-foot{margin-top:14px;display:flex;align-items:center;gap:10px}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:6px 11px;border-radius:999px;background:var(--clay-soft);color:var(--clay-deep);font-size:12px;white-space:nowrap}
+
+/* 按钮 */
+.btn{min-height:44px;border-radius:var(--r-ctl);display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:0 16px;font-size:14px;font-weight:600;transition:transform .08s ease,background .15s ease}
+.btn:active{transform:translateY(1px)}
+.btn-main{background:var(--green);color:#FFFCF5;box-shadow:0 2px 0 var(--green-deep);flex:1}
+.btn-main:active{background:var(--green-deep)}
+.btn-quiet{background:var(--paper);border:1px solid var(--line);color:var(--ink-2);min-height:38px;border-radius:11px;font-size:13px;font-weight:500}
+.btn-mini{min-height:30px;padding:0 11px;border-radius:9px;background:var(--paper-2);border:1px solid var(--line);color:var(--ink-2);font-size:12px}
+.btn-danger{background:var(--rose);color:#fff;box-shadow:0 2px 0 #8E5F68}
+
+/* 分段 */
+.seg{display:flex;gap:4px;background:var(--bg-2);border-radius:12px;padding:4px}
+.seg-item{flex:1;min-height:34px;border-radius:9px;font-size:13px;color:var(--ink-2);display:inline-flex;align-items:center;justify-content:center;gap:5px}
+.seg-item.on{background:var(--paper);color:var(--ink);font-weight:600;box-shadow:0 1px 3px rgba(74,54,30,.12)}
+.badge{min-width:16px;height:16px;border-radius:8px;background:var(--clay);color:#fff;font-size:10px;line-height:16px;text-align:center;padding:0 4px}
+
+/* 7 天格 */
+.week{background:var(--paper-2);border-radius:var(--r-ctl);padding:9px 10px 8px}
+.week-days{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:10px;color:var(--ink-3);text-align:center;margin-bottom:5px}
+.week-cells{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cell{aspect-ratio:1/1;border-radius:var(--r-cell);background:var(--bg-2);display:grid;place-items:center;font-size:10px;color:transparent}
+.cell.done{background:var(--green)}
+.cell.miss{background:var(--rose-soft)}
+.cell.today{background:var(--clay-soft);border:1.5px solid var(--clay);color:var(--clay-deep)}
+.cell.future{background:transparent;border:1px dashed var(--line)}
+.legend{display:flex;gap:14px;justify-content:center;font-size:11px;color:var(--ink-3);margin-top:9px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px;vertical-align:0}
+.legend i.done{background:var(--green)}.legend i.miss{background:var(--rose-soft)}.legend i.today{background:var(--clay-soft);border:1px solid var(--clay)}
+
+/* 难度 */
+.dbar{display:inline-flex;gap:2px;vertical-align:1px;margin-left:4px}
+.dbar i{width:3px;height:8px;border-radius:1px;background:var(--bg-2)}
+.dbar i.on{background:var(--clay)}
+
+/* 进度 */
+.bar{display:flex;gap:3px}
+.bar i{flex:1;height:8px;border-radius:3px;background:var(--bg-2)}
+.bar i.on{background:var(--green)}
+
+/* 对比 */
+.cmp{background:var(--paper);border:1px solid var(--line);border-radius:var(--r-card);overflow:hidden;box-shadow:var(--shadow-soft)}
+.cmp-row{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:8px;align-items:baseline;padding:11px 15px;border-top:1px solid var(--line-2)}
+.cmp-row:first-child{border-top:0;background:var(--paper-2);font-size:11px;color:var(--ink-3)}
+.cmp-row span:nth-child(n+2){text-align:right}
+.cmp-row b{font-family:var(--font-mono);font-size:13px;font-weight:400;text-align:right}
+
+/* 短语 */
+.nudge{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.nudge-btn{padding:10px 6px;border-radius:11px;background:var(--paper-2);border:1px solid var(--line);font-size:12px;color:var(--ink-2)}
+.nudge-btn.done{background:var(--green-soft);color:var(--green-deep);border-color:var(--green)}
+
+/* 弹层 */
+.sheet{position:absolute;inset:0;display:flex;align-items:flex-end;z-index:30}
+.scrim{position:absolute;inset:0;background:rgba(42,36,30,.36);animation:fade .18s ease}
+.panel{position:relative;width:100%;max-height:88%;overflow-y:auto;background:var(--paper);border-radius:22px 22px 0 0;padding:9px 18px 20px;box-shadow:0 -14px 30px -18px rgba(42,36,30,.5);animation:up .22s ease}
+.handle{display:block;width:38px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 12px}
+.panel-title{margin:0 0 14px;font-size:16px;font-weight:700;text-align:center}
+.panel-body{display:flex;flex-direction:column;gap:12px}
+.panel-actions{display:flex;gap:10px;margin-top:16px}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+@keyframes up{from{transform:translateY(18px);opacity:.6}to{transform:none;opacity:1}}
+
+/* 表单 */
+.field{display:flex;flex-direction:column;gap:6px}
+.label{font-size:12px;color:var(--ink-3)}
+.input{height:44px;border-radius:11px;border:1px solid var(--line);background:var(--paper-2);display:flex;align-items:center;padding:0 13px;font-size:14px;width:100%}
+.input:focus{outline:none;border-color:var(--green);background:#fff}
+textarea.input{height:auto;min-height:72px;padding:11px 13px;resize:none;font-family:inherit}
+
+/* toast */
+.toast{position:absolute;left:50%;bottom:96px;transform:translateX(-50%);background:rgba(58,48,38,.94);color:#FFFCF5;font-size:13px;padding:10px 16px;border-radius:12px;z-index:40;max-width:82%;text-align:center;animation:fade .15s ease}
+
+/* 空状态 */
+.empty{text-align:center;padding:32px 20px}
+.empty-emoji{font-size:30px}
+.empty-title{margin-top:8px;font-size:15px;font-weight:700}
+.empty-sub{margin-top:5px;font-size:13px;color:var(--ink-3)}
+
+/* 底部导航 */
+.tabbar{position:absolute;left:0;right:0;bottom:0;height:var(--tab-h);background:rgba(255,253,247,.96);backdrop-filter:blur(10px);border-top:1px solid var(--line);display:flex;z-index:20}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:11px;color:var(--ink-3)}
+.tab .ic{width:22px;height:22px}
+.tab.on{color:var(--green-deep);font-weight:600}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="view" id="view"></div>
+  <div class="tabbar" id="tabbar"></div>
+</div>
+<script src="../js/icons.js"></script>
+<script>
+/* =========================================================
+   脚印 · 新版 Demo（可交互，数据在内存里，刷新重置）
+   ========================================================= */
+const ui = (n, c = "") => (window.icon ? window.icon(n, c) : "");
+
+const State = {
+  tab: "home",
+  user: { name: "栗子", avatar: "🐱", points: 1318, month: 666, streak: 5 },
+  partner: { name: "阿白", avatar: "🐻", points: 564, month: 338, streak: 4, todayChecked: 2, todayExpected: 3 },
+  goalsType: "daily",           // daily | stage | big
+  goalsView: "week",            // week | month
+  goals: [
+    { id: 1, e: "📚", t: "背单词", p: 14, d: 2, m: 30, done: [1,1,1,1,1,1,0], streak: 14, freq: "每天" },
+    { id: 2, e: "🎹", t: "练琴",   p: 34, d: 3, m: 45, done: [1,1,1,1,0,1,0], streak: 4,  freq: "每天" },
+    { id: 3, e: "🏋️", t: "健身",   p: 65, d: 4, m: 60, done: [1,0,1,0,1,0,0], streak: 0,  freq: "每周 3 次" },
+    { id: 4, e: "💤", t: "早睡",   p: 14, d: 2, m: 30, done: [1,1,1,1,1,0,0], streak: 1,  freq: "每天" },
+    { id: 5, e: "📖", t: "阅读",   p: 18, d: 2, m: 30, done: [1,0,1,1,0,1,0], streak: 2,  freq: "每天" },
+    { id: 6, e: "💧", t: "喝水",   p: 3,  d: 1, m: 5,  done: [1,1,1,1,1,1,0], streak: 6,  freq: "每天" },
+  ],
+  todayDone: [],                // 今天已打卡的 goal id（从 done[5] 推）
+  stages: [
+    { id: 101, e: "🎓", t: "考过雅思 6.5", status: "active", due: "12 月 20 日", days: 43, d: 4, points: 680, criteria: "雅思模考总分 ≥ 6.5，附成绩单截图" },
+    { id: 102, e: "🧡", t: "完成 8 周力量训练", status: "reviewing", due: "11 月 30 日", d: 3, points: 450, criteria: "连续 8 周每周 3 练，训练记录完整" },
+    { id: 103, e: "📚", t: "读完 12 本书", status: "done", due: "10 月 30 日", d: 3, points: 520, criteria: "读完并各写 300 字笔记" },
+  ],
+  bigs: [
+    { id: 201, e: "🌄", t: "找到 Agent 开发的工作", pct: 40, done: 2, total: 5, note: "简历改完，正在补两个能讲的项目", next: "把「RAG 检索优化」写成一个小目标" },
+    { id: 202, e: "💪", t: "把身体练回大学时", pct: 65, done: 3, total: 5, note: "力量已回到 8 成，接下来是心肺", next: "跑一次 10 公里计时" },
+  ],
+  wishes: [
+    { id: 301, e: "🧋", t: "奶茶", cost: 250, done: [] },
+    { id: 302, e: "🍲", t: "一顿火锅", cost: 1500, done: [] },
+    { id: 303, e: "🎧", t: "蓝牙耳机", cost: 1990, done: [] },
+    { id: 304, e: "🌷", t: "乐高花束", cost: 3490, done: [] },
+  ],
+  redemptions: [],
+  wishTab: "saving",
+  partnerTab: "live",
+  nudges: [],                 // 已发送的短语
+  pendingVerify: [
+    { id: 401, t: "完成 8 周力量训练", from: "阿白", points: 450, self: "第八周最后一次练完，视频在附件里" },
+  ],
+  ledger: [
+    { t: "打卡 ·「喝水」5 分钟", m: "11 月 7 日 09:54", p: 3 },
+    { t: "打卡 ·「背单词」30 分钟", m: "11 月 7 日 09:44", p: 14 },
+    { t: "连续奖励 · 连续 7 达成", m: "11 月 6 日 21:30", p: 65 },
+  ],
+  diary: { date: "11 月 6 日", text: "今天背单词连续第 14 天，练琴练到肖邦夜曲左手走位还是不稳。晚上十点后状态明显下滑，明天把难的部分挪到上午。" },
+};
+
+const WEEK = ["一","二","三","四","五","六","日"];
+const TODAY_INDEX = 5; // 周六
+
+/* ---------- 工具 ---------- */
+function toast(msg) {
+  const old = document.querySelector(".toast");
+  if (old) old.remove();
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.textContent = msg;
+  document.getElementById("app").appendChild(el);
+  setTimeout(() => el.remove(), 1800);
+}
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function fmt(n) { return Number(n).toLocaleString("zh-CN"); }
+function diff(d) { return `<span class="dbar">${Array.from({ length: 5 }, (_, i) => `<i class="${i < d ? "on" : ""}"></i>`).join("")}</span>`; }
+function weekCells(done, editable) {
+  return `<div class="week">
+    <div class="week-days">${WEEK.map((d) => `<span>${d}</span>`).join("")}</div>
+    <div class="week-cells">${done.map((v, i) => `<div class="cell ${v ? "done" : ""} ${i === TODAY_INDEX ? "today" : ""}" ${editable ? `data-cell="${i}"` : ""}>${i === TODAY_INDEX ? "今" : ""}</div>`).join("")}</div>
+  </div>`;
+}
+function head(kicker, title, sub, right) {
+  return `<div class="head">
+    <div>${kicker ? `<div class="kicker">${kicker}</div>` : ""}
+      <h1 class="title">${title}</h1>
+      ${sub ? `<div class="sub">${sub}</div>` : ""}</div>
+    ${right || ""}</div>`;
+}
+function secHead(title, note) {
+  return `<div class="sec-head"><h2 class="sec-title">${title}</h2><span class="sec-note">${note || ""}</span></div>`;
+}
+function balance() {
+  return `<div class="balance">
+    <div><div class="balance-label">可用积分</div><div class="balance-num">${fmt(State.user.points)}</div><div class="balance-conv">≈ ¥${(State.user.points / 10).toFixed(1)}</div></div>
+    <div class="balance-tags">
+      <span class="pill">${ui("flame")} ${State.user.streak} 天连续</span>
+      <span class="pill light">本月 +${State.user.month}</span>
+    </div></div>`;
+}
+
+/* ---------- 打卡逻辑 ---------- */
+function checkin(id, opts = {}) {
+  const g = State.goals.find((x) => x.id === id);
+  if (!g) return;
+  if (g.done[TODAY_INDEX]) { toast("今天已经打过卡了"); return; }
+  g.done[TODAY_INDEX] = 1;
+  g.streak += 1;
+  State.user.points += g.p;
+  State.user.month += g.p;
+  State.ledger.unshift({ t: `打卡 ·「${g.t}」${g.m} 分钟`, m: "刚刚", p: g.p });
+  toast(`打卡成功，+${g.p} 分已入账`);
+  render();
+}
+function undoCheckin(id) {
+  const g = State.goals.find((x) => x.id === id);
+  if (!g || !g.done[TODAY_INDEX]) return;
+  g.done[TODAY_INDEX] = 0;
+  g.streak = Math.max(0, g.streak - 1);
+  State.user.points -= g.p;
+  State.user.month -= g.p;
+  State.ledger.unshift({ t: `撤销 ·「${g.t}」`, m: "刚刚", p: -g.p });
+  toast("已撤销，分数已扣回");
+  closeSheet();
+  render();
+}
+
+/* ---------- 弹层 ---------- */
+let sheetHtml = "";
+function openSheet(html) {
+  sheetHtml = html;
+  const wrap = document.createElement("div");
+  wrap.className = "sheet";
+  wrap.id = "sheet";
+  wrap.innerHTML = `<div class="scrim" data-close></div>${html}`;
+  document.getElementById("app").appendChild(wrap);
+  wrap.addEventListener("click", (e) => {
+    if (e.target.dataset.close !== undefined) closeSheet();
+  });
+}
+function closeSheet() {
+  const el = document.getElementById("sheet");
+  if (el) el.remove();
+  sheetHtml = "";
+}
+
+/* ---------- 页面 ---------- */
+const Pages = {};
+
+/* ===== 今天 ===== */
+Pages.home = () => {
+  const pending = State.goals.filter((g) => !g.done[TODAY_INDEX]);
+  const hero = pending[0];
+  const rest = pending.slice(1);
+  const done = State.goals.filter((g) => g.done[TODAY_INDEX]);
+  return `
+  ${head("11 月 7 日 · 周六", `晚上好，${State.user.name}`, "", `<span class="avatar">${State.user.avatar}</span>`)}
+  <div class="sec">${balance()}</div>
+  <div class="sec">
+    ${secHead("今天", pending.length ? `剩 ${pending.length} 项` : "全部完成")}
+    ${hero ? `
+    <article class="focus">
+      <div class="focus-top">
+        <span class="ico">${hero.e}</span>
+        <div><h2 class="focus-title">${hero.t}</h2><div class="focus-meta">全天 · ${hero.m} 分钟 ${diff(hero.d)}</div></div>
+        <span class="focus-points">+${hero.p}</span>
+      </div>
+      <div class="focus-foot">
+        <span class="chip">${ui("flame")} ${hero.streak} 天</span>
+        <button class="btn btn-main" data-checkin="${hero.id}">${ui("check")} 打卡</button>
+      </div>
+    </article>` : `
+    <div class="card empty"><div class="empty-emoji">🌱</div><div class="empty-title">今天全打完了</div>
+      <div class="empty-sub">明天继续，连续 ${State.user.streak} 天了</div></div>`}
+    ${rest.length ? `<div class="list" style="margin-top:10px">
+      ${rest.map((g) => `<div class="li">
+        <span class="ico sm">${g.e}</span>
+        <div class="li-main"><div class="li-title">${g.t}</div><div class="li-meta">${g.m} 分钟 ${diff(g.d)}</div></div>
+        <div class="li-side"><span class="li-val">+${g.p}</span><button class="btn btn-mini" data-checkin="${g.id}">完成</button></div>
+      </div>`).join("")}
+    </div>` : ""}
+  </div>
+  ${done.length ? `<div class="sec">
+    ${secHead("已完成", `${done.length} 项`)}
+    <div class="list">${done.map((g) => `<div class="li" data-undo="${g.id}">
+      <span class="ico sm">${g.e}</span>
+      <div class="li-main"><div class="li-title">${g.t}</div><div class="li-meta">${g.m} 分钟 · 今天已完成</div></div>
+      <div class="li-side"><span class="li-val dim">+${g.p}</span><span style="color:var(--green)">✓</span></div>
+    </div>`).join("")}</div>
+  </div>` : ""}
+  <div class="sec">
+    <div class="card pad" style="display:flex;align-items:center;gap:11px">
+      <span class="avatar">${State.partner.avatar}</span>
+      <div class="li-main"><div class="li-title">${State.partner.name} <span class="li-meta" style="display:inline">今日 ${State.partner.todayChecked}/${State.partner.todayExpected}</span></div>
+        <div class="li-meta">${State.partner.todayChecked >= State.partner.todayExpected ? "今天全打完啦" : `还有 ${State.partner.todayExpected - State.partner.todayChecked} 张没打`}</div></div>
+      <button class="btn btn-quiet" data-nav="partner">看看</button>
+    </div>
+  </div>`;
+};
+
+/* ===== 目标 ===== */
+Pages.goals = () => {
+  const type = State.goalsType;
+  const seg = `<div class="seg">
+    ${[["daily","日常"],["stage","小目标"],["big","大目标"]].map(([k, l]) => `<button class="seg-item ${type === k ? "on" : ""}" data-type="${k}">${l}</button>`).join("")}
+  </div>`;
+
+  let body = "";
+  if (type === "daily") {
+    body = State.goalsView === "week" ? weekBoard() : monthBoard();
+  } else if (type === "stage") {
+    body = stageList();
+  } else {
+    body = bigList();
+  }
+
+  return `${head("", "目标", type === "daily" ? "这周打了几天" : type === "stage" ? "阶段目标，做完请对方验收" : "长期方向，靠一个个小目标推进",
+      `<button class="btn btn-quiet" data-new-goal="1">＋ 新建</button>`)}
+    <div class="sec">${seg}</div>
+    ${body}`;
+};
+
+function weekBoard() {
+  const total = State.goals.reduce((s, g) => s + g.p * g.done.filter(Boolean).length, 0);
+  const doneCount = State.goals.reduce((s, g) => s + g.done.filter(Boolean).length, 0);
+  const expected = State.goals.length * 7;
+  return `<div class="sec">
+    <div class="card pad">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
+        <div><div style="font-size:17px;font-weight:700">11/2 – 11/8</div>
+          <div style="font-size:12px;color:var(--ink-3);margin-top:3px">${total} 分 · ${doneCount}/${expected} 完成 · ${State.goals.length} 个目标</div></div>
+        <div class="seg" style="flex:none;padding:3px">
+          ${[["week","周"],["month","月"]].map(([k, l]) => `<button class="seg-item ${State.goalsView === k ? "on" : ""}" data-view="${k}" style="flex:none;min-height:28px;padding:0 13px;font-size:12px">${l}</button>`).join("")}
+        </div>
+      </div>
+      <div style="margin-top:14px;display:flex;flex-direction:column;gap:6px">
+        ${State.goals.map((g) => `<div style="display:grid;grid-template-columns:100px repeat(7,1fr);gap:4px;align-items:center">
+          <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${g.e} ${g.t}</div>
+          ${g.done.map((v, i) => `<div class="cell ${v ? "done" : ""} ${i === TODAY_INDEX ? "today" : ""}" data-goal="${g.id}" data-cell="${i}">${i === TODAY_INDEX ? (v ? "✓" : "今") : ""}</div>`).join("")}
+        </div>`).join("")}
+      </div>
+      <div class="legend"><span><i class="done"></i>已打</span><span><i class="miss"></i>漏了</span><span><i class="today"></i>今天</span></div>
+    </div>
+    <div class="card pad" style="display:flex;justify-content:space-between;margin-top:12px">
+      ${[["最长连续","21 天"],["本月完成率","86%"],["时间投入","21.3 h"]].map(([k, v]) => `<div><div style="font-size:11px;color:var(--ink-3)">${k}</div><div style="font-family:var(--font-mono);font-size:17px;margin-top:2px">${v}</div></div>`).join("")}
+    </div>
+  </div>`;
+}
+
+function monthBoard() {
+  const cells = Array.from({ length: 30 }, (_, i) => i + 1).map((n) => {
+    const isToday = n === 13;
+    const done = n < 13 && !(n % 7 === 0);
+    const cls = isToday ? "today" : done ? "done" : n > 13 ? "future" : "miss";
+    return `<div class="cell ${cls}" data-day="${n}" style="font-size:11px;color:${done ? "#fff" : isToday ? "var(--clay-deep)" : "var(--ink-3)"}">${n}</div>`;
+  }).join("");
+  return `<div class="sec">
+    <div class="card pad">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
+        <div><div style="font-size:17px;font-weight:700">2026 年 11 月</div>
+          <div style="font-size:12px;color:var(--ink-3);margin-top:3px">64/102 完成 · 1,468 分</div></div>
+        <div class="seg" style="flex:none;padding:3px">
+          ${[["week","周"],["month","月"]].map(([k, l]) => `<button class="seg-item ${State.goalsView === k ? "on" : ""}" data-view="${k}" style="flex:none;min-height:28px;padding:0 13px;font-size:12px">${l}</button>`).join("")}
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-top:16px;text-align:center;font-size:10px;color:var(--ink-3)">${WEEK.map((d) => `<span>${d}</span>`).join("")}</div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-top:6px">${cells}</div>
+      <div class="legend"><span><i class="done"></i>已打</span><span><i class="miss"></i>漏了</span><span><i class="today"></i>今天</span></div>
+    </div>
+  </div>`;
+}
+
+function stageList() {
+  if (!State.stages.length) {
+    return `<div class="sec"><div class="card empty">
+      <div class="empty-emoji">🎯</div><div class="empty-title">还没有小目标</div>
+      <div class="empty-sub">定一个阶段要够到的事，做完请对方验收</div>
+      <button class="btn btn-main" style="width:186px;margin:16px auto 0" data-new-goal="stage">${ui("plus")} 建一个小目标</button>
+    </div></div>`;
+  }
+  const [main, ...others] = State.stages;
+  const badge = (st) => st === "done" ? `<span style="font-size:10px;font-weight:600;color:var(--green-deep);background:var(--green-soft);padding:1px 7px;border-radius:999px">已达成</span>`
+    : st === "reviewing" ? `<span style="font-size:10px;font-weight:600;color:var(--clay-deep);background:var(--clay-soft);padding:1px 7px;border-radius:999px">待验收</span>`
+    : `<span style="font-size:10px;font-weight:600;color:var(--green-deep);background:var(--green-soft);padding:1px 7px;border-radius:999px">进行中</span>`;
+  return `<div class="sec">
+    <article class="focus">
+      <div class="focus-top">
+        <span class="ico">${main.e}</span>
+        <div style="flex:1"><h2 class="focus-title">${esc(main.t)} ${badge(main.status)}</h2>
+          <div class="focus-meta">截止 ${main.due}${main.days ? ` · 还剩 ${main.days} 天` : ""} · 难度 ${main.d}</div></div>
+      </div>
+      <div style="margin-top:10px;font-size:12px;color:var(--ink-2);background:var(--paper-2);border-radius:11px;padding:10px 12px">验收：${esc(main.criteria)}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;gap:10px">
+        <span style="font-size:12px;color:var(--ink-3)">达成 <b style="font-family:var(--font-mono);color:var(--clay-deep);font-weight:400">+${main.points}</b> 分</span>
+        ${main.status === "active" ? `<button class="btn btn-main" style="flex:none;min-height:38px;font-size:13px;padding:0 14px" data-submit="${main.id}">提交验收</button>` : ""}
+      </div>
+    </article>
+    ${others.length ? `<div class="list" style="margin-top:10px">
+      ${others.map((g) => `<div class="li" style="align-items:flex-start">
+        <span class="ico sm">${g.e}</span>
+        <div class="li-main"><div class="li-title">${esc(g.t)} ${badge(g.status)}</div><div class="li-meta">截止 ${g.due} · 难度 ${g.d}</div></div>
+        <span class="li-val">+${g.points}</span>
+      </div>`).join("")}
+    </div>` : ""}
+  </div>`;
+}
+
+function bigList() {
+  return `<div class="sec">
+    ${State.bigs.map((b) => `<div class="card pad" style="margin-bottom:12px">
+      <div style="display:flex;align-items:baseline;gap:8px">
+        <span style="font-size:18px">${b.e}</span>
+        <div style="font-size:15px;font-weight:700;flex:1">${esc(b.t)}</div>
+        <span style="font-family:var(--font-mono);font-size:13px;color:var(--green-deep)">${b.pct}%</span>
+      </div>
+      <div style="font-size:12px;color:var(--ink-3);margin-top:3px">客观 ${b.done}/${b.total} 个小目标达成</div>
+      <div style="height:4px;border-radius:2px;background:var(--bg-2);margin:11px 0;overflow:hidden"><i style="display:block;height:100%;width:${b.pct}%;background:var(--green)"></i></div>
+      <div style="font-size:12px;color:var(--ink-2)">${esc(b.note)}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:11px">
+        <span style="font-size:12px;color:var(--clay-deep);flex:1">下一步：${esc(b.next)}</span>
+        <button class="btn btn-mini" data-big="${b.id}">展开</button>
+      </div>
+    </div>`).join("")}
+  </div>`;
+}
+
+/* ===== 我们 ===== */
+Pages.partner = () => {
+  const tab = State.partnerTab;
+  const seg = `<div class="seg">
+    <button class="seg-item ${tab === "live" ? "on" : ""}" data-ptab="live">${ui("us")} 互动 ${State.pendingVerify.length ? `<span class="badge">${State.pendingVerify.length}</span>` : ""}</button>
+    <button class="seg-item ${tab === "data" ? "on" : ""}" data-ptab="data">${ui("target")} 数据对比</button>
+  </div>`;
+
+  const body = tab === "live" ? partnerLive() : partnerData();
+  return `${head("", "我们", `和 ${State.partner.name} · 一起第 18 天`)}<div class="sec">${seg}</div>${body}`;
+};
+
+function partnerLive() {
+  const nudges = ["加油", "拍一拍", "早点睡", "今天很棒", "别太累", "辛苦了"];
+  return `
+  <div class="sec">
+    <div class="card pad">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <span style="font-size:13px;font-weight:700">发一句</span>
+        <span style="font-size:11px;color:var(--ink-3)">今天还剩 ${Math.max(0, 3 - State.nudges.length)} 次</span>
+      </div>
+      <div class="nudge" style="margin-top:11px">
+        ${nudges.map((t) => `<button class="nudge-btn ${State.nudges.includes(t) ? "done" : ""}" data-nudge="${t}">${t}</button>`).join("")}
+      </div>
+    </div>
+  </div>
+  ${State.pendingVerify.length ? `<div class="sec">
+    <div class="card pad" style="border-color:var(--clay)">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <span style="font-size:11px;font-weight:700;color:var(--clay-deep);letter-spacing:.06em">待你验收</span>
+        <span style="font-size:12px;color:var(--clay-deep)">${State.pendingVerify.length} 条</span>
+      </div>
+      <div style="font-size:15px;font-weight:700;margin-top:9px">${esc(State.pendingVerify[0].t)}</div>
+      <div style="font-size:12px;color:var(--ink-3);margin-top:2px">${State.partner.name} · +${State.pendingVerify[0].points} 分</div>
+      <div style="font-size:12px;color:var(--ink-2);margin-top:6px">“${esc(State.pendingVerify[0].self)}”</div>
+      <div style="display:flex;gap:9px;margin-top:13px">
+        <button class="btn btn-main" style="min-height:38px;font-size:13px" data-approve="${State.pendingVerify[0].id}">${ui("check")} 去验收</button>
+        <button class="btn btn-quiet" data-reject="${State.pendingVerify[0].id}">驳回</button>
+      </div>
+    </div>
+  </div>` : ""}
+  <div class="sec">
+    ${secHead(`${State.partner.name} 今天`, `${State.partner.todayChecked}/${State.partner.todayExpected}`)}
+    <div class="list">
+      ${[["📚", "背单词", 18, "30 分钟 · 09:18"], ["🏋️", "健身", 65, "60 分钟 · 07:42"]].map(([e, t, p, m]) => `
+        <div class="li"><span class="ico sm">${e}</span>
+          <div class="li-main"><div class="li-title">${t} <span class="li-val">+${p}</span></div><div class="li-meta">${m}</div></div>
+        </div>`).join("")}
+    </div>
+  </div>`;
+}
+
+function partnerData() {
+  const rows = [["本月得分", `+${State.user.month}`, `+${State.partner.month}`],
+    ["连续天数", `${State.user.streak} 天`, `${State.partner.streak} 天`],
+    ["完成率", "76%", "75%"],
+    ["时间投入", "14.8 小时", "8.2 小时"],
+    ["当前余额", fmt(State.user.points), fmt(State.partner.points)]];
+  return `<div class="sec">
+    ${secHead("并排看看", "不比输赢")}
+    <div class="cmp">
+      <div class="cmp-row"><span>指标</span><span>我 ${State.user.avatar}</span><span>${State.partner.name} ${State.partner.avatar}</span></div>
+      ${rows.map(([k, a, b]) => `<div class="cmp-row"><span>${k}</span><b>${a}</b><b>${b}</b></div>`).join("")}
+    </div>
+  </div>
+  <div class="sec">
+    ${secHead("手机在谁手里", "今日")}
+    <div class="card pad" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      ${[["我"], [State.partner.name]].map(([n]) => `<div>
+        <div style="font-size:12px;color:var(--ink-3)">${n}</div>
+        <div style="font-size:15px;color:var(--ink-3);margin-top:4px">还没数据</div>
+        <div style="height:6px;border-radius:3px;background:var(--bg-2);margin-top:8px"></div>
+        <div style="font-size:11px;color:var(--ink-3);margin-top:6px">没有上报</div>
+      </div>`).join("")}
+    </div>
+  </div>`;
+}
+
+/* ===== 愿望单 ===== */
+Pages.wish = () => {
+  const ready = State.wishes.filter((w) => w.cost <= State.user.points);
+  const saving = State.wishes.filter((w) => w.cost > State.user.points).sort((a, b) => a.cost - b.cost);
+  const tab = State.wishTab;
+  return `${head("", "愿望单", "攒够就能换，先攒后换", `<button class="btn btn-quiet" data-new-wish="1">＋ 新建</button>`)}
+  <div class="sec">
+    <div style="border-radius:18px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;background:linear-gradient(135deg,#EEC97F 0%,#DDA457 100%);box-shadow:0 12px 24px -18px rgba(221,164,87,.95)">
+      <div style="display:flex;align-items:baseline;gap:4px;color:#3A2D1D"><span style="font-family:var(--font-mono);font-size:27px;font-weight:700">${fmt(State.user.points)}</span><span style="font-size:12px">分</span></div>
+      <div style="text-align:right;font-size:11px;color:#4A3A28;line-height:1.5">≈ ¥${(State.user.points / 10).toFixed(1)}<br/>1 元 = 10 分</div>
+    </div>
+  </div>
+  ${ready.length ? `<div class="sec">
+    ${secHead("现在可以换", `${ready.length} 件`)}
+    ${ready.map((w) => `<div class="card pad" style="border-left:5px solid var(--green);margin-bottom:10px">
+      <div style="display:flex;align-items:flex-start;gap:11px">
+        <span style="font-size:24px">${w.e}</span>
+        <div style="flex:1"><div style="font-size:15px;font-weight:700">${esc(w.t)}</div>
+          <div style="font-size:12px;color:var(--ink-3);margin-top:2px">换完还剩 ${fmt(State.user.points - w.cost)} 分</div></div>
+        <span style="font-family:var(--font-mono);font-size:17px;color:var(--green-deep)">${fmt(w.cost)}<span style="font-size:11px;color:var(--ink-3)"> 分</span></span>
+      </div>
+      <button class="btn btn-main" style="width:100%;margin-top:12px" data-redeem="${w.id}">兑换 · −${fmt(w.cost)} 分</button>
+    </div>`).join("")}
+  </div>` : ""}
+  <div class="sec">
+    <div class="seg">
+      <button class="seg-item ${tab === "saving" ? "on" : ""}" data-wtab="saving">还在攒 ${saving.length}</button>
+      <button class="seg-item ${tab === "records" ? "on" : ""}" data-wtab="records">兑换记录 ${State.redemptions.length}</button>
+    </div>
+  </div>
+  ${tab === "saving" ? `<div class="sec" style="margin-top:0">
+    ${saving.length ? saving.map((w) => {
+      const pct = Math.max(0, Math.min(100, Math.round((State.user.points / w.cost) * 100)));
+      return `<div style="padding:12px 2px;border-top:1px solid var(--line-2)">
+        <div style="display:flex;align-items:flex-start;gap:11px">
+          <span style="font-size:20px">${w.e}</span>
+          <div style="flex:1"><div style="font-size:14px;font-weight:600">${esc(w.t)}</div>
+            <div style="font-size:12px;color:var(--ink-3);margin-top:2px">${fmt(w.cost)} 分 · 还差 ${fmt(w.cost - State.user.points)}</div></div>
+          <span style="font-family:var(--font-mono);font-size:13px;color:var(--ink-2)">${pct}%</span>
+        </div>
+        <div class="bar" style="margin-top:9px">${Array.from({ length: 10 }, (_, i) => `<i class="${i < Math.round(pct / 10) ? "on" : ""}"></i>`).join("")}</div>
+      </div>`;
+    }).join("") : `<div class="card empty"><div class="empty-emoji">🎁</div><div class="empty-title">还没有想要的</div>
+      <div class="empty-sub">把想买的东西放进来，填上真实价格</div>
+      <button class="btn btn-main" style="width:192px;margin:16px auto 0" data-new-wish="1">${ui("plus")} 加第一个愿望</button></div>`}
+  </div>` : `<div class="sec" style="margin-top:0">
+    ${State.redemptions.length ? `<div class="list">${State.redemptions.map((r) => `<div class="li">
+      <span class="ico sm">${r.e}</span>
+      <div class="li-main"><div class="li-title">${esc(r.t)}</div><div class="li-meta">${r.m} · ${fmt(r.cost)} 分</div></div>
+      <span style="font-size:11px;padding:3px 9px;border-radius:999px;background:var(--green-soft);color:var(--green-deep)">已兑换</span>
+    </div>`).join("")}</div>` : `<div class="card empty"><div class="empty-emoji">🧾</div><div class="empty-title">还没有兑换记录</div>
+      <div class="empty-sub">兑换过的会出现在这里</div></div>`}
+  </div>`}`;
+};
+
+/* ===== 我的 ===== */
+Pages.me = () => `${head("", "我的", `${State.user.name} 的脚印`)}
+  <div class="sec">
+    <div class="card pad" style="display:flex;align-items:center;gap:12px">
+      <span class="avatar" style="width:48px;height:48px;border-radius:14px;font-size:24px">${State.user.avatar}</span>
+      <div style="flex:1"><div style="font-size:15px;font-weight:700">${State.user.name}</div>
+        <div style="font-size:12px;color:var(--ink-3)">和 ${State.partner.name} 互相监督中</div></div>
+      <button class="btn btn-quiet" data-toast="口令修改暂未开放">改口令</button>
+    </div>
+  </div>
+  <div class="sec">
+    <div class="balance" style="padding:14px 16px">
+      <div><div class="balance-label">可用积分</div><div class="balance-num" style="font-size:28px">${fmt(State.user.points)}</div></div>
+      <div class="balance-tags"><span class="pill">本月 +${State.user.month}</span><span class="pill light">连续 ${State.user.streak} 天</span></div>
+    </div>
+  </div>
+  <div class="sec">
+    <div class="card" style="display:grid;grid-template-columns:1fr 1fr;overflow:hidden">
+      ${[["本月完成率", "76%"], ["时间投入", "14.8 小时"], ["最长连续", "21 天"], ["被驳回次数", "0"]].map(([k, v], i) => `
+        <div style="padding:13px 15px;border-top:${i > 1 ? "1px solid var(--line-2)" : "0"};border-left:${i % 2 ? "1px solid var(--line-2)" : "0"}">
+          <div style="font-size:12px;color:var(--ink-3)">${k}</div><div style="font-family:var(--font-mono);font-size:18px;margin-top:3px">${v}</div>
+        </div>`).join("")}
+    </div>
+  </div>
+  <div class="sec">
+    ${secHead("积分流水", "最近 3 条")}
+    <div class="list">${State.ledger.slice(0, 5).map((l) => `<div class="li">
+      <div class="li-main"><div class="li-title">${esc(l.t)}</div><div class="li-meta">${esc(l.m)}</div></div>
+      <span class="li-val" style="color:${l.p < 0 ? "var(--rose)" : "var(--green-deep)"}">${l.p > 0 ? "+" : ""}${l.p}</span>
+    </div>`).join("")}</div>
+  </div>
+  <div class="sec">
+    ${secHead("AI 日报", "")}
+    <div class="card pad">
+      <div style="font-size:12px;color:var(--ink-3)">${State.diary.date}</div>
+      <div style="font-size:13px;margin-top:5px;color:var(--ink-2)">${esc(State.diary.text)}</div>
+    </div>
+  </div>
+  <div class="sec">
+    <div class="list">
+      ${[["数据与备份", "导出 · 快照"], ["积分系数", "规则可调"], ["我的画像", "仅自己可见"]].map(([t, n]) => `
+        <div class="li" data-toast="${t}暂未接入演示"><div class="li-main"><div class="li-title">${t}</div><div class="li-meta">${n}</div></div>
+          <span style="color:var(--ink-3)">›</span></div>`).join("")}
+    </div>
+  </div>`;
+
+/* ===== 底部导航 ===== */
+const TABS = [["home", "今天", "home"], ["goals", "目标", "target"], ["wish", "愿望单", "gift"], ["partner", "我们", "us"], ["me", "我的", "me"]];
+function renderTabbar() {
+  document.getElementById("tabbar").innerHTML = TABS.map(([k, l, ic]) =>
+    `<button class="tab ${State.tab === k ? "on" : ""}" data-tab="${k}">${ui(ic)}<span>${l}</span></button>`).join("");
+}
+
+/* ===== 渲染 ===== */
+function render() {
+  const view = document.getElementById("view");
+  const scrollTop = view.scrollTop;
+  view.innerHTML = Pages[State.tab]();
+  view.scrollTop = scrollTop;
+  renderTabbar();
+}
+
+/* ===== 事件 ===== */
+document.getElementById("app").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-tab],[data-checkin],[data-undo],[data-type],[data-view],[data-goal],[data-ptab],[data-nudge],[data-approve],[data-reject],[data-wtab],[data-redeem],[data-new-wish],[data-new-goal],[data-submit],[data-big],[data-toast],[data-nav]");
+  if (!t) return;
+  const d = t.dataset;
+
+  if (d.tab) { State.tab = d.tab; closeSheet(); render(); return; }
+  if (d.nav) { State.tab = d.nav; closeSheet(); render(); return; }
+  if (d.checkin) { checkin(Number(d.checkin)); return; }
+  if (d.undo) { openCheckinDetail(Number(d.undo)); return; }
+  if (d.type) { State.goalsType = d.type; render(); return; }
+  if (d.view) { State.goalsView = d.view; render(); return; }
+  if (d.goal) { openDayCell(Number(d.goal), Number(d.cell)); return; }
+  if (d.ptab) { State.partnerTab = d.ptab; render(); return; }
+  if (d.nudge) {
+    if (State.nudges.includes(d.nudge)) return;
+    if (State.nudges.length >= 3) { toast("今天已经发了 3 次，明天再来"); return; }
+    State.nudges.push(d.nudge);
+    toast(`已给 ${State.partner.name} 递了一句「${d.nudge}」`);
+    render(); return;
+  }
+  if (d.approve) {
+    const v = State.pendingVerify.find((x) => x.id === Number(d.approve));
+    State.pendingVerify = State.pendingVerify.filter((x) => x.id !== Number(d.approve));
+    if (v) toast(`已通过验收，${State.partner.name} 入账 +${v.points} 分`);
+    render(); return;
+  }
+  if (d.reject) {
+    State.pendingVerify = State.pendingVerify.filter((x) => x.id !== Number(d.reject));
+    toast("已驳回，目标退回进行中");
+    render(); return;
+  }
+  if (d.wtab) { State.wishTab = d.wtab; render(); return; }
+  if (d.redeem) { openRedeem(Number(d.redeem)); return; }
+  if (d.newWish) { openWishForm(); return; }
+  if (d.newGoal) { openGoalForm(); return; }
+  if (d.submit) { openSubmit(Number(d.submit)); return; }
+  if (d.big) { toast("大目标详情暂未展开"); return; }
+  if (d.toast) { toast(d.toast); return; }
+});
+
+/* ===== 弹层实现 ===== */
+function openCheckinDetail(id) {
+  const g = State.goals.find((x) => x.id === id);
+  if (!g) return;
+  openSheet(`<div class="panel">
+    <span class="handle"></span>
+    <h2 class="panel-title">${esc(g.t)} · 今天</h2>
+    <div class="panel-body">
+      <div style="display:flex;align-items:center;gap:11px">
+        <span class="ico">${g.e}</span>
+        <div><div style="font-weight:600">${esc(g.t)}</div><div style="font-size:12px;color:var(--ink-3)">每天 ${g.m} 分钟 · 难度 ${g.d}</div></div>
+      </div>
+      ${[["日期", "11 月 7 日 · 周六"], ["时长", `${g.m} 分钟`], ["得分", `+${g.p}`]].map(([k, v]) => `
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding:8px 0;border-bottom:1px solid var(--line-2)">
+          <span style="color:var(--ink-3)">${k}</span><b style="font-weight:600">${v}</b></div>`).join("")}
+      <div style="font-size:12px;color:var(--ink-3)">24 小时内可以撤销，撤销会把这 ${g.p} 分扣回。</div>
+    </div>
+    <div class="panel-actions">
+      <button class="btn btn-quiet" data-close style="flex:1">再想想</button>
+      <button class="btn btn-danger" style="flex:1" data-undo-confirm="${g.id}">撤销这次打卡</button>
+    </div>
+  </div>`);
+  document.getElementById("sheet").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-undo-confirm]");
+    if (b) undoCheckin(Number(b.dataset.undoConfirm));
+    if (e.target.closest("[data-close]")) closeSheet();
+  });
+}
+function openDayCell(goalId, idx) {
+  const g = State.goals.find((x) => x.id === goalId);
+  if (!g) return;
+  const isToday = idx === TODAY_INDEX;
+  const checked = g.done[idx];
+  openSheet(`<div class="panel">
+    <span class="handle"></span>
+    <h2 class="panel-title">${esc(g.t)} · 周${WEEK[idx]}</h2>
+    <div class="panel-body">
+      <div style="display:flex;align-items:center;gap:11px">
+        <span class="ico">${g.e}</span>
+        <div><div style="font-weight:600">${esc(g.t)}</div><div style="font-size:12px;color:var(--ink-3)">${checked ? "已打卡" : isToday ? "今天还没打" : "这天没有记录"}</div></div>
+      </div>
+    </div>
+    <div class="panel-actions">
+      <button class="btn btn-quiet" style="flex:1" data-close>关闭</button>
+      ${isToday && !checked ? `<button class="btn btn-main" style="flex:1" data-doc "${""}" data-do-checkin="${g.id}">现在就打</button>` : ""}
+    </div>
+  </div>`);
+  const sheet = document.getElementById("sheet");
+  sheet.addEventListener("click", (e) => {
+    if (e.target.closest("[data-close]")) { closeSheet(); return; }
+    const b = e.target.closest("[data-do-checkin]");
+    if (b) { closeSheet(); checkin(Number(b.dataset.doCheckin)); }
+  });
+}
+function openRedeem(id) {
+  const w = State.wishes.find((x) => x.id === id);
+  if (!w) return;
+  openSheet(`<div class="panel">
+    <span class="handle"></span>
+    <h2 class="panel-title">确认兑换</h2>
+    <div class="panel-body">
+      <div style="display:flex;align-items:center;gap:11px">
+        <span class="ico">${w.e}</span>
+        <div><div style="font-weight:600">${esc(w.t)}</div><div style="font-size:12px;color:var(--ink-3)">${fmt(w.cost)} 分</div></div>
+      </div>
+      ${[["当前余额", fmt(State.user.points)], ["兑换后余额", fmt(State.user.points - w.cost)]].map(([k, v]) => `
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0"><span style="color:var(--ink-3)">${k}</span><b>${v}</b></div>`).join("")}
+      <div style="font-size:12px;color:var(--ink-3)">商品类兑换提交即扣分，对方看得见。</div>
+    </div>
+    <div class="panel-actions">
+      <button class="btn btn-quiet" style="flex:1" data-close>再想想</button>
+      <button class="btn btn-main" style="flex:1" data-confirm-redeem="${w.id}">兑换 · −${fmt(w.cost)} 分</button>
+    </div>
+  </div>`);
+  const sheet = document.getElementById("sheet");
+  sheet.addEventListener("click", (e) => {
+    if (e.target.closest("[data-close]")) { closeSheet(); return; }
+    const b = e.target.closest("[data-confirm-redeem]");
+    if (!b) return;
+    State.user.points -= w.cost;
+    State.redemptions.unshift({ e: w.e, t: w.t, cost: w.cost, m: "刚刚" });
+    State.ledger.unshift({ t: `兑换 ·「${w.t}」`, m: "刚刚", p: -w.cost });
+    closeSheet();
+    toast(`兑换成功，−${w.cost} 分`);
+    render();
+  });
+}
+function openWishForm() {
+  openSheet(`<div class="panel">
+    <span class="handle"></span>
+    <h2 class="panel-title">加一个愿望</h2>
+    <div class="panel-body">
+      <div class="field"><span class="label">想要什么</span><input class="input" id="w-title" placeholder="比如：一顿火锅" maxlength="20"/></div>
+      <div class="field"><span class="label">真实价格（元）</span><input class="input" id="w-price" type="number" placeholder="150" min="1"/></div>
+      <div style="font-size:12px;color:var(--ink-3)">按 1 元 = 10 分换算，约 <b id="w-pts">0</b> 分</div>
+    </div>
+    <div class="panel-actions">
+      <button class="btn btn-quiet" style="flex:1" data-close>取消</button>
+      <button class="btn btn-main" style="flex:1" data-save-wish="1">加进愿望单</button>
+    </div>
+  </div>`);
+  const sheet = document.getElementById("sheet");
+  const price = sheet.querySelector("#w-price");
+  const pts = sheet.querySelector("#w-pts");
+  price.addEventListener("input", () => { pts.textContent = (Number(price.value) || 0) * 10; });
+  sheet.addEventListener("click", (e) => {
+    if (e.target.closest("[data-close]")) { closeSheet(); return; }
+    if (!e.target.closest("[data-save-wish]")) return;
+    const title = sheet.querySelector("#w-title").value.trim();
+    const yuan = Number(price.value);
+    if (!title) { toast("先写一个名字"); return; }
+    if (!yuan || yuan <= 0) { toast("填一个真实价格"); return; }
+    State.wishes.push({ id: Date.now(), e: "🎁", t: title, cost: Math.round(yuan * 10) });
+    closeSheet();
+    toast("已加入愿望单");
+    render();
+  });
+}
+function openGoalForm() {
+  openSheet(`<div class="panel">
+    <span class="handle"></span>
+    <h2 class="panel-title">新建目标</h2>
+    <div class="panel-body">
+      <div class="field"><span class="label">目标名称</span><input class="input" id="g-title" placeholder="比如：早睡" maxlength="20"/></div>
+      <div class="field"><span class="label">单次时长（分钟）</span><input class="input" id="g-min" type="number" value="30" min="1"/></div>
+      <div class="field"><span class="label">难度</span>
+        <div class="seg" id="g-diff">${[1, 2, 3, 4, 5].map((n) => `<button class="seg-item ${n === 2 ? "on" : ""}" data-diff="${n}">${n}</button>`).join("")}</div>
+      </div>
+      <div style="background:var(--green-soft);border-radius:12px;padding:11px 13px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:12px;color:var(--green-deep)">每次打卡可得</span>
+        <span style="font-family:var(--font-mono);font-size:17px;color:var(--green-deep)" id="g-preview">+21 分</span>
+      </div>
+    </div>
+    <div class="panel-actions"><button class="btn btn-main" data-save-goal="1">建好这个目标</button></div>
+  </div>`);
+  const sheet = document.getElementById("sheet");
+  let d = 2;
+  const calc = () => {
+    const m = Number(sheet.querySelector("#g-min").value) || 30;
+    const p = Math.round(Math.min(m, 120) * 0.5 * (1 + (d - 1) * 0.3));
+    sheet.querySelector("#g-preview").textContent = `+${p} 分`;
+    return p;
+  };
+  sheet.querySelector("#g-min").addEventListener("input", calc);
+  sheet.querySelector("#g-diff").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-diff]");
+    if (!b) return;
+    d = Number(b.dataset.diff);
+    sheet.querySelectorAll("[data-diff]").forEach((x) => x.classList.toggle("on", x === b));
+    calc();
+  });
+  sheet.addEventListener("click", (e) => {
+    if (!e.target.closest("[data-save-goal]")) return;
+    const title = sheet.querySelector("#g-title").value.trim();
+    if (!title) { toast("先写个名字"); return; }
+    const m = Number(sheet.querySelector("#g-min").value) || 30;
+    State.goals.push({ id: Date.now(), e: "🎯", t: title, p: calc(), d, m, done: [0,0,0,0,0,0,0], streak: 0, freq: "每天" });
+    closeSheet();
+    toast(`已建好「${title}」`);
+    State.goalsType = "daily";
+    State.tab = "goals";
+    render();
+  });
+}
+function openSubmit(id) {
+  const st = State.stages.find((x) => x.id === id);
+  if (!st) return;
+  openSheet(`<div class="panel">
+    <span class="handle"></span>
+    <h2 class="panel-title">提交验收</h2>
+    <div class="panel-body">
+      <div style="display:flex;align-items:center;gap:11px"><span class="ico">${st.e}</span>
+        <div><div style="font-weight:600">${esc(st.t)}</div><div style="font-size:12px;color:var(--ink-3)">达成 +${st.points} 分</div></div></div>
+      <div class="field"><span class="label">说一句完成情况</span><input class="input" id="s-note" placeholder="比如：模考 6.5，成绩单截图在附件里"/></div>
+      <div style="font-size:12px;color:var(--ink-3)">提交后等对方验收，通过才会入账。</div>
+    </div>
+    <div class="panel-actions">
+      <button class="btn btn-quiet" style="flex:1" data-close>取消</button>
+      <button class="btn btn-main" style="flex:1" data-do-submit="${st.id}">提交给对方</button>
+    </div>
+  </div>`);
+  const sheet = document.getElementById("sheet");
+  sheet.addEventListener("click", (e) => {
+    if (e.target.closest("[data-close]")) { closeSheet(); return; }
+    if (!e.target.closest("[data-do-submit]")) return;
+    st.status = "reviewing";
+    closeSheet();
+    toast("已提交，等对方验收");
+    render();
+  });
+}
+
+render();
+</script>
+</body>
+</html>

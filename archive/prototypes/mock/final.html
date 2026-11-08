@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<meta name="color-scheme" content="light"/>
+<title>脚印 · 最终效果图（Pixelife 风格）</title>
+<style>
+@font-face{font-family:"FusionPixel";font-display:swap;src:url("/public/fonts/fusion-pixel-12px-proportional-latin.otf.woff2") format("woff2");unicode-range:U+0000-00FF,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;}
+@font-face{font-family:"FusionPixel";font-display:swap;src:url("/public/fonts/fusion-pixel-12px-proportional-zh_hans.otf.woff2") format("woff2");unicode-range:U+2E80-9FFF,U+FF00-FFEF,U+F900-FAFF;}
+@font-face{font-family:"FusionPixelMono";font-display:swap;src:url("/public/fonts/fusion-pixel-12px-monospaced-latin.otf.woff2") format("woff2");unicode-range:U+0000-00FF,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;}
+@font-face{font-family:"FusionPixelMono";font-display:swap;src:url("/public/fonts/fusion-pixel-12px-monospaced-zh_hans.otf.woff2") format("woff2");unicode-range:U+2E80-9FFF,U+FF00-FFEF,U+F900-FAFF;}
+
+:root{
+  --bg:#F5EFE4;
+  --surface:#FFFDF9;
+  --surface-2:#FBF5EA;
+  --sunken:#F0E9DB;
+  --ink:#2A2420;
+  --ink-2:#5F574C;
+  --ink-3:#8C8378;
+  --line:#E7DECE;
+  --line-2:#F1EADD;
+  --sage:#6B9581;
+  --sage-deep:#3E6B57;
+  --sage-soft:#DFEAE3;
+  --clay:#D89A62;
+  --clay-deep:#9E5F27;
+  --clay-soft:#F9E9D7;
+  --rose:#B57E88;
+  --rose-soft:#F2E3E6;
+  --r-lg:22px;
+  --r-md:15px;
+  --r-sm:11px;
+  --font-px:"FusionPixel","PingFang SC","Microsoft YaHei",sans-serif;
+  --font-mono:"FusionPixelMono","FusionPixel",monospace;
+  --font-body:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --shadow:0 14px 34px -18px rgba(74,54,30,.35);
+  --shadow-soft:0 6px 18px -12px rgba(74,54,30,.3);
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:#E9E1D3;color:var(--ink);font-family:var(--font-body);font-size:14px;line-height:1.62;-webkit-font-smoothing:antialiased}
+button,input,textarea{font:inherit;color:inherit}
+button{border:0;background:none;cursor:pointer}
+:focus-visible{outline:3px solid var(--clay);outline-offset:2px}
+.ic{display:inline-flex;width:16px;height:16px;flex:none}
+.ic svg{width:100%;height:100%;display:block}
+
+/* ===== 屏 ===== */
+.screen{width:390px;min-height:844px;margin:0 auto;background:var(--bg);padding:0 18px 100px;display:flex;flex-direction:column;gap:16px;position:relative}
+@media(min-width:520px){.screen{box-shadow:0 30px 70px -30px rgba(60,40,20,.45)}}
+
+/* ===== 顶部 ===== */
+.head{padding-top:26px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.head-kicker{font-family:var(--font-px);font-size:11px;color:var(--ink-3);letter-spacing:.08em}
+.head-title{margin:6px 0 0;font-size:22px;font-weight:700;letter-spacing:-.02em;line-height:1.28}
+.head-sub{margin-top:4px;font-size:12px;color:var(--ink-3)}
+.avatar{width:36px;height:36px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line);display:grid;place-items:center;font-size:18px}
+
+/* ===== 区块标题 ===== */
+.sec{display:flex;flex-direction:column;gap:10px}
+.sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:0 2px}
+.sec-title{margin:0;font-size:15px;font-weight:700;letter-spacing:-.01em}
+.sec-note{font-family:var(--font-mono);font-size:11px;color:var(--ink-3)}
+
+/* ===== 卡 ===== */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow-soft)}
+.pad{padding:15px 16px}
+.flat{background:var(--surface-2);border-radius:var(--r-md)}
+
+/* ===== 积分 ===== */
+.balance{border-radius:24px;padding:17px 18px;display:flex;justify-content:space-between;align-items:flex-end;gap:14px;
+  background:radial-gradient(120% 140% at 100% 0%,#7FA991 0%,#5F8C75 55%,#4D7963 100%);
+  color:#FBFDFB;box-shadow:0 18px 30px -20px rgba(61,104,85,.9);position:relative;overflow:hidden}
+.balance::after{content:"";position:absolute;right:-34px;top:-38px;width:118px;height:118px;border-radius:50%;background:rgba(255,255,255,.09)}
+.balance-label{font-size:11px;letter-spacing:.06em;opacity:.85}
+.balance-num{font-family:var(--font-mono);font-size:34px;line-height:1.1;margin-top:3px;letter-spacing:-.01em}
+.balance-conv{font-size:11px;opacity:.8;margin-top:2px}
+.balance-tags{display:flex;flex-direction:column;align-items:flex-end;gap:7px;position:relative}
+.tagpill{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:999px;font-size:11px;white-space:nowrap;background:rgba(255,255,255,.18)}
+.tagpill.light{background:#FCFAF5;color:var(--sage-deep)}
+
+/* ===== 主任务 ===== */
+.focus{padding:16px;border-radius:var(--r-lg);background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow)}
+.focus-top{display:flex;gap:12px;align-items:flex-start}
+.ico-box{width:46px;height:46px;border-radius:14px;background:var(--surface-2);border:1px solid var(--line);display:grid;place-items:center;font-size:22px;flex:none}
+.ico-box.sm{width:34px;height:34px;border-radius:11px;font-size:17px}
+.focus-title{margin:0;font-size:18px;font-weight:700;line-height:1.3;letter-spacing:-.01em}
+.focus-meta{margin-top:3px;font-size:12px;color:var(--ink-3)}
+.focus-points{margin-left:auto;font-family:var(--font-mono);font-size:19px;color:var(--clay-deep);white-space:nowrap}
+.focus-foot{margin-top:15px;display:flex;align-items:center;gap:10px}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:6px 11px;border-radius:999px;background:var(--clay-soft);color:var(--clay-deep);font-size:12px;white-space:nowrap}
+
+/* ===== 按钮 ===== */
+.btn{min-height:44px;border-radius:14px;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:0 16px;font-size:14px;font-weight:600;transition:transform .1s ease,background .15s ease}
+.btn:active{transform:scale(.985)}
+.btn-main{background:var(--sage);color:#FFFFFF;box-shadow:0 10px 18px -12px rgba(62,107,87,.95);flex:1}
+.btn-main:active{background:var(--sage-deep)}
+.btn-quiet{background:var(--surface-2);border:1px solid var(--line);color:var(--ink-2);min-height:38px;border-radius:12px;font-size:13px;font-weight:500}
+.btn-mini{min-height:30px;padding:0 11px;border-radius:9px;background:var(--surface-2);border:1px solid var(--line);color:var(--ink-2);font-size:12px}
+
+/* ===== 列表 ===== */
+.list{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow-soft)}
+.li{display:flex;align-items:center;gap:11px;padding:12px 15px;border-top:1px solid var(--line-2)}
+.li:first-child{border-top:0}
+.li-main{flex:1;min-width:0}
+.li-title{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.li-meta{margin-top:2px;font-size:12px;color:var(--ink-3)}
+.li-val{font-family:var(--font-mono);font-size:15px;color:var(--sage-deep);white-space:nowrap}
+.li-val.dim{color:var(--ink-3)}
+.li-side{display:flex;align-items:center;gap:8px}
+.tick{color:var(--sage);font-size:14px}
+
+/* ===== 周格 ===== */
+.week{background:var(--surface-2);border-radius:var(--r-md);padding:9px 10px 8px}
+.week-days{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:10px;color:var(--ink-3);text-align:center;margin-bottom:5px}
+.week-cells{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cell{aspect-ratio:1/1;border-radius:8px;background:var(--sunken);display:grid;place-items:center;font-size:10px;color:transparent}
+.cell.done{background:var(--sage)}
+.cell.miss{background:var(--rose-soft)}
+.cell.today{background:var(--clay-soft);border:1.5px solid var(--clay);color:var(--clay-deep)}
+.cell.future{background:transparent;border:1px dashed var(--line)}
+.legend{display:flex;gap:14px;justify-content:center;font-size:11px;color:var(--ink-3);margin-top:9px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px;vertical-align:1px}
+.legend i.done{background:var(--sage)}.legend i.miss{background:var(--rose-soft)}.legend i.today{background:var(--clay-soft);border:1px solid var(--clay)}
+
+/* ===== 分段 ===== */
+.seg{display:flex;gap:5px;background:var(--sunken);border-radius:14px;padding:4px}
+.seg-item{flex:1;min-height:36px;border-radius:11px;font-size:13px;color:var(--ink-2);display:inline-flex;align-items:center;justify-content:center;gap:5px}
+.seg-item.on{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:var(--shadow-soft)}
+.seg-item .dot{min-width:16px;height:16px;border-radius:8px;background:var(--clay);color:#fff;font-size:10px;line-height:16px;text-align:center;padding:0 4px}
+
+/* ===== 对比 ===== */
+.cmp{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow-soft)}
+.cmp-row{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:8px;align-items:baseline;padding:11px 15px;border-top:1px solid var(--line-2)}
+.cmp-row:first-child{border-top:0;background:var(--surface-2);font-size:11px;color:var(--ink-3)}
+.cmp-row span:nth-child(n+2){text-align:right}
+.cmp-row b{font-family:var(--font-mono);font-size:13px;font-weight:400;text-align:right}
+
+/* ===== 弹层 ===== */
+.sheet{position:absolute;inset:0;display:flex;align-items:flex-end;z-index:10}
+.scrim{position:absolute;inset:0;background:rgba(42,36,32,.35);backdrop-filter:blur(1.5px)}
+.panel{position:relative;width:100%;background:var(--surface);border-radius:26px 26px 0 0;padding:9px 18px 22px;box-shadow:0 -16px 40px -20px rgba(42,36,32,.5)}
+.handle{display:block;width:38px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 13px}
+.panel-title{margin:0 0 14px;font-size:16px;font-weight:700;text-align:center}
+.panel-body{display:flex;flex-direction:column;gap:13px}
+.panel-actions{display:flex;gap:10px;margin-top:18px}
+
+/* ===== 表单 ===== */
+.field{display:flex;flex-direction:column;gap:6px}
+.label{font-size:12px;color:var(--ink-3)}
+.input{height:44px;border-radius:12px;border:1px solid var(--line);background:var(--surface-2);display:flex;align-items:center;padding:0 13px;font-size:14px}
+
+/* ===== 空状态 ===== */
+.empty{text-align:center;padding:34px 22px}
+.empty-emoji{font-size:30px}
+.empty-title{margin-top:8px;font-size:15px;font-weight:700}
+.empty-sub{margin-top:5px;font-size:13px;color:var(--ink-3);line-height:1.6}
+
+/* ===== 数据行 ===== */
+.stats{display:flex;gap:10px;justify-content:space-between}
+.stat-label{font-size:11px;color:var(--ink-3)}
+.stat-value{font-family:var(--font-mono);font-size:17px;margin-top:2px}
+
+/* 短语 */
+.nudge{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.nudge-btn{padding:10px 6px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line);font-size:12px;color:var(--ink-2);display:inline-flex;align-items:center;justify-content:center;gap:4px}
+
+/* 进度条 */
+.bar{display:flex;gap:3px}
+.bar i{flex:1;height:8px;border-radius:3px;background:var(--sunken)}
+.bar i.on{background:var(--sage)}
+
+/* 难度 */
+.dbar{display:inline-flex;gap:2px;vertical-align:1px;margin-left:4px}
+.dbar i{width:3px;height:8px;border-radius:1px;background:var(--sunken)}
+.dbar i.on{background:var(--clay)}
+
+/* 底部导航（固定在 390 宽内） */
+.tabbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:390px;height:74px;
+  background:rgba(255,253,249,.94);backdrop-filter:blur(12px);border-top:1px solid var(--line);
+  display:flex;z-index:8;padding-bottom:env(safe-area-inset-bottom,0px)}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:11px;color:var(--ink-3)}
+.tab .ic{width:22px;height:22px}
+.tab.on{color:var(--sage-deep);font-weight:600}
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script src="../js/icons.js"></script>
+<script>
+const M = {
+  me: { name: "栗子", avatar: "🐱", points: 1318, month: 666, streak: 5 },
+  ta: { name: "阿白", avatar: "🐻", points: 564, month: 338, streak: 4 },
+  today: "11月7日 · 周六",
+  week: ["一","二","三","四","五","六","日"],
+  goals: [
+    { e:"📚", t:"背单词", p:14, done:[1,1,1,1,1,1,0], s:14, d:2, m:30 },
+    { e:"🎹", t:"练琴",   p:34, done:[1,1,1,1,0,1,0], s:4,  d:3, m:45 },
+    { e:"🏋️", t:"健身",   p:65, done:[1,0,1,0,1,0,0], s:0,  d:4, m:60 },
+    { e:"💤", t:"早睡",   p:14, done:[1,1,1,1,1,0,0], s:1,  d:2, m:30 },
+    { e:"📖", t:"阅读",   p:18, done:[1,0,1,1,0,1,0], s:2,  d:2, m:30 },
+    { e:"💧", t:"喝水",   p:3,  done:[1,1,1,1,1,1,0], s:6,  d:1, m:5  },
+  ],
+};
+const ui = (n,c="") => window.icon(n,c);
+
+function head(kicker, title, sub, right) {
+  return `<div class="head">
+    <div>
+      ${kicker ? `<div class="head-kicker">${kicker}</div>` : ""}
+      <h1 class="head-title">${title}</h1>
+      ${sub ? `<div class="head-sub">${sub}</div>` : ""}
+    </div>
+    ${right || ""}
+  </div>`;
+}
+function nav(active) {
+  const items = [["home","今天","home"],["goals","目标","target"],["wish","愿望单","gift"],["partner","我们","us"],["me","我的","me"]];
+  return `<div class="tabbar">${items.map(([k,l,ic]) => `
+    <div class="tab ${active===k?"on":""}">${ui(ic)}<span>${l}</span></div>`).join("")}</div>`;
+}
+function balanceBlock() {
+  return `<div class="balance">
+    <div>
+      <div class="balance-label">可用积分</div>
+      <div class="balance-num">${M.me.points.toLocaleString()}</div>
+      <div class="balance-conv">≈ ¥${(M.me.points/10).toFixed(1)}</div>
+    </div>
+    <div class="balance-tags">
+      <span class="tagpill">${ui("flame")} ${M.me.streak} 天连续</span>
+      <span class="tagpill light">本月 +${M.me.month}</span>
+    </div>
+  </div>`;
+}
+function diff(d) { return `<span class="dbar">${Array.from({length:5},(_,i)=>`<i class="${i<d?"on":""}"></i>`).join("")}</span>`; }
+function weekCells(done) {
+  return `<div class="week">
+    <div class="week-days">${M.week.map(d=>`<span>${d}</span>`).join("")}</div>
+    <div class="week-cells">${done.map((v,i)=>`<div class="cell ${v?"done":""} ${i===5?"today":""}">${i===5?"今":""}</div>`).join("")}</div>
+  </div>`;
+}
+
+const S = {};
+
+/* ---------- 1 今天 ---------- */
+S.home = () => `<div class="screen">
+  ${head(M.today, `晚上好，${M.me.name}`, "", `<span class="avatar">${M.me.avatar}</span>`)}
+  ${balanceBlock()}
+  <section class="sec">
+    <div class="sec-head"><h2 class="sec-title">今天</h2><span class="sec-note">剩 2 项</span></div>
+    <article class="focus">
+      <div class="focus-top">
+        <span class="ico-box">🎹</span>
+        <div>
+          <h2 class="focus-title">练琴</h2>
+          <div class="focus-meta">全天 · 45 分钟 ${diff(3)}</div>
+        </div>
+        <span class="focus-points">+34</span>
+      </div>
+      <div class="focus-foot">
+        <span class="chip">${ui("flame")} 4 天</span>
+        <button class="btn btn-main">${ui("check")} 打卡</button>
+      </div>
+    </article>
+    <div class="list">
+      <div class="li"><span class="ico-box sm">💤</span>
+        <div class="li-main"><div class="li-title">早睡</div><div class="li-meta">22:30–23:30 · 30 分钟 ${diff(2)}</div></div>
+        <div class="li-side"><span class="li-val">+14</span><button class="btn btn-mini">完成</button></div>
+      </div>
+    </div>
+  </section>
+  <section class="sec">
+    <div class="sec-head"><h2 class="sec-title">已完成</h2><span class="sec-note">3 项</span></div>
+    <div class="list">
+      ${[["📚","背单词","30 分钟 · 有记录",14],["🏋️","健身","60 分钟 · 有记录",65],["💧","喝水","5 分钟 · 有记录",3]].map(([e,t,m,p])=>`
+        <div class="li"><span class="ico-box sm">${e}</span>
+          <div class="li-main"><div class="li-title">${t}</div><div class="li-meta">${m}</div></div>
+          <div class="li-side"><span class="li-val dim">+${p}</span><span class="tick">✓</span></div>
+        </div>`).join("")}
+    </div>
+  </section>
+  <div class="card pad" style="display:flex;align-items:center;gap:11px">
+    <span class="avatar">${M.ta.avatar}</span>
+    <div class="li-main"><div class="li-title">${M.ta.name} <span class="li-meta" style="display:inline">今日 2/2</span></div><div class="li-meta">今天全打完啦</div></div>
+    <button class="btn btn-quiet">看看</button>
+  </div>
+  ${nav("home")}
+</div>`;
+
+/* ---------- 2 目标 · 周 ---------- */
+S.goalsWeek = () => `<div class="screen">
+  ${head("", "目标", "这周打了几天", `<button class="btn btn-quiet">＋ 新建</button>`)}
+  <div class="seg"><button class="seg-item on">日常</button><button class="seg-item">小目标</button><button class="seg-item">大目标</button></div>
+  <div class="card pad">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
+      <div><div style="font-size:17px;font-weight:700;letter-spacing:-.01em">11/2 – 11/8</div>
+        <div style="font-size:12px;color:var(--ink-3);margin-top:3px">412 分 · 21/33 完成 · 6 个目标</div></div>
+      <div class="seg" style="padding:3px;border-radius:11px;flex:none"><button class="seg-item on" style="flex:none;min-height:28px;padding:0 13px;font-size:12px">周</button><button class="seg-item" style="flex:none;min-height:28px;padding:0 13px;font-size:12px">月</button></div>
+    </div>
+    <div style="margin-top:15px;display:flex;flex-direction:column;gap:6px">
+      ${M.goals.map(g=>{
+        const n = g.done.filter(Boolean).length;
+        return `<div style="display:grid;grid-template-columns:100px repeat(7,1fr);gap:4px;align-items:center">
+          <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${g.e} ${g.t}</div>
+          ${g.done.map((v,i)=>`<div class="cell ${v?"done":""} ${i===5?"today":""}">${i===5?"今":""}</div>`).join("")}
+        </div>`;
+      }).join("")}
+    </div>
+    <div class="legend"><span><i class="done"></i>已打</span><span><i class="miss"></i>漏了</span><span><i class="today"></i>今天</span></div>
+  </div>
+  <div class="card pad stats">
+    ${[["最长连续","21 天"],["本月完成率","86%"],["时间投入","21.3 h"]].map(([k,v])=>`<div><div class="stat-label">${k}</div><div class="stat-value">${v}</div></div>`).join("")}
+  </div>
+  ${nav("goals")}
+</div>`;
+
+/* ---------- 3 目标 · 月 ---------- */
+S.goalsMonth = () => {
+  const cells = Array.from({length:30},(_,i)=>i+1).map(n=>{
+    const done = [1,2,3,4,5,6,7,9,10,11,12].includes(n);
+    const miss = n < 13 && !done;
+    const cls = n===13 ? "today" : (done ? "done" : (miss ? "miss" : (n>13 ? "future" : "")));
+    return `<div class="cell ${cls}" style="font-size:11px;color:${done?"#fff":(n===13?"var(--clay-deep)":"var(--ink-3)")}">${n}</div>`;
+  }).join("");
+  return `<div class="screen">
+    ${head("", "目标", "这周打了几天", `<button class="btn btn-quiet">＋ 新建</button>`)}
+    <div class="seg"><button class="seg-item on">日常</button><button class="seg-item">小目标</button><button class="seg-item">大目标</button></div>
+    <div class="card pad">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
+        <div><div style="font-size:17px;font-weight:700;letter-spacing:-.01em">2026 年 11 月</div>
+          <div style="font-size:12px;color:var(--ink-3);margin-top:3px">64/102 完成 · 1,468 分</div></div>
+        <div class="seg" style="padding:3px;border-radius:11px;flex:none"><button class="seg-item" style="flex:none;min-height:28px;padding:0 13px;font-size:12px">周</button><button class="seg-item on" style="flex:none;min-height:28px;padding:0 13px;font-size:12px">月</button></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-top:16px;text-align:center;font-size:10px;color:var(--ink-3)">${M.week.map(d=>`<span>${d}</span>`).join("")}</div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-top:6px">${cells}</div>
+      <div class="legend"><span><i class="done"></i>已打</span><span><i class="miss"></i>漏了</span><span><i class="today"></i>今天</span></div>
+    </div>
+    <div class="card pad stats">
+      ${[["最长连续","21 天"],["本月完成率","86%"],["时间投入","21.3 h"]].map(([k,v])=>`<div><div class="stat-label">${k}</div><div class="stat-value">${v}</div></div>`).join("")}
+    </div>
+    ${nav("goals")}
+  </div>`;
+};
+
+/* ---------- 4 小目标 ---------- */
+S.goalsStage = () => `<div class="screen">
+  ${head("", "目标", "阶段目标，做完请对方验收", `<button class="btn btn-quiet">＋ 新建</button>`)}
+  <div class="seg"><button class="seg-item on">日常</button><button class="seg-item">小目标</button><button class="seg-item">大目标</button></div>
+  <article class="focus">
+    <div class="focus-top">
+      <span class="ico-box">🎓</span>
+      <div style="flex:1">
+        <h2 class="focus-title">考过雅思 6.5 <span style="font-size:11px;font-weight:600;color:var(--sage-deep);background:var(--sage-soft);padding:2px 8px;border-radius:999px;vertical-align:3px">进行中</span></h2>
+        <div class="focus-meta">截止 12 月 20 日 · 还剩 43 天 · 难度 4</div>
+      </div>
+    </div>
+    <div style="margin-top:11px;font-size:12px;color:var(--ink-2);background:var(--surface-2);border-radius:12px;padding:10px 12px">验收：雅思模考总分 ≥ 6.5，附成绩单截图</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:13px;gap:10px">
+      <span style="font-size:12px;color:var(--ink-3)">达成 <b style="font-family:var(--font-mono);color:var(--clay-deep);font-weight:400">+680</b> 分</span>
+      <button class="btn btn-main" style="flex:none;min-height:38px;font-size:13px;padding:0 14px">提交验收</button>
+    </div>
+  </article>
+  <div class="list">
+    ${[["🧡","完成 8 周力量训练","截止 11 月 30 日 · 难度 3","+450","待验收"],
+       ["📚","读完 12 本书","10 月 30 日验收通过 · 阿白","+520","已达成"]].map(([e,t,m,p,st])=>`
+      <div class="li" style="align-items:flex-start"><span class="ico-box sm">${e}</span>
+        <div class="li-main">
+          <div class="li-title">${t} <span style="font-size:10px;font-weight:600;color:${st==="已达成"?"var(--sage-deep)":"var(--clay-deep)"};background:${st==="已达成"?"var(--sage-soft)":"var(--clay-soft)"};padding:1px 7px;border-radius:999px">${st}</span></div>
+          <div class="li-meta">${m}</div>
+        </div>
+        <span class="li-val">${p}</span>
+      </div>`).join("")}
+  </div>
+  ${nav("goals")}
+</div>`;
+
+/* ---------- 5 大目标 ---------- */
+S.goalsBig = () => `<div class="screen">
+  ${head("", "目标", "长期方向，靠一个个小目标推进", `<button class="btn btn-quiet">＋ 新建</button>`)}
+  <div class="seg"><button class="seg-item on">日常</button><button class="seg-item">小目标</button><button class="seg-item">大目标</button></div>
+  ${[["🌄","找到 Agent 开发的工作",40,"客观 2/5 个小目标达成","简历改完，正在补两个能讲的项目","下一步：把「RAG 检索优化」写成一个小目标"],
+     ["💪","把身体练回大学时",65,"客观 3/5 个小目标达成","力量已回到 8 成，接下来是心肺","下一步：跑一次 10 公里计时"]].map(([e,t,pct,m,note,next])=>`
+    <div class="card pad">
+      <div style="display:flex;align-items:baseline;gap:8px">
+        <span style="font-size:18px">${e}</span>
+        <div style="font-size:15px;font-weight:700;flex:1;letter-spacing:-.01em">${t}</div>
+        <span style="font-family:var(--font-mono);font-size:13px;color:var(--sage-deep)">${pct}%</span>
+      </div>
+      <div style="font-size:12px;color:var(--ink-3);margin-top:3px">${m}</div>
+      <div style="height:4px;border-radius:2px;background:var(--sunken);margin:11px 0;overflow:hidden"><i style="display:block;height:100%;width:${pct}%;background:var(--sage)"></i></div>
+      <div style="font-size:12px;color:var(--ink-2)">${note}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:11px">
+        <span style="font-size:12px;color:var(--clay-deep);flex:1">${next}</span>
+        <button class="btn btn-mini">展开</button>
+      </div>
+    </div>`).join("")}
+  ${nav("goals")}
+</div>`;
+
+/* ---------- 6 格子详情 ---------- */
+S.goalsCell = () => `<div class="screen" style="padding-bottom:0">
+  ${head("", "目标", "这周打了几天")}
+  <div class="seg"><button class="seg-item on">日常</button><button class="seg-item">小目标</button><button class="seg-item">大目标</button></div>
+  <div class="card pad" style="opacity:.6">
+    <div style="font-size:17px;font-weight:700">11/2 – 11/8</div>
+    <div style="font-size:12px;color:var(--ink-3);margin-top:3px">412 分 · 21/33 完成</div>
+  </div>
+  <div class="sheet"><div class="scrim"></div>
+    <div class="panel">
+      <span class="handle"></span>
+      <h2 class="panel-title">练琴 · 11 月 5 日</h2>
+      <div class="panel-body">
+        <div style="display:flex;align-items:center;gap:11px">
+          <span class="ico-box">🎹</span>
+          <div><div style="font-weight:600">练琴</div><div style="font-size:12px;color:var(--ink-3)">每天 45 分钟 · 难度 3</div></div>
+        </div>
+        ${[["日期","11 月 5 日 · 周四"],["时长","45 分钟"],["得分","+34"],["记录","音阶 20 分钟，肖邦夜曲 25 分钟"]].map(([k,v])=>`
+          <div style="display:flex;justify-content:space-between;gap:14px;font-size:13px;padding:8px 0;border-bottom:1px solid var(--line-2)">
+            <span style="color:var(--ink-3);flex:none">${k}</span><b style="font-weight:600;text-align:right">${v}</b>
+          </div>`).join("")}
+        <div style="font-size:12px;color:var(--ink-3)">24 小时内可以撤销，撤销会把这 34 分扣回。</div>
+      </div>
+      <div class="panel-actions">
+        <button class="btn btn-quiet" style="flex:1">再想想</button>
+        <button class="btn btn-main" style="flex:1;background:var(--rose);box-shadow:none">撤销这次打卡</button>
+      </div>
+    </div>
+  </div>
+</div>`;
+
+/* ---------- 7 新建目标 ---------- */
+S.goalsNew = () => `<div class="screen" style="padding-bottom:0">
+  ${head("", "目标", "这周打了几天")}
+  <div class="seg"><button class="seg-item on">日常</button><button class="seg-item">小目标</button><button class="seg-item">大目标</button></div>
+  <div class="sheet"><div class="scrim"></div>
+    <div class="panel">
+      <span class="handle"></span>
+      <h2 class="panel-title">新建目标</h2>
+      <div class="panel-body">
+        <div class="field"><span class="label">目标名称</span><div class="input">早睡</div></div>
+        <div class="field"><span class="label">图标</span>
+          <div style="display:flex;gap:8px">${["📚","🏃","💤","💧","🎹","📖"].map((e,i)=>`<span style="width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:19px;background:${i===2?"var(--sage-soft)":"var(--surface-2)"};border:1px solid ${i===2?"var(--sage)":"var(--line)"}">${e}</span>`).join("")}</div>
+        </div>
+        <div class="field"><span class="label">频率</span>
+          <div class="seg"><button class="seg-item on">每天</button><button class="seg-item">每周</button><button class="seg-item">工作日</button></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="field"><span class="label">单次时长</span><div class="input">30 分钟</div></div>
+          <div class="field"><span class="label">难度</span><div class="input">${diff(2)} 2</div></div>
+        </div>
+      </div>
+      <div style="margin-top:14px;background:var(--sage-soft);border-radius:14px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:12px;color:var(--sage-deep)">每次打卡可得</span>
+        <span style="font-family:var(--font-mono);font-size:18px;color:var(--sage-deep)">+14 分</span>
+      </div>
+      <div class="panel-actions"><button class="btn btn-main">建好这个目标</button></div>
+    </div>
+  </div>
+</div>`;
+
+/* ---------- 8 空 · 日常 ---------- */
+S.goalsEmpty = () => `<div class="screen">
+  ${head("", "目标", "这周打了几天", `<button class="btn btn-quiet">＋ 新建</button>`)}
+  <div class="seg"><button class="seg-item on">日常</button><button class="seg-item">小目标</button><button class="seg-item">大目标</button></div>
+  <div class="card pad" style="opacity:.5">
+    <div style="font-size:17px;font-weight:700">11/2 – 11/8</div>
+    <div style="margin-top:14px;display:flex;flex-direction:column;gap:6px">
+      ${Array.from({length:3},()=>`<div style="display:grid;grid-template-columns:100px repeat(7,1fr);gap:4px;align-items:center">
+        <div style="height:12px;border-radius:6px;background:var(--sunken)"></div>
+        ${Array.from({length:7},()=>`<div class="cell"></div>`).join("")}
+      </div>`).join("")}
+    </div>
+  </div>
+  <div class="empty">
+    <div class="empty-emoji">🌱</div>
+    <div class="empty-title">还没有日常目标</div>
+    <div class="empty-sub">先定一件每天都要做的小事</div>
+    <button class="btn btn-main" style="width:172px;margin:16px auto 0">${ui("plus")} 建第一个目标</button>
+  </div>
+  ${nav("goals")}
+</div>`;
+
+/* ---------- 9 空 · 小目标 ---------- */
+S.goalsStageEmpty = () => `<div class="screen">
+  ${head("", "目标", "阶段目标，做完请对方验收", `<button class="btn btn-quiet">＋ 新建</button>`)}
+  <div class="seg"><button class="seg-item on">日常</button><button class="seg-item">小目标</button><button class="seg-item">大目标</button></div>
+  <div class="card pad" style="opacity:.45">
+    <div style="display:flex;gap:10px;align-items:center">
+      <span class="ico-box sm"></span>
+      <div style="flex:1"><div style="height:12px;width:58%;border-radius:6px;background:var(--sunken)"></div>
+        <div style="height:9px;width:38%;border-radius:5px;background:var(--line-2);margin-top:8px"></div></div>
+    </div>
+  </div>
+  <div class="empty">
+    <div class="empty-emoji">🎯</div>
+    <div class="empty-title">还没有小目标</div>
+    <div class="empty-sub">定一个阶段要够到的事，做完请对方验收</div>
+    <button class="btn btn-main" style="width:186px;margin:16px auto 0">${ui("plus")} 建一个小目标</button>
+  </div>
+  ${nav("goals")}
+</div>`;
+
+/* ---------- 10 我们 · 互动 ---------- */
+S.partnerLive = () => `<div class="screen">
+  ${head("", "我们", `和 ${M.ta.name} · 一起第 18 天`)}
+  <div class="seg">
+    <button class="seg-item on">${ui("us")} 互动 <span class="dot">1</span></button>
+    <button class="seg-item">${ui("target")} 数据对比</button>
+  </div>
+  <div class="card pad">
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <span style="font-size:13px;font-weight:700">发一句</span>
+      <span style="font-size:11px;color:var(--ink-3)">今天还剩 2 次</span>
+    </div>
+    <div class="nudge" style="margin-top:11px">
+      ${["加油","拍一拍","早点睡","今天很棒","别太累","辛苦了"].map(t=>`<button class="nudge-btn">${t}</button>`).join("")}
+    </div>
+  </div>
+  <div class="card pad" style="border-color:#EFC9A3;box-shadow:0 12px 24px -18px rgba(216,154,98,.9)">
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <span style="font-size:11px;font-weight:700;color:var(--clay-deep);letter-spacing:.06em">待你验收</span>
+      <span style="font-size:12px;color:var(--clay-deep)">1 条</span>
+    </div>
+    <div style="font-size:15px;font-weight:700;margin-top:9px">完成 8 周力量训练</div>
+    <div style="font-size:12px;color:var(--ink-3);margin-top:2px">${M.ta.name} · +450 分</div>
+    <div style="display:flex;gap:9px;margin-top:13px">
+      <button class="btn btn-main" style="min-height:38px;font-size:13px">${ui("check")} 去验收</button>
+      <button class="btn btn-quiet">稍后</button>
+    </div>
+  </div>
+  <section class="sec">
+    <div class="sec-head"><h2 class="sec-title">${M.ta.name} 今天</h2><span class="sec-note">2/3</span></div>
+    <div class="list">
+      ${[["📚","背单词","+18","30 分钟 · 09:18"],["🏋️","健身","+65","60 分钟 · 07:42"]].map(([e,t,p,m])=>`
+        <div class="li"><span class="ico-box sm">${e}</span>
+          <div class="li-main"><div class="li-title">${t} <span class="li-val">${p}</span></div><div class="li-meta">${m}</div></div>
+        </div>`).join("")}
+    </div>
+  </section>
+  ${nav("partner")}
+</div>`;
+
+/* ---------- 11 我们 · 数据 ---------- */
+S.partnerData = () => `<div class="screen">
+  ${head("", "我们", `和 ${M.ta.name} · 一起第 18 天`)}
+  <div class="seg">
+    <button class="seg-item">${ui("us")} 互动 <span class="dot">1</span></button>
+    <button class="seg-item on">${ui("target")} 数据对比</button>
+  </div>
+  <section class="sec">
+    <div class="sec-head"><h2 class="sec-title">并排看看</h2><span class="sec-note">不比输赢</span></div>
+    <div class="cmp">
+      <div class="cmp-row"><span>指标</span><span>我 ${M.me.avatar}</span><span>${M.ta.name} ${M.ta.avatar}</span></div>
+      ${[["本月得分","+666","+338"],["连续天数","5 天","4 天"],["完成率","76%","75%"],["时间投入","14.8 小时","8.2 小时"],["当前余额","1,318","564"]].map(([k,a,b])=>`
+        <div class="cmp-row"><span>${k}</span><b>${a}</b><b>${b}</b></div>`).join("")}
+    </div>
+  </section>
+  <section class="sec">
+    <div class="sec-head"><h2 class="sec-title">手机在谁手里</h2><span class="sec-note">今日</span></div>
+    <div class="card pad" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      ${[["我"],["阿白"]].map(([n])=>`
+        <div><div style="font-size:12px;color:var(--ink-3)">${n}</div>
+          <div style="font-size:15px;color:var(--ink-3);margin-top:4px">还没数据</div>
+          <div style="height:6px;border-radius:3px;background:var(--sunken);margin-top:8px"></div>
+          <div style="font-size:11px;color:var(--ink-3);margin-top:6px">没有上报</div></div>`).join("")}
+    </div>
+  </section>
+  ${nav("partner")}
+</div>`;
+
+/* ---------- 12 固定短语 ---------- */
+S.partnerNudge = () => `<div class="screen">
+  ${head("", "我们", `和 ${M.ta.name} · 一起第 18 天`)}
+  <div class="seg">
+    <button class="seg-item on">${ui("us")} 互动 <span class="dot">1</span></button>
+    <button class="seg-item">${ui("target")} 数据对比</button>
+  </div>
+  <div style="background:var(--clay-soft);border-radius:16px;padding:13px 15px;display:flex;align-items:center;gap:10px">
+    <span style="font-size:20px">${M.ta.avatar}</span>
+    <div style="flex:1">
+      <div style="font-size:13px;font-weight:600">${M.ta.name} 给你拍一拍</div>
+      <div style="font-size:11px;color:var(--clay-deep);margin-top:2px">刚刚 · 不用回复也行</div>
+    </div>
+  </div>
+  <div class="card pad">
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <span style="font-size:13px;font-weight:700">也回一句？</span>
+      <span style="font-size:11px;color:var(--ink-3)">点一下就好</span>
+    </div>
+    <div class="nudge" style="margin-top:11px">
+      ${["加油","拍一拍","早点睡","今天很棒","别太累","辛苦了"].map((t,i)=>`<button class="nudge-btn" style="${i===0?"background:var(--sage-soft);color:var(--sage-deep);border-color:var(--sage)":""}">${t}</button>`).join("")}
+    </div>
+  </div>
+  <div class="card pad" style="font-size:12px;color:var(--ink-3);text-align:center">发完就结束，对方不需要回，也不会有「为什么不回我」的压力。</div>
+  ${nav("partner")}
+</div>`;
+
+/* ---------- 13 愿望单 · 还在攒 ---------- */
+function wishBalance(n){ return `<div style="border-radius:20px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;background:linear-gradient(135deg,#F0C87E 0%,#DFA65A 100%);box-shadow:0 14px 26px -20px rgba(223,166,90,.95)">
+  <div style="display:flex;align-items:baseline;gap:4px;color:#3A2D1D"><span style="font-family:var(--font-mono);font-size:27px;font-weight:700">${n.toLocaleString()}</span><span style="font-size:12px">分</span></div>
+  <div style="text-align:right;font-size:11px;color:#4A3A28;line-height:1.5">≈ ¥${(n/10).toFixed(1)}<br/>1 元 = 10 分</div>
+</div>`; }
+
+S.wish = () => `<div class="screen">
+  ${head("", "愿望单", "攒够就能换，先攒后换", `<button class="btn btn-quiet">＋ 新建</button>`)}
+  ${wishBalance(1318)}
+  <section class="sec">
+    <div class="sec-head"><h2 class="sec-title">现在可以换</h2><span class="sec-note">1 件</span></div>
+    <div class="card pad" style="border-left:5px solid var(--sage);padding-left:14px">
+      <div style="display:flex;align-items:flex-start;gap:11px">
+        <span style="font-size:24px">🧋</span>
+        <div style="flex:1"><div style="font-size:15px;font-weight:700">奶茶</div><div style="font-size:12px;color:var(--ink-3);margin-top:2px">换完还剩 1,068 分</div></div>
+        <span style="font-family:var(--font-mono);font-size:17px;color:var(--sage-deep)">250<span style="font-size:11px;color:var(--ink-3)"> 分</span></span>
+      </div>
+      <button class="btn btn-main" style="width:100%;margin-top:13px">兑换 · −250 分</button>
+    </div>
+  </section>
+  <div class="seg"><button class="seg-item on">还在攒 3</button><button class="seg-item">兑换记录 1</button></div>
+  <section class="sec" style="gap:0">
+    ${[["🍲","一顿火锅",1500,88],["🎧","蓝牙耳机",1990,66],["🌷","乐高花束",3490,38]].map(([e,t,cost,pct])=>`
+      <div style="padding:12px 2px;border-top:1px solid var(--line-2)">
+        <div style="display:flex;align-items:flex-start;gap:11px">
+          <span style="font-size:20px">${e}</span>
+          <div style="flex:1"><div style="font-size:14px;font-weight:600">${t}</div>
+            <div style="font-size:12px;color:var(--ink-3);margin-top:2px">${cost.toLocaleString()} 分 · 还差 ${(cost-1318).toLocaleString()}</div></div>
+          <span style="font-family:var(--font-mono);font-size:13px;color:var(--ink-2)">${pct}%</span>
+        </div>
+        <div class="bar" style="margin-top:9px">${Array.from({length:10},(_,i)=>`<i class="${i<Math.round(pct/10)?"on":""}"></i>`).join("")}</div>
+      </div>`).join("")}
+  </section>
+  ${nav("wish")}
+</div>`;
+
+/* ---------- 14 愿望单 · 记录 ---------- */
+S.wishRecords = () => `<div class="screen">
+  ${head("", "愿望单", "攒够就能换，先攒后换", `<button class="btn btn-quiet">＋ 新建</button>`)}
+  ${wishBalance(1318)}
+  <div class="seg"><button class="seg-item">还在攒 3</button><button class="seg-item on">兑换记录 2</button></div>
+  <div class="list">
+    ${[["🧋","奶茶","11 月 7 日 09:12 · 250 分","已完成",true],["🍲","一顿火锅","11 月 1 日 20:01 · 1,500 分","已扣分",false]].map(([e,t,m,st,ok])=>`
+      <div class="li"><span class="ico-box sm">${e}</span>
+        <div class="li-main"><div class="li-title">${t}</div><div class="li-meta">${m}</div></div>
+        <span style="font-size:11px;padding:3px 9px;border-radius:999px;background:${ok?"var(--sage-soft)":"var(--surface-2)"};color:${ok?"var(--sage-deep)":"var(--ink-3)"};white-space:nowrap">${st}</span>
+      </div>`).join("")}
+  </div>
+  <div class="card pad" style="font-size:12px;color:var(--ink-3);text-align:center">撤回只在兑换后 2 小时内可用。</div>
+  ${nav("wish")}
+</div>`;
+
+/* ---------- 15 愿望单 · 空 ---------- */
+S.wishEmpty = () => `<div class="screen">
+  ${head("", "愿望单", "攒够就能换，先攒后换", `<button class="btn btn-quiet">＋ 新建</button>`)}
+  ${wishBalance(824)}
+  <div class="empty">
+    <div class="empty-emoji">🎁</div>
+    <div class="empty-title">还没有想要的</div>
+    <div class="empty-sub">把想买的东西放进来，填上真实价格</div>
+    <button class="btn btn-main" style="width:192px;margin:16px auto 0">${ui("plus")} 加第一个愿望</button>
+  </div>
+  ${nav("wish")}
+</div>`;
+
+/* ---------- 16 我的 ---------- */
+S.me = () => `<div class="screen">
+  ${head("", "我的", `${M.me.name} 的脚印`)}
+  <div class="card pad" style="display:flex;align-items:center;gap:12px">
+    <span class="avatar" style="width:48px;height:48px;border-radius:15px;font-size:24px">${M.me.avatar}</span>
+    <div style="flex:1"><div style="font-size:15px;font-weight:700">${M.me.name}</div><div style="font-size:12px;color:var(--ink-3)">和 ${M.ta.name} 互相监督中</div></div>
+    <button class="btn btn-quiet">改口令</button>
+  </div>
+  <div class="balance" style="padding:15px 17px">
+    <div>
+      <div class="balance-label">可用积分</div>
+      <div class="balance-num" style="font-size:30px">1,318</div>
+    </div>
+    <div class="balance-tags">
+      <span class="tagpill">本月 +666</span>
+      <span class="tagpill light">连续 5 天</span>
+    </div>
+  </div>
+  <div class="card" style="display:grid;grid-template-columns:1fr 1fr;overflow:hidden">
+    ${[["本月完成率","76%"],["时间投入","14.8 小时"],["最长连续","21 天"],["被驳回次数","0"]].map(([k,v],i)=>`
+      <div style="padding:13px 15px;border-top:${i>1?"1px solid var(--line-2)":"0"};border-left:${i%2?"1px solid var(--line-2)":"0"}">
+        <div style="font-size:12px;color:var(--ink-3)">${k}</div><div style="font-family:var(--font-mono);font-size:18px;margin-top:3px">${v}</div>
+      </div>`).join("")}
+  </div>
+  <section class="sec">
+    <div class="sec-head"><h2 class="sec-title">积分流水</h2><span class="sec-note">最近 3 条</span></div>
+    <div class="list">
+      ${[["打卡 ·「喝水」5 分钟","11 月 7 日 09:54","+3"],["打卡 ·「背单词」30 分钟","11 月 7 日 09:44","+14"],["连续奖励 · 连续 7 达成","11 月 6 日 21:30","+65"]].map(([t,m,p])=>`
+        <div class="li"><div class="li-main"><div class="li-title">${t}</div><div class="li-meta">${m}</div></div><span class="li-val">${p}</span></div>`).join("")}
+    </div>
+  </section>
+  <div class="list">
+    ${["数据与备份","积分系数","我的画像"].map(t=>`<div class="li"><div class="li-main"><div class="li-title">${t}</div></div><span style="color:var(--ink-3)">›</span></div>`).join("")}
+  </div>
+  ${nav("me")}
+</div>`;
+
+/* ---------- 17 登录 ---------- */
+S.login = () => `<div class="screen" style="justify-content:flex-start">
+  <div style="padding-top:68px;text-align:center">
+    <div style="width:66px;height:66px;border-radius:22px;background:linear-gradient(140deg,#7FA991,#4D7963);display:grid;place-items:center;margin:0 auto;font-size:30px;box-shadow:0 18px 30px -18px rgba(61,104,85,.95)">🐾</div>
+    <div style="font-family:var(--font-px);font-size:22px;margin-top:16px;letter-spacing:.08em">脚印</div>
+    <div style="font-size:12px;color:var(--ink-3);margin-top:6px">两个人互相看得见的打卡与目标</div>
+  </div>
+  <div class="card pad" style="margin-top:30px">
+    <div style="font-size:18px;font-weight:700;letter-spacing:-.01em">欢迎回来</div>
+    <div class="field" style="margin-top:16px"><span class="label">昵称</span><div class="input" style="color:var(--ink-3)">你的昵称</div></div>
+    <div class="field" style="margin-top:13px"><span class="label">口令</span><div class="input" style="color:var(--ink-3)">至少 6 位</div></div>
+    <button class="btn btn-main" style="width:100%;margin-top:20px">进入脚印</button>
+    <div style="text-align:center;font-size:12px;color:var(--ink-3);margin-top:12px">登录后，今天的脚印会从上次停下的地方继续。</div>
+  </div>
+  <div style="text-align:center;margin-top:auto;padding-bottom:28px">
+    <div style="display:flex;justify-content:center;align-items:center;gap:8px">${["🐱","🐻"].map(a=>`<span class="avatar">${a}</span>`).join('<span style="color:var(--line);font-size:18px">·</span>')}</div>
+    <div style="font-size:11px;color:var(--ink-3);margin-top:12px">一个人容易停，两个人就走得远。</div>
+  </div>
+</div>`;
+
+/* ---------- 18–21 Agent ---------- */
+function agentPanel(step){
+  const data = {
+    1:{ tip:["想做成什么事？说个大概就行，","我帮你排成每周做的小目标"], chips:["找 Agent 开发的工作","考雅思","体脂降到 18%"], status:"刚打开" },
+    2:{ tip:["这件事，你每周大概能拿出多少时间？","先给我一个数，我按它排"], chips:["每周 3 小时","每周 6 小时","每周 10 小时"], status:"正在聊" },
+    3:{ tip:["按每周 6 小时排了 6 周，","候选小目标在下面，你看看要不要"], chips:[], status:"正在聊" },
+    4:{ tip:["5 个已排进 8 周，","想调顺序也行，直接说就行"], chips:["把第 2 个提前一周"], status:"已完成" },
+  }[step];
+  return `<div class="card pad" style="border-radius:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <span style="font-size:13px;font-weight:700">✨ zoowy</span>
+      <span style="font-size:11px;color:var(--ink-3)">${data.status}</span>
+    </div>
+    <div style="background:var(--surface-2);border-radius:14px;padding:12px 14px;font-size:13px;color:var(--ink-2);line-height:1.7">
+      ${data.tip.map(l=>`<div>${l}</div>`).join("")}
+    </div>
+    ${step===3?`<div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+      ${[["把简历改成 1 页","一次 · 约 40 分"],["整理 3 个项目讲法","6 周 · 每周 1 次"]].map(([t,m])=>`
+        <div style="border:1px solid var(--line);border-radius:13px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;gap:10px">
+          <div><div style="font-size:13px;font-weight:600">${t}</div><div style="font-size:11px;color:var(--ink-3);margin-top:1px">${m}</div></div>
+          <span style="width:20px;height:20px;border-radius:6px;background:var(--sage);color:#fff;display:grid;place-items:center;font-size:12px;flex:none">✓</span>
+        </div>`).join("")}
+    </div>`:""}
+    ${data.chips.length?`<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:12px">${data.chips.map(c=>`<button class="nudge-btn" style="border-radius:999px;padding:7px 13px">${c}</button>`).join("")}</div>`:""}
+    <div style="margin-top:13px;display:flex;align-items:center;gap:8px">
+      <div style="flex:1;height:42px;border-radius:13px;border:1px solid var(--line);background:var(--surface-2);display:flex;align-items:center;padding:0 13px;color:var(--ink-3);font-size:13px">说说你想做成什么…</div>
+      <button class="btn btn-main" style="flex:none;width:42px;min-height:42px;border-radius:13px;padding:0">→</button>
+    </div>
+    ${step===3?'<button class="btn btn-main" style="width:100%;margin-top:11px">就按这个建</button>':""}
+    ${step===4?'<div style="margin-top:11px;font-size:12px;color:var(--sage-deep);text-align:center">已创建 5 个小目标 · 未覆盖你手改过的</div>':""}
+  </div>`;
+}
+[["agentOpen",1],["agentAsk",2],["agentPlan",3],["agentDone",4]].forEach(([k,step])=>{
+  S[k] = () => `<div class="screen">
+    ${head("", "目标", "这周打了几天", `<button class="btn btn-quiet">＋ 新建</button>`)}
+    <div class="seg"><button class="seg-item on">日常</button><button class="seg-item">小目标</button><button class="seg-item">大目标</button></div>
+    <div class="card pad" style="opacity:.45">
+      <div style="font-size:15px;font-weight:700">11/2 – 11/8</div>
+      <div style="font-size:12px;color:var(--ink-3);margin-top:3px">412 分 · 21/33 完成</div>
+    </div>
+    ${agentPanel(step)}
+    ${nav("goals")}
+  </div>`;
+});
+
+const screen = new URLSearchParams(location.search).get("screen") || "home";
+document.getElementById("app").innerHTML = (S[screen] || S.home)();
+</script>
+</body>
+</html>

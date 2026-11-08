@@ -1,0 +1,55 @@
+/* 脚印 · 效果稿 · 弹层
+   底部弹层外壳 + 表单控件。 */
+
+/* ---------- sheet ---------- */
+.sheet-layer { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-end; justify-content: center; }
+.sheet-scrim { position: absolute; inset: 0; background: rgba(43, 32, 24, .52); }
+.sheet-panel {
+  position: relative; width: 100%; max-width: 420px; max-height: 88dvh;
+  display: flex; flex-direction: column;
+  padding: 8px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  background: var(--bg); border-top: 3px solid var(--outline);
+  box-shadow: 0 -6px 0 rgba(59, 46, 34, .16);
+}
+.sheet-handle { width: 44px; height: 6px; margin: 0 auto 12px; background: var(--outline); flex: none; }
+.sheet-title { margin: 0 0 14px; font-family: var(--font-px); font-size: 20px; font-weight: 400; line-height: 1.35; text-align: center; flex: none; }
+.sheet-body { flex: 1; min-height: 0; overflow-y: auto; }
+.sheet-actions { display: flex; gap: 10px; margin-top: 16px; flex: none; }
+.sheet-btn {
+  flex: 1; min-height: 46px; padding: 0 14px;
+  background: var(--paper); color: var(--ink-2);
+  border: 1px solid var(--line-strong); font-size: 14px; font-weight: 600;
+}
+.sheet-btn.primary { background: var(--forest); color: #FFFDF6; border-color: var(--outline); box-shadow: 0 4px 0 var(--outline); }
+.sheet-btn.danger { background: var(--paper); color: var(--red); border-color: #E6CBC5; }
+.sheet-btn.ghost { background: var(--bg-2); }
+
+.cid-goal { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.cid-goal-title { font-size: 15px; font-weight: 600; }
+.cid-goal-meta { margin-top: 2px; color: var(--muted); font-size: 12px; }
+.cid-rows { padding-top: 4px; }
+.cid-row { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--hairline); font-size: 13px; }
+.cid-row span { flex: none; color: var(--muted); }
+.cid-row b { text-align: right; font-weight: 400; line-height: 1.6; }
+.cid-row b.cid-ok { color: var(--forest-deep); font-family: var(--font-mono); font-size: 17px; }
+.cid-hint { margin: 12px 0 0; padding: 9px 11px; background: var(--bg-2); color: var(--ink-2); font-size: 12px; line-height: 1.7; }
+
+.gf-field { margin-top: 14px; }
+.gf-field:first-child { margin-top: 0; }
+.gf-label { display: block; margin-bottom: 6px; color: var(--ink-2); font-family: var(--font-px); font-size: 12px; }
+.gf-input { width: 100%; height: 46px; padding: 0 12px; background: var(--paper); border: 1px solid var(--line-strong); color: var(--ink); font-size: 15px; }
+.gf-emojis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 7px; }
+.gf-emoji { height: 40px; display: grid; place-items: center; background: var(--paper); border: 1px solid var(--line); font-size: 19px; }
+.gf-emoji.on { background: var(--forest-soft); border-color: var(--forest); box-shadow: inset 0 0 0 1px var(--forest); }
+.gf-seg { display: flex; }
+.gf-seg button { flex: 1; min-height: 42px; background: var(--paper); border: 1px solid var(--line); border-left: 0; color: var(--ink-2); font-size: 13px; }
+.gf-seg button:first-child { border-left: 1px solid var(--line); }
+.gf-seg button.on { background: var(--forest); border-color: var(--outline); color: #FFFDF6; }
+.gf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.gf-step { display: flex; align-items: center; gap: 0; }
+.gf-step button { width: 40px; height: 44px; background: var(--bg-2); border: 1px solid var(--line-strong); color: var(--ink-2); font-size: 17px; }
+.gf-step b { min-width: 44px; height: 44px; display: grid; place-items: center; background: var(--paper); border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); font-family: var(--font-mono); font-size: 17px; font-weight: 400; }
+.gf-step span { margin-left: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.gf-preview { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; padding: 12px 13px; background: var(--forest-soft); border: 1px solid #B7D2A3; }
+.gf-preview-label { color: var(--forest-deep); font-size: 13px; }
+.gf-preview-val { color: var(--forest-deep); font-family: var(--font-mono); font-size: 20px; font-weight: 400; }

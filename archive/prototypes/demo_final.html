@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>最终方案 Demo</title>
+  <style>
+    :root {
+      --bg: #F8F5EE;
+      --card: #FFFFFF;
+      --text: #3D352A;
+      --sub: #8C8273;
+      --primary: #4A7C59;
+      --radius: 20px;
+    }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, sans-serif; margin: 0; padding: 20px; }
+    
+    /* Loading */
+    #loader { position: fixed; inset: 0; background: var(--bg); display: flex; justify-content: center; align-items: center; z-index: 100; }
+    .spinner { width: 40px; height: 40px; border: 4px solid #E6E0D5; border-top: 4px solid var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    /* Cards */
+    .card { background: var(--card); border-radius: var(--radius); padding: 20px; margin-bottom: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    h2 { font-size: 18px; margin-top: 0; }
+    
+    .tabbar { position: fixed; bottom: 0; left: 0; right: 0; background: white; display: flex; justify-content: space-around; padding: 15px; border-top: 1px solid #EBE7DF; }
+  </style>
+</head>
+<body>
+
+<div id="loader"><div class="spinner"></div></div>
+
+<div id="app">
+  <header><h1>今天</h1></header>
+  
+  <div class="card">
+    <h2>可用积分</h2>
+    <div style="font-size: 32px; font-weight: bold; color: var(--primary);">1,332</div>
+  </div>
+
+  <div class="card">
+    <h2>今日待办</h2>
+    <p>练琴 - 45分钟</p>
+  </div>
+</div>
+
+<nav class="tabbar">
+  <span>今天</span><span>目标</span><span>愿望单</span><span>我们</span><span>我的</span>
+</nav>
+
+<script>
+  window.onload = () => setTimeout(() => document.getElementById('loader').style.display = 'none', 1500);
+</script>
+</body>
+</html>

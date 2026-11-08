@@ -1,0 +1,78 @@
+:root {
+  --bg: #FAF9F6;
+  --card: #FFFFFF;
+  --text: #2D241E;
+  --sub: #8B7E72;
+  --primary: #527A50;
+  --radius: 18px;
+  --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+body {
+  background-color: var(--bg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: var(--text);
+  margin: 0;
+  padding: 16px;
+  padding-bottom: 90px;
+}
+
+/* 卡片入场动画 */
+.card {
+  background: var(--card);
+  border: 0.5px solid #EBE7DF;
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.03);
+  
+  /* 动效 */
+  opacity: 0;
+  transform: translateY(15px);
+  animation: slideInUp 0.5s ease-out forwards;
+}
+
+/* 错开入场时间 */
+.card:nth-child(1) { animation-delay: 0.05s; }
+.card:nth-child(2) { animation-delay: 0.1s; }
+.card:nth-child(3) { animation-delay: 0.15s; }
+.card:nth-child(4) { animation-delay: 0.2s; }
+
+@keyframes slideInUp {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 按钮交互 */
+button {
+  border-radius: 12px;
+  border: none;
+  background: var(--primary);
+  color: white;
+  padding: 10px 20px;
+  font-weight: 500;
+  transition: var(--transition);
+  cursor: pointer;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.1);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+/* Tabbar 交互 */
+.tab-item {
+  transition: var(--transition);
+}
+
+.tab-item:active {
+  transform: scale(0.9);
+}
+
+header { margin-bottom: 20px; }
+h1, h2 { font-size: 16px; margin: 0 0 10px 0; color: var(--sub); }
+
+

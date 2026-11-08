@@ -1,0 +1,20 @@
+camera|camera|a photo camera
+plane|plane|an airplane
+book|book|an open book
+run|run|a running person silhouette, sport icon
+meditate|meditate|a person sitting cross-legged meditating
+art|art|a painter's palette with paint blobs
+write|write|a fountain pen
+tooth|tooth|a single tooth
+apple|apple|a red apple with a green leaf
+broom|broom|a broom
+grad|grad|a graduation cap mortarboard
+muscle|muscle|a flexed bicep arm
+medal|medal|a medal with a ribbon
+climb|climb|a person rock climbing
+swim|swim|a swimmer swimming
+mountainbike|mountainbike|a bicycle, mountain bike
+cat|cat|a cat face
+bell|bell|a bell
+hotpot|hotpot|a Chinese hot pot with soup and food
+gym|gym|a dumbbell
