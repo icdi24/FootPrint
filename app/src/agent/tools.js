@@ -482,11 +482,12 @@ const IMPLEMENTATIONS = {
 
 // ---------- 白名单（待办计划 1.8：按工作流最小授权）----------
 const WHITELIST = {
-  plan: ['read_my_profile', 'read_big_goal', 'read_my_goals', 'create_plan_goal', 'shift_plan_dates', 'patch_my_profile'],
+  plan: ['read_my_profile', 'read_big_goal', 'read_my_goals', 'create_plan_goal', 'shift_plan_dates'],
   progress: ['read_my_goals', 'read_big_goal', 'read_checkins', 'write_big_goal_progress', 'patch_my_profile'],
   daily: ['read_my_goals', 'read_big_goal', 'read_checkins', 'read_my_profile', 'read_my_usage', 'read_my_diaries', 'write_my_diary', 'patch_my_profile'],
-  // chat 保留调用能力，但同一套白名单机制：读全 + 大目标/计划/画像写；不给写日报/写进度（防伪造）
-  chat: ['read_my_profile', 'read_my_goals', 'read_big_goal', 'list_big_goals', 'read_checkins', 'read_my_usage', 'read_my_diaries', 'create_big_goal', 'create_plan_goal', 'shift_plan_dates', 'patch_my_profile'],
+  // chat 按授权来源分级（v2）：读工具 + 用户明确请求的单条直写；
+  // patch_my_profile 从 chat 收口成「提议 → 确认卡片 → applyProfilePatch」，只保留在 progress/daily 后台工作流。
+  chat: ['read_my_profile', 'read_my_goals', 'read_big_goal', 'list_big_goals', 'read_checkins', 'read_my_usage', 'read_my_diaries', 'create_big_goal', 'create_plan_goal', 'shift_plan_dates'],
 };
 
 // 工具名 → OpenAI tools 格式

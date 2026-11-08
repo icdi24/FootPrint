@@ -226,8 +226,7 @@ module.exports = function authRoutes(db) {
     } catch (e) { next(e); }
   });
 
-  // ---- AI 设置（P0-5）：每用户一份，与全局 settings 表（积分系数）无关 ----
-  // skipConfirm 默认关、reportChanges 默认开；两开关只调确认与汇报，不调工具白名单
+  // ---- AI 设置（P0-5）：每用户一份；v2 起 skipConfirm 已移除（确认=决策，不可跳过） ----
   r.get('/me/settings', requireUser, async (req, res, next) => {
     try {
       res.json(await getUserSettings(db, req.user.id));
@@ -238,16 +237,15 @@ module.exports = function authRoutes(db) {
     try {
       const b = req.body || {};
       const cur = await getUserSettings(db, req.user.id);
-      const skipConfirm = b.skipConfirm !== undefined ? Boolean(b.skipConfirm) : cur.skipConfirm;
       const reportChanges = b.reportChanges !== undefined ? Boolean(b.reportChanges) : cur.reportChanges;
       const dailyEnabled = b.dailyEnabled !== undefined ? Boolean(b.dailyEnabled) : cur.dailyEnabled;
       await db.run(
-        `INSERT INTO user_settings (user_id, skip_confirm, report_changes, daily_enabled, updated_at) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT (user_id) DO UPDATE SET skip_confirm = EXCLUDED.skip_confirm, report_changes = EXCLUDED.report_changes, daily_enabled = EXCLUDED.daily_enabled, updated_at = EXCLUDED.updated_at`,
-        [req.user.id, skipConfirm ? 1 : 0, reportChanges ? 1 : 0, dailyEnabled ? 1 : 0, new Date().toISOString()]
+        `INSERT INTO user_settings (user_id, report_changes, daily_enabled, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT (user_id) DO UPDATE SET report_changes = EXCLUDED.report_changes, daily_enabled = EXCLUDED.daily_enabled, updated_at = EXCLUDED.updated_at`,
+        [req.user.id, reportChanges ? 1 : 0, dailyEnabled ? 1 : 0, new Date().toISOString()]
       );
-      log.log('user_settings', `${req.user.login_name} skipConfirm=${skipConfirm} reportChanges=${reportChanges} dailyEnabled=${dailyEnabled}`);
-      res.json({ skipConfirm, reportChanges, dailyEnabled });
+      log.log('user_settings', `${req.user.login_name} reportChanges=${reportChanges} dailyEnabled=${dailyEnabled}`);
+      res.json({ reportChanges, dailyEnabled });
     } catch (e) { next(e); }
   });
 

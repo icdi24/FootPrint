@@ -82,7 +82,7 @@ const MePage = {
       <section class="sec">
         <div class="sec-head"><h2>设置</h2></div>
         <div class="menu-list">
-          <button class="menu-row" id="m-ai-settings">🐾<span>AI 设置</span><span class="menu-note">确认与汇报</span>${window.icon('right')}</button>
+          <button class="menu-row" id="m-ai-settings">🐾<span>AI 设置</span><span class="menu-note">汇报与日报</span>${window.icon('right')}</button>
           <button class="menu-row" id="m-points">${window.icon('gear')}<span>积分系数</span><span class="menu-note">规则可调</span>${window.icon('right')}</button>
           <button class="menu-row" id="m-data">${window.icon('doc')}<span>数据与备份</span><span class="menu-note">导出 · 快照</span>${window.icon('right')}</button>
         </div>
@@ -174,7 +174,7 @@ const MePage = {
       <section class="sec">
         <div class="sec-head"><h2>设置</h2></div>
         <div class="menu-list">
-          <button class="menu-row">🐾<span>AI 设置</span><span class="menu-note">确认与汇报</span>${window.icon('right')}</button>
+          <button class="menu-row">🐾<span>AI 设置</span><span class="menu-note">汇报与日报</span>${window.icon('right')}</button>
           <button class="menu-row">${window.icon('gear')}<span>积分系数</span><span class="menu-note">规则可调</span>${window.icon('right')}</button>
           <button class="menu-row">${window.icon('doc')}<span>数据与备份</span><span class="menu-note">导出 · 快照</span>${window.icon('right')}</button>
         </div>
@@ -595,7 +595,7 @@ const MePage = {
     UI.sheet({ title: '我的画像（仅自己可见）', body, actions: [{ label: '关闭', onClick: (close) => close() }] });
   },
 
-  // ---- AI 设置（P0-#5 消费端）：两个开关只调确认与汇报，不调工具白名单 ----
+  // ---- AI 设置：改完汇报 / AI 日报 两个开关 ----
   async aiSettingsSheet() {
     let cur;
     try {
@@ -612,7 +612,6 @@ const MePage = {
         <button class="at-switch ${on ? 'on' : ''}" data-key="${key}" role="switch" aria-checked="${on}"><i></i></button>
       </div>`;
     body.innerHTML = `
-      ${toggle('skipConfirm', '免确认', '开 = AI 改画像 / 改计划不再弹确认直接改（候选计划仍要你勾选，免的是弹窗不是决策）', cur.skipConfirm)}
       ${toggle('reportChanges', '改完汇报', '开 = AI 每次改完告诉你改了什么；关 = 静默改。不管开不开，改动都留痕，随时能翻', cur.reportChanges)}
       ${toggle('dailyEnabled', 'AI 日报', '开 = 每晚 23:30 给你生成一份日报（会调用 AI）；默认关，不开就不烧额度', cur.dailyEnabled)}
       <div class="gf-hint">每人一份，两边互不影响。白名单不受开关影响：AI 永远碰不到验收、积分和对方的数据。</div>
@@ -631,11 +630,10 @@ const MePage = {
         {
           label: '保存', kind: 'primary',
           async onClick(close) {
-            const skipConfirm = body.querySelector('[data-key="skipConfirm"]').classList.contains('on');
             const reportChanges = body.querySelector('[data-key="reportChanges"]').classList.contains('on');
             const dailyEnabled = body.querySelector('[data-key="dailyEnabled"]').classList.contains('on');
             try {
-              await api.put('/api/me/settings', { skipConfirm, reportChanges, dailyEnabled });
+              await api.put('/api/me/settings', { reportChanges, dailyEnabled });
               UI.toast('已保存', 'ok');
               close();
             } catch (e) { UI.toast(e.message, 'err'); }

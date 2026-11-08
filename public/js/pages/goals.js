@@ -247,7 +247,7 @@ const GoalsPage = {
       });
       card.querySelector('[data-act="zoowy"]')?.addEventListener('click', () => {
         const bg = bigGoals.find((b) => b.id === Number(card.dataset.id));
-        if (bg) ZoowyPlan.open({ bigGoal: bg, onConfirmed: () => this.draw(root) });
+        if (bg) ZoowyChat.open({ bigGoalId: bg.id, title: bg.title, onApplied: () => this.draw(root) });
       });
     });
   },
@@ -1170,7 +1170,7 @@ const StageGoalForm = {
     });
     preview();
     const zfEntry = body.querySelector('#sf-zoowy');
-    if (zfEntry) zfEntry.addEventListener('click', () => ZoowyPlan.open({ onConfirmed: onSaved }));
+    if (zfEntry) zfEntry.addEventListener('click', () => ZoowyChat.open({ onApplied: onSaved }));
 
     let saving = false;
     UI.sheet({

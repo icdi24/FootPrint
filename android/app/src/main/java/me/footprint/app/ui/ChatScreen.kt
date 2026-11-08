@@ -93,7 +93,7 @@ fun ChatScreen(vm: AppViewModel, onClose: () -> Unit) {
                 ) {
                     PixelSmallButton(text = "‹ 返回", filled = false, onClick = onClose)
                     Text(
-                        text = partner?.nickname?.let { "和 $it 私聊" } ?: "私聊",
+                        text = partner?.username?.let { "和 $it 私聊" } ?: "私聊",
                         style = PixelType.Title,
                         color = PixelColors.Ink,
                     )

@@ -60,12 +60,12 @@ data class PartnerResponse(
     val staleMinutes: Long? = null,
 )
 
-/** 后端统一用 { error: "..." } 返回错误信息 */
+/** 后端统一用 { error: "...", code: "..." } 返回错误信息 */
 @Serializable
-data class ApiErrorBody(val error: String? = null)
+data class ApiErrorBody(val error: String? = null, val code: String? = null)
 
 /** 把后端的 HTTP 错误变成可读异常，UI 直接展示 message */
-class ApiException(message: String, val code: Int = 0) : IOException(message)
+class ApiException(message: String, val code: Int = 0, val serverCode: String? = null) : IOException(message)
 
 // ---------------- 客户端 ----------------
 
@@ -116,6 +116,20 @@ object Api {
             .build()
     }
 
+    /** zoowy 私有/取消类请求：不跟随重定向 */
+    private val zoovyPrivateClient: OkHttpClient by lazy {
+        client.newBuilder().followRedirects(false).followSslRedirects(false).build()
+    }
+
+    /** zoowy 聊天/出草案要跑模型，给更长的读超时，且断线不自动重试（重试靠 requestId 幂等） */
+    private val zoovyChatClient: OkHttpClient by lazy {
+        zoovyPrivateClient.newBuilder()
+            .readTimeout(75, TimeUnit.SECONDS)
+            .callTimeout(80, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(false)
+            .build()
+    }
+
     fun baseUrl(): String = Session.baseUrl()
 
     /** 拼完整地址；BASE_URL 必须带结尾 "/"，这里再兜一层 */
@@ -131,6 +145,7 @@ object Api {
         path: String,
         body: String? = null,
         token: String? = null,
+        requestClient: OkHttpClient = client,
         onSetCookie: ((Map<String, String>) -> Unit)? = null,
     ): String = withContext(Dispatchers.IO) {
         val builder = Request.Builder().url(url(path))
@@ -143,7 +158,7 @@ object Api {
         builder.header("Accept", "application/json")
 
         val response = try {
-            client.newCall(builder.build()).execute()
+            requestClient.newCall(builder.build()).execute()
         } catch (e: IOException) {
             // 网络不通（没连 Wi-Fi / 地址填错 / 后端没起）统一成一句话
             Log.w(TAG, "$method $path 网络失败", e)
@@ -163,14 +178,52 @@ object Api {
             }
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {
-                val msg = runCatching {
-                    json.decodeFromString(ApiErrorBody.serializer(), text).error
+                val err = runCatching {
+                    json.decodeFromString(ApiErrorBody.serializer(), text)
                 }.getOrNull()
-                throw ApiException(msg?.takeIf { it.isNotBlank() } ?: "HTTP ${resp.code}", resp.code)
+                throw ApiException(
+                    err?.error?.takeIf { it.isNotBlank() } ?: "HTTP ${resp.code}",
+                    resp.code,
+                    err?.code,
+                )
             }
             text
         }
     }
+
+    // ---------------- zoowy 常驻问答（第一批：chat / messages / cancel / acceptOffer / confirmDraft） ----------------
+
+    /** GET /api/zoowy/messages —— 历史消息（含卡片 / 工具 / 画像改动 / 失败标记） */
+    suspend fun zoovyMessages(token: String): ZoovyHistory =
+        json.decodeFromString(ZoovyHistory.serializer(), send("GET", "api/zoowy/messages", null, token))
+
+    /** POST /api/zoowy/chat —— requestId 由客户端生成，服务端据此做幂等与「停止本轮」 */
+    suspend fun zoovyChat(token: String, message: ZoovyRequest): ZoovyReply =
+        json.decodeFromString(ZoovyReply.serializer(), send(
+            "POST", "api/zoowy/chat", json.encodeToString(ZoovyRequest.serializer(), message), token,
+            requestClient = zoovyChatClient,
+        ))
+
+    /** POST /api/zoowy/turns/{requestId}/cancel —— 停止本轮 */
+    suspend fun cancelZoovyTurn(token: String, requestId: String): Boolean =
+        json.decodeFromString(ZoovyCancellation.serializer(), send(
+            "POST", "api/zoowy/turns/$requestId/cancel", "{}", token, requestClient = zoovyPrivateClient,
+        )).cancelled
+
+    /** POST /api/zoowy/offers/{id}/accept —— 同意提议；返回 plan_draft 或 profile_applied 卡片 */
+    suspend fun acceptZoovyOffer(token: String, id: Long, requestId: String): ZoovyCard =
+        json.decodeFromString(ZoovyCardResponse.serializer(), send(
+            "POST", "api/zoowy/offers/$id/accept",
+            json.encodeToString(ZoovyOperationRequest.serializer(), ZoovyOperationRequest(requestId)), token,
+            requestClient = zoovyChatClient,
+        )).card
+
+    /** POST /api/zoowy/drafts/{id}/confirm —— 应用指定版本的草案 */
+    suspend fun confirmZoovyDraft(token: String, id: Long, revision: Int): ZoovyCard =
+        json.decodeFromString(ZoovyCardResponse.serializer(), send(
+            "POST", "api/zoowy/drafts/$id/confirm",
+            json.encodeToString(ZoovyConfirm.serializer(), ZoovyConfirm(revision)), token,
+        )).card
 
     // ---------------- 登录 ----------------
 
@@ -408,7 +461,7 @@ object Api {
         return json.decodeFromString(UserSettings.serializer(), text)
     }
 
-    /** PUT /api/me/settings —— 改 AI 设置（reportChanges / skipConfirm / dailyEnabled） */
+    /** PUT /api/me/settings —— 改 AI 设置（reportChanges / dailyEnabled） */
     suspend fun updateAiSettings(token: String, body: AiSettingsPayload): UserSettings {
         val text = send("PUT", "api/me/settings", json.encodeToString(AiSettingsPayload.serializer(), body), token)
         return json.decodeFromString(UserSettings.serializer(), text)
@@ -1142,14 +1195,12 @@ data class DiaryTodayResponse(val today: String = "", val diary: DiaryDto? = nul
 
 @Serializable
 data class UserSettings(
-    val skipConfirm: Boolean = false,
     val reportChanges: Boolean = true,
     val dailyEnabled: Boolean = false,
 )
 
 @Serializable
 data class AiSettingsPayload(
-    val skipConfirm: Boolean = false,
     val reportChanges: Boolean = true,
     val dailyEnabled: Boolean = false,
 )

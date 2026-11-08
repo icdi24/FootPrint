@@ -8,7 +8,7 @@ const express = require('express');
 const { nowIso, todayStr } = require('../tz');
 const { makeMiddleware } = require('../middleware');
 const { IMPLEMENTATIONS, snapshotPlan } = require('../agent/tools');
-const { planIntro, confirmPlan } = require('../agent/workflows/plan');
+const ai = require('../ai');
 const log = require('../log');
 
 function isValidDate(s) {
@@ -253,38 +253,6 @@ function bigGoalsRoutes(db) {
     } catch (e) { next(e); }
   });
 
-  // ---- zoowy plan 入口（#9 后端部分：创建表单「让 zoowy 帮忙拆」+ 详情页「重新规划」）----
-  // 第一步：自检信息够不够 → 不够问一个问题（带建议答案）/ 够了出候选（不写库）
-  r.post('/zoowy/plan/intro', mw.requireUser, async (req, res, next) => {
-    try {
-      const b = req.body || {};
-      if (!aiAvailable()) return res.status(503).json({ error: 'AI 未配置，zoowy 不可用' });
-      const out = await planIntro({
-        db, userId: req.user.id,
-        bigGoalId: Number(b.big_goal_id) || 0,
-        mode: b.mode === 'idea' ? 'idea' : 'auto',
-        userMessage: String(b.message || '').slice(0, 1000),
-        force: Boolean(b.force),
-        history: Array.isArray(b.history) ? b.history.slice(-5).map((h) => ({ q: String(h && h.q || '').slice(0, 300), a: String(h && h.a || '').slice(0, 500) })) : [],
-      });
-      res.json(out);
-    } catch (e) { next(e); }
-  });
-
-  // 第二步：用户勾选候选 = 一次确认 → 走白名单工具创建
-  r.post('/zoowy/plan/confirm', mw.requireUser, async (req, res, next) => {
-    try {
-      const b = req.body || {};
-      const out = await confirmPlan({
-        db, userId: req.user.id,
-        bigGoalId: Number(b.big_goal_id) || 0,
-        items: Array.isArray(b.items) ? b.items : [],
-        profilePatches: Array.isArray(b.profile_patches) ? b.profile_patches : [],
-      });
-      res.json(out);
-    } catch (e) { next(e); }
-  });
-
   return r;
 }
 
@@ -293,5 +261,5 @@ module.exports = bigGoalsRoutes;
 bigGoalsRoutes.releaseChain = releaseChain;
 
 function aiAvailable() {
-  return Boolean(process.env.AI_API_KEY);
+  return ai.aiAvailable();
 }

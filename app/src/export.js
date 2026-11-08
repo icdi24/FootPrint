@@ -29,6 +29,13 @@ const TABLES = [
   'user_settings',
   'pair_invites',
   'pair_messages',
+  'hall_listings',
+  'hall_invites',
+  // ===== zoowy v2 新增表 =====
+  'planning_drafts',
+  'zoowy_compactions',
+  'zoowy_turns',
+  'zoowy_offers',
 ];
 
 // 不是每张表都有 id 列（goal_milestones / pair_members 是联合主键，settings 主键是 key，
@@ -42,6 +49,10 @@ const ORDER_BY = {
   user_settings: 'user_id',
   pair_invites: 'code',
   pair_members: 'pair_id, user_id', // 联合主键，无 id 列
+  zoowy_compactions: 'session_id',
+  zoowy_turns: 'user_id, request_id',
+  planning_drafts: 'id',
+  zoowy_offers: 'id',
 };
 
 async function dumpAll(db) {

@@ -94,6 +94,11 @@ fun MeScreen(vm: AppViewModel) {
   }
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
+  var showZoovy by remember { mutableStateOf(false) }
+  if (showZoovy) {
+    ZoovyScreen(onBack = { showZoovy = false })
+    return
+  }
 
   // ---- 页面状态 ----
   var stats by remember { mutableStateOf<StatsInner?>(null) }
@@ -225,7 +230,15 @@ fun MeScreen(vm: AppViewModel) {
 
       Spacer(Modifier.height(16.dp))
 
-      // ===== 改密码 / 积分系数 / AI 设置 入口 =====
+      // ===== 和 zoowy 聊聊 / 改密码 / 积分系数 / AI 设置 入口 =====
+      PixelButton(
+        text = "🐾 和 zoowy 聊聊",
+        onClick = { showZoovy = true },
+        modifier = Modifier.fillMaxWidth(),
+      )
+
+      Spacer(Modifier.height(16.dp))
+
       SettingsActions(
         onPassword = { showPassword = true },
         onPoints = { showPoints = true },
@@ -975,14 +988,13 @@ private fun ProfileChangesDialog(
   }
 }
 
-/** AI 设置弹层：改完汇报 / 免确认 / AI 日报 */
+/** AI 设置弹层：改完汇报 / AI 日报 */
 @Composable
 private fun AiSettingsDialog(
   initial: UserSettings,
   onDismiss: () -> Unit,
   onSave: (AiSettingsPayload) -> Unit,
 ) {
-  var skipConfirm by remember { mutableStateOf(initial.skipConfirm) }
   var reportChanges by remember { mutableStateOf(initial.reportChanges) }
   var dailyEnabled by remember { mutableStateOf(initial.dailyEnabled) }
 
@@ -995,8 +1007,6 @@ private fun AiSettingsDialog(
           reportChanges = it
         }
         Spacer(Modifier.height(8.dp))
-        AiToggle("免确认", "开 = 少弹确认窗（候选计划仍要你勾选）", skipConfirm) { skipConfirm = it }
-        Spacer(Modifier.height(8.dp))
         AiToggle("AI 日报", "开 = 每晚 23:30 生成日报（会调用 AI）", dailyEnabled) { dailyEnabled = it }
         Spacer(Modifier.height(12.dp))
         Text("每人一份，两边互不影响。白名单不受开关影响。", style = PixelType.Small, color = PixelColors.Ink3)
@@ -1007,7 +1017,6 @@ private fun AiSettingsDialog(
             PixelSmallButton("保存", onClick = {
               onSave(
                 AiSettingsPayload(
-                  skipConfirm = skipConfirm,
                   reportChanges = reportChanges,
                   dailyEnabled = dailyEnabled,
                 )

@@ -109,7 +109,7 @@ async function main() {
 
   const server = http.createServer(app);
   require('./ws').initWs(server, db);
-  server.listen(PORT, () => {
+  server.listen(PORT, process.env.HOST || undefined, () => {
     console.log('');
     console.log('  🐾 脚印 V0.1 已启动');
     console.log(`  ➜ 本机访问  http://localhost:${PORT}`);

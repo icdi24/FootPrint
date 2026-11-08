@@ -1462,3 +1462,19 @@ code { background: var(--bg-2); border: 1px solid var(--line-strong); padding: 1
 .require-auth .ra-emoji { font-size: 40px; line-height: 1; margin-bottom: 12px; }
 .require-auth .ra-text { font-size: 14px; color: var(--ink-2); line-height: 1.7; }
 .hall-form-tip { font-size: 11px; color: var(--ink-2); line-height: 1.7; margin-top: 4px; }
+
+/* ===== zoowy v2：提议卡片 / 草案 / 本轮状态（追加，不覆盖已有规则） ===== */
+.zc-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--ink-2); }
+.zc-toolbar .btn { flex: none; min-height: 32px; padding-inline: 10px; }
+.zc-composer { display: flex; flex-direction: column; }
+.zc-error { color: var(--red-deep); font-size: 12px; padding: 6px 0; overflow-wrap: anywhere; }
+.zc-operation-status { color: var(--ink-2); font-size: 12px; padding: 6px 0; overflow-wrap: anywhere; }
+.zc-degraded, .zc-failed { margin-top: 6px; font-size: 10px; color: var(--orange-deep); border-top: 1px dashed var(--line-strong); padding-top: 4px; }
+.zc-card { white-space: normal; border-top: 2px dashed var(--line-strong); margin-top: 8px; padding-top: 8px; }
+.zc-card:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.zc-card p { margin: 4px 0; }
+.zc-card ol, .zc-card ul { padding-inline-start: 20px; margin: 8px 0; }
+.zc-card li + li { margin-top: 8px; }
+.zc-card .btn { margin-top: 8px; height: auto; min-height: 44px; padding: 8px 12px; white-space: normal; }
+.zc-detail { color: var(--ink-2); }
+.zc-next { display: inline-block; margin-inline-start: 4px; padding-inline: 4px; color: var(--green-deep); background: var(--green-soft); }

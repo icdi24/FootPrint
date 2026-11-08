@@ -61,6 +61,11 @@ npm start              # 默认 http://localhost:3000
 | `DATABASE_URL` | `postgres://postgres:footprint_dev_pw@localhost:5432/footprint` | PostgreSQL 连接串 |
 | `DATA_DIR` | `app/data` | 备份、日志、上传图片都在这里 |
 | `FOOTPRINT_VERBOSE` | 空 | 设 1 时把关键日志也打到控制台 |
+| `DEEPSEEK_API_KEY` | 空（**必填**） | 部署级 DeepSeek Key，只放服务器 `.env`；用户不填 Key。`docker-compose.yml` 用 `:?` 必填，缺了容器起不来 |
+| `DEEPSEEK_MODEL` | `deepseek-flash` | 仅 `deepseek-flash` / `deepseek-v4-pro` |
+| `AI_DAILY_LIMIT` | `50` | 日报每日生成上限 |
+
+> v2.0 已移除 `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`，且**不留百炼回退分支**。
 | `SIGNUP_OPEN` | `1`（开） | 置 `0` 立即关闭注册（紧急关闸） |
 | `COOKIE_SECURE` | 空 | 纯 HTTP 下**不能开**；上 HTTPS 后设 `1` 让会话 cookie 带 `Secure` |
 
@@ -115,16 +120,14 @@ Dockerfile / docker-compose.yml
 
 演示账号由 `cd app && node scripts/seed-demo.js` 在本地空库生成（密码见脚本，仅限本地演示）。云端账号密码一律由管理员后台下发并定期轮换，不要沿用演示密码。
 
-## Agent 工作流（zoowy）
+## Agent 工作流（zoowy v2）
 
-zoowy = 一个网关 + 4 个工作流（`plan` 规划 / `progress` 进度 / `daily` 日报 / `chat` 常驻问答），后端自己调阿里百炼 OpenAI 兼容 API，不依赖开发会话里的 agent。实现细节、技术栈、表结构、API、触发链路与安全边界全部记在 [Agent工作流实现文档.md](Agent工作流实现文档.md)；设计决策与验收清单在 [待办计划-AI工作流与双端改造.md](待办计划-AI工作流与双端改造.md)。
+zoowy 是一条**聊天主线**：chat 走 tool-calling loop，`progress` / `daily` 是后台工作流，`planning` 三件套承担规划草案。后端统一调用 **DeepSeek 官方 API**（部署级 `DEEPSEEK_API_KEY`，用户永不填 Key）。用户明确请求的单条写入直接完成；模型主动提议的画像 / 批量改动要先出卡片、由用户点确认才写入。实现细节见 [Agent工作流实现文档.md](Agent工作流实现文档.md)；本次融合的取舍与上线顺序见 [融合计划-zoowy-v2.md](融合计划-zoowy-v2.md)；早期设计决策见 [待办计划-AI工作流与双端改造.md](待办计划-AI工作流与双端改造.md)（部分描述已被 v2.0 取代）。
 
-> **维护约定**：任何涉及 agent 工作流的改动 —— 工具注册表、白名单、提示词、输出 schema、loop 参数、触发点、表结构、定时任务、会话 / 可见性、前端与 Android 入口、配置项 —— **必须在同一个提交里同步更新 `Agent工作流实现文档.md`**，并在该文档 §12 追加一行变更记录。完整触发清单与最小动作见文档 §0。
+> **维护约定**：任何涉及 agent 工作流的改动 —— 工具注册表、白名单、提示词、输出 schema、loop 参数、触发点、表结构、定时任务、会话 / 可见性、前端与 Android 入口、配置项 —— **必须在同一个提交里同步更新 `Agent工作流实现文档.md`**，并在该文档 §12 追加一行变更记录。完整触发清单与最小动作见文档 §0。改库还要同步 [数据库设计实现文档.md](数据库设计实现文档.md)。
 
-自动兜底：改完跑 `node app/scripts/check-agent-doc.js`；增删 / 改名工具或工作流却没同步文档时，脚本会非零退出。
+自动兜底：改完跑 `node app/scripts/check-agent-doc.js` 和 `cd app && npm run check-schema-doc`；增删 / 改名工具或表却没同步文档时，脚本会非零退出。
 
-聊天工具轮次超限或模型超时不再报 500：会降级回复「这轮查得有点多，先说到这儿」，并保留这一轮的用户消息与错误记录（v1.3）。
+聊天工具轮次超限或模型超时不再报 500，会降级回复并保留这一轮的用户消息与错误记录；「帮我建个大目标」「给已有大目标配第一期小目标」可以直接说，zoowy 会自己查 id。画像改动会告诉你改了什么（`reportChanges`），留痕与版本回滚始终写入。
 
-现在直接跟 zoowy 说「帮我建个大目标」就行：它会先查已有目标避免重复，再替你创建、返回 id，之后可以接着让它读详情或配第一期小目标（v1.4）。
-
-当前已知差距（Android 端仍缺 zoowy 聊天 / 拆计划、`skipConfirm` 未接进工作流、plan 两处错误码等）列在文档 §11；修掉一条就从那里移走。`reportChanges` 已于 v1.1 接线：zoowy 每次改动画像会告诉你改了什么，Web「我」页与 Android「我」页都有红点、明细、版本回滚（v1.2 双端对齐）；关掉开关只是不推送，留痕照写。
+当前已知差距（第二批外围能力、Android 真机验证、独立截止日期列等）列在文档 §11；修掉一条就从那里移走。
