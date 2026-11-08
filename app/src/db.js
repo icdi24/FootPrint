@@ -428,6 +428,8 @@ async function openDb(connString) {
   await pool.query('ALTER TABLE goals ADD COLUMN IF NOT EXISTS planned_date TEXT');
   await pool.query('ALTER TABLE goals ADD COLUMN IF NOT EXISTS plan_order INTEGER');
   await pool.query("ALTER TABLE goals ADD COLUMN IF NOT EXISTS plan_status TEXT");
+  // 迁移：zoowy v2 草案应用时形成小目标前置依赖链（whtmo 引入，融合时补齐）
+  await pool.query('ALTER TABLE goals ADD COLUMN IF NOT EXISTS prerequisite_goal_id INTEGER');
   // 迁移：画像块分享标记（P3：默认仅自己，主动分享后对方可见）
   await pool.query('ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS shared INTEGER NOT NULL DEFAULT 0');
   // partner_id 仅保留作回滚兼容，新代码一律读 pair_members
