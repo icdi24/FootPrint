@@ -132,12 +132,12 @@ module.exports = function pairRoutes(db) {
           await c.run("UPDATE redemptions SET status = 'cancelled' WHERE id = ?", [red.id]);
           refunded += 1;
         }
-        // 4) 断开关系
-        await c.run('DELETE FROM pair_members WHERE user_id = ?', [req.user.id]);
-        const left = await c.get('SELECT COUNT(*) AS c FROM pair_members WHERE pair_id = ?', [pid]);
-        if (Number(left.c) === 0) {
-          await c.run("UPDATE pairs SET status = 'dissolved', dissolved_at = ? WHERE id = ?", [now, pid]);
-        }
+        // 4) 断开关系：这是严格 2 人组，单方解绑即解散整组，
+        //    必须把双方都从 pair_members 移除并把组置 dissolved。
+        //    否则另一方会留在「有组但没搭档」的幽灵状态：
+        //    currentPairId 仍非空 → 系统当成「已绑定」，既看不到搭档、又发不了大厅。
+        await c.run('DELETE FROM pair_members WHERE pair_id = ?', [pid]);
+        await c.run("UPDATE pairs SET status = 'dissolved', dissolved_at = ? WHERE id = ?", [now, pid]);
         // 5) 审计
         await c.run('INSERT INTO pair_events (pair_id, user_id, action, detail, created_at) VALUES (?, ?, ?, ?, ?)',
           [pid, req.user.id, 'unbind',

@@ -13,6 +13,7 @@ import me.footprint.app.net.AppUsage
 import me.footprint.app.net.ChatMessage
 import me.footprint.app.net.ChatWebSocket
 import me.footprint.app.net.HomeResponse
+import me.footprint.app.net.HallState
 import me.footprint.app.net.PartnerResponse
 import me.footprint.app.net.Session
 import me.footprint.app.net.UserDto
@@ -207,6 +208,103 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (open) _chatUnread.value = 0
     }
 
+    // ---------------- 匹配大厅 ----------------
+
+    private val _hall = MutableStateFlow<HallState?>(null)
+    val hall: StateFlow<HallState?> = _hall.asStateFlow()
+
+    /** 拉取大厅全部状态（我的发布 + 收/发邀请 + 列表） */
+    fun loadHall() {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                _hall.value = Api.getHall(token)
+            } catch (e: Exception) {
+                // 静默：大厅拿不到数据就保持旧状态
+            }
+        }
+    }
+
+    fun publishHall(note: String, onDone: (String?) -> Unit) {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                Api.publishHall(token, note)
+                _hall.value = Api.getHall(token)
+                onDone(null)
+            } catch (e: Exception) {
+                onDone(e.message ?: "发布失败")
+            }
+        }
+    }
+
+    fun withdrawHall(onDone: (String?) -> Unit) {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                Api.withdrawHall(token)
+                _hall.value = Api.getHall(token)
+                onDone(null)
+            } catch (e: Exception) {
+                onDone(e.message ?: "撤回失败")
+            }
+        }
+    }
+
+    fun inviteHall(toUserId: Long, onDone: (String?) -> Unit) {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                Api.inviteHall(token, toUserId)
+                _hall.value = Api.getHall(token)
+                onDone(null)
+            } catch (e: Exception) {
+                onDone(e.message ?: "邀请失败")
+            }
+        }
+    }
+
+    /** 接受邀请并组队；成功后刷新首页/搭档数据 */
+    fun acceptHallInvite(id: Long, onDone: (String?) -> Unit) {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                Api.acceptHallInvite(token, id)
+                _hall.value = null
+                onDone(null)
+                refreshAll()
+            } catch (e: Exception) {
+                onDone(e.message ?: "接受失败")
+            }
+        }
+    }
+
+    fun declineHallInvite(id: Long, onDone: (String?) -> Unit) {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                Api.declineHallInvite(token, id)
+                _hall.value = Api.getHall(token)
+                onDone(null)
+            } catch (e: Exception) {
+                onDone(e.message ?: "操作失败")
+            }
+        }
+    }
+
+    fun cancelHallInvite(id: Long, onDone: (String?) -> Unit) {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                Api.cancelHallInvite(token, id)
+                _hall.value = Api.getHall(token)
+                onDone(null)
+            } catch (e: Exception) {
+                onDone(e.message ?: "操作失败")
+            }
+        }
+    }
+
     init {
         // 冷启动时若已登录（上次会话留存），也要把 WS 连上并拉一次未读
         if (_loggedIn.value) {
@@ -262,6 +360,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _chatUnread.value = 0
         _chatPartner.value = null
         _chatLoaded.value = false
+        _hall.value = null
     }
 
     // ---------------- 刷新 / 上报 ----------------

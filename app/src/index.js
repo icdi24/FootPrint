@@ -64,6 +64,7 @@ async function main() {
   app.use('/api', zoowyRoutes(db));
   app.use('/api', require('./routes/pair')(db));
   app.use('/api', require('./routes/chat')(db));
+  app.use('/api', require('./routes/hall')(db));
   app.use('/api', require('./routes/admin')(db));
 
   // AI 日报定时（P2-#12）：每晚 23:30 两人各一份；幂等，服务重启当天会补跑

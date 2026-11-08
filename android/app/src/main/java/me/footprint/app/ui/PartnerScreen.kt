@@ -95,6 +95,7 @@ fun PartnerScreen(vm: AppViewModel, onOpenUsageSettings: () -> Unit) {
   val home by vm.home.collectAsStateWithLifecycle()
   val myAvatar = home?.me?.avatar.orEmpty()
   var chatOpen by remember { mutableStateOf(false) }
+  var hallOpen by remember { mutableStateOf(false) }
 
   // 拉数据：成功后写进 state；失败写 error
   fun load() {
@@ -159,7 +160,13 @@ fun PartnerScreen(vm: AppViewModel, onOpenUsageSettings: () -> Unit) {
             Spacer(Modifier.height(6.dp))
             Text(err, style = PixelType.Small, color = PixelColors.OrangeDeep)
             Spacer(Modifier.height(12.dp))
-            PixelSmallButton(text = "重试", onClick = { load() })
+            Row {
+              if (err == "还没有搭档") {
+                PixelSmallButton(text = "去匹配大厅", filled = true, onClick = { hallOpen = true })
+                Spacer(Modifier.width(8.dp))
+              }
+              PixelSmallButton(text = "重试", onClick = { load() })
+            }
           }
         }
         Spacer(Modifier.height(12.dp))
@@ -287,6 +294,11 @@ fun PartnerScreen(vm: AppViewModel, onOpenUsageSettings: () -> Unit) {
   // 搭子私聊弹层
   if (chatOpen) {
     ChatScreen(vm = vm, onClose = { chatOpen = false })
+  }
+
+  // 匹配大厅弹层（关闭后重新拉一遍：若已组队，则从无搭子态切到有搭档）
+  if (hallOpen) {
+    HallScreen(vm = vm, onClose = { hallOpen = false; load() })
   }
 }
 

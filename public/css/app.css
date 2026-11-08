@@ -1393,3 +1393,33 @@ code { background: var(--bg-2); border: 1px solid var(--line-strong); padding: 1
 }
 .at-switch.on { background: var(--green-soft); border-color: var(--green); }
 .at-switch.on i { left: 22px; background: var(--green); }
+
+/* ===== 匹配大厅 ===== */
+.hall-body { min-width: 0; }
+.hall-sec { margin-bottom: 16px; }
+.hall-sec-title { font-size: 12px; font-family: var(--font-px-mono); color: var(--ink-2); margin-bottom: 8px; }
+.hall-mycard, .hall-mynone {
+  background: var(--card); border: 2px solid var(--line-strong); box-shadow: var(--sh-px-sm);
+  padding: 12px;
+}
+.hall-mynone { text-align: center; font-size: 12px; line-height: 1.8; color: var(--ink-2); padding: 18px 12px; }
+.hall-mynone .btn { margin-top: 10px; }
+.hall-mynote { font-size: 13px; line-height: 1.8; }
+.hall-mynote .muted { color: var(--ink-2); }
+.hall-mysum, .hall-sum { font-size: 11px; color: var(--ink-2); line-height: 1.7; margin-top: 6px; }
+.hall-card, .hall-invite {
+  background: var(--card); border: 2px solid var(--line); box-shadow: var(--sh-px-sm);
+  padding: 12px; margin-bottom: 8px;
+}
+.hall-card-head { display: flex; align-items: center; gap: 8px; }
+.hall-avatar { font-size: 22px; flex: none; }
+.hall-who { flex: 1; min-width: 0; }
+.hall-nick { font-size: 13px; font-family: var(--font-px-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hall-time { font-size: 11px; color: var(--ink-2); margin-top: 2px; }
+.hall-note { font-size: 12px; line-height: 1.8; margin-top: 8px; }
+.hall-btn-row { display: flex; gap: 8px; margin-top: 10px; }
+.hall-btn-row .btn { flex: 1; }
+.hall-wait { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--ink-2); }
+.hall-entry-actions { display: flex; gap: 8px; margin-top: 4px; }
+.hall-entry-actions .btn { flex: 1; }
+.hall-form-tip { font-size: 11px; color: var(--ink-2); line-height: 1.7; margin-top: 4px; }

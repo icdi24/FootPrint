@@ -21,7 +21,10 @@ const PartnerPage = {
           <div class="empty big">
             <div class="empty-emoji">🤝</div>
             <div>生成邀请码，请对方加入后就能互相看见。</div>
-            <button class="btn primary" id="partner-invite">生成邀请码</button>
+            <div class="hall-entry-actions">
+              <button class="btn primary" id="partner-invite">生成邀请码</button>
+              <button class="btn ghost" id="partner-hall">去匹配大厅</button>
+            </div>
           </div>
         </section>`;
       root.querySelector('#partner-invite').addEventListener('click', async () => {
@@ -34,6 +37,7 @@ const PartnerPage = {
           });
         } catch (e) { UI.toast(e.message); }
       });
+      root.querySelector('#partner-hall').addEventListener('click', () => HallPage.open());
       return;
     }
     const { partner, partnerStats, myStats, partnerGoals, partnerToday, today, pendingVerifications } = data;

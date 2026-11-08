@@ -508,6 +508,46 @@ object Api {
     /** 复用同一 OkHttp 配置建 WebSocket（供 ChatWebSocket 用） */
     fun newWebSocket(request: Request, listener: okhttp3.WebSocketListener) =
         client.newWebSocket(request, listener)
+
+    // ---------------- 匹配大厅 ----------------
+
+    /** GET /api/hall —— 我的发布 + 收/发邀请 + 大厅列表 */
+    suspend fun getHall(token: String): HallState {
+        val text = send("GET", "api/hall", null, token)
+        return json.decodeFromString(HallState.serializer(), text)
+    }
+
+    /** POST /api/hall {note} —— 发布/更新我的找搭子信息 */
+    suspend fun publishHall(token: String, note: String) {
+        val body = json.encodeToString(PublishHallRequest.serializer(), PublishHallRequest(note))
+        send("POST", "api/hall", body, token)
+    }
+
+    /** DELETE /api/hall —— 撤回我的发布 */
+    suspend fun withdrawHall(token: String) {
+        send("DELETE", "api/hall", null, token)
+    }
+
+    /** POST /api/hall/invite {toUserId} —— 邀请对方 */
+    suspend fun inviteHall(token: String, toUserId: Long) {
+        val body = json.encodeToString(HallInviteRequest.serializer(), HallInviteRequest(toUserId))
+        send("POST", "api/hall/invite", body, token)
+    }
+
+    /** POST /api/hall/invite/{id}/accept —— 接受邀请（事务化成组） */
+    suspend fun acceptHallInvite(token: String, id: Long) {
+        send("POST", "api/hall/invite/$id/accept", "{}", token)
+    }
+
+    /** POST /api/hall/invite/{id}/decline —— 拒绝收到的邀请 */
+    suspend fun declineHallInvite(token: String, id: Long) {
+        send("POST", "api/hall/invite/$id/decline", "{}", token)
+    }
+
+    /** POST /api/hall/invite/{id}/cancel —— 取消我发出的邀请 */
+    suspend fun cancelHallInvite(token: String, id: Long) {
+        send("POST", "api/hall/invite/$id/cancel", "{}", token)
+    }
 }
 
 // ---------------- 打卡 / 积分相关数据类 ----------------
@@ -1059,3 +1099,53 @@ data class PlanGoalDto(
     val big_goal_id: Long = 0,
     val big_goal_title: String = "",
 )
+
+// ---------------- 匹配大厅 ----------------
+
+@Serializable
+data class HallUser(
+    val id: Long = 0,
+    val nickname: String = "",
+    val avatar: String? = null,
+)
+
+@Serializable
+data class HallListing(
+    val userId: Long = 0,
+    val nickname: String = "",
+    val avatar: String? = null,
+    val note: String = "",
+    val goalSummary: String = "",
+    val createdAt: String = "",
+    val relation: String = "none", // none / invitedByMe / invitedMe
+)
+
+/** 我的发布（后端只回 note/goalSummary/createdAt，不含 userId 等） */
+@Serializable
+data class HallMyListing(
+    val note: String = "",
+    val goalSummary: String = "",
+    val createdAt: String = "",
+)
+
+@Serializable
+data class HallInvite(
+    val id: Long = 0,
+    val fromUser: HallUser? = null,
+    val toUser: HallUser? = null,
+    val createdAt: String = "",
+)
+
+@Serializable
+data class HallState(
+    val myListing: HallMyListing? = null,
+    val incoming: List<HallInvite> = emptyList(),
+    val outgoing: List<HallInvite> = emptyList(),
+    val listings: List<HallListing> = emptyList(),
+)
+
+@Serializable
+data class PublishHallRequest(val note: String)
+
+@Serializable
+data class HallInviteRequest(val toUserId: Long)
