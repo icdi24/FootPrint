@@ -22,10 +22,10 @@ services:
       - PORT=3000
       - DATA_DIR=/app/data
       - DATABASE_URL=postgres://postgres:${POSTGRES_PASSWORD}@db:5432/footprint
-      # AI 底座（P0-3）：密钥只在服务器 .env，compose 注入容器，不下发到 Web/Android
-      - AI_BASE_URL=${AI_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
-      - AI_API_KEY=${AI_API_KEY:?请在 .env 里设置 AI_API_KEY}
-      - AI_MODEL=${AI_MODEL:-qwen-plus}
+      # 统一调用 DeepSeek 官方 API。凭据由服务端使用。
+      - DEEPSEEK_CREDENTIAL_KEY=${DEEPSEEK_CREDENTIAL_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-flash}
     volumes:
       - ./runtime/data:/app/data
     depends_on:
