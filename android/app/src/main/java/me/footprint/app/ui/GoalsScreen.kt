@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.launch
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.footprint.app.net.Api
 import me.footprint.app.net.ApiException
 import me.footprint.app.net.BigGoalDetailResponse
@@ -88,6 +89,11 @@ private val DIFFICULTY_LABELS = listOf("1 轻松", "2 简单", "3 中等", "4 �
 
 @Composable
 fun GoalsScreen(vm: AppViewModel) {
+  val loggedIn by vm.loggedIn.collectAsStateWithLifecycle()
+  if (!loggedIn) {
+    GuestEmpty(vm = vm, emoji = "🎯", title = "登录后一起定目标", sub = "两个人的打卡目标，从登录开始")
+    return
+  }
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
 

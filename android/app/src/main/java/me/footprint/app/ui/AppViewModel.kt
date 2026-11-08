@@ -41,6 +41,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _login = MutableStateFlow(LoginState())
     val login: StateFlow<LoginState> = _login.asStateFlow()
 
+    // ---------------- 注册 ----------------
+
+    data class RegisterState(
+        val username: String = "",
+        val avatar: String = "🐱",
+        val busy: Boolean = false,
+        val error: String? = null,
+    )
+
+    private val _register = MutableStateFlow(RegisterState())
+    val register: StateFlow<RegisterState> = _register.asStateFlow()
+
+    // ---------------- 认证入口（访客点「登录/注册」跳转） ----------------
+
+    /** null = 不显示认证页；"login" / "register" = 显示对应认证页 */
+    private val _authMode = MutableStateFlow<String?>(null)
+    val authMode: StateFlow<String?> = _authMode.asStateFlow()
+
+    fun showAuth(mode: String) {
+        _authMode.value = mode
+    }
+
+    fun closeAuth() {
+        _authMode.value = null
+    }
+
     // ---------------- 会话 ----------------
 
     private val _loggedIn = MutableStateFlow(Session.isLoggedIn(app))
@@ -319,6 +345,43 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _login.value = _login.value.copy(username = v, error = null)
     }
 
+    fun onRegisterUsernameChange(v: String) {
+        _register.value = _register.value.copy(username = v, error = null)
+    }
+
+    fun onRegisterAvatarChange(avatar: String) {
+        _register.value = _register.value.copy(avatar = avatar)
+    }
+
+    fun register(username: String, password: String, avatar: String) {
+        val name = username.trim()
+        if (name.isEmpty() || password.isEmpty()) {
+            _register.value = _register.value.copy(error = "用户名和密码都要填")
+            return
+        }
+        _register.value = _register.value.copy(busy = true, error = null)
+        viewModelScope.launch {
+            try {
+                val resp = Api.register(name, password, avatar) { token ->
+                    Session.saveToken(getApplication(), token)
+                    Session.saveUsername(getApplication(), name)
+                }
+                _myName.value = resp.user?.username ?: name
+                _loggedIn.value = true
+                _register.value = RegisterState()
+                _authMode.value = null
+                refreshAll()
+                connectChatWs()
+                loadChat()
+            } catch (e: Exception) {
+                _register.value = _register.value.copy(
+                    busy = false,
+                    error = e.message ?: "注册失败",
+                )
+            }
+        }
+    }
+
     fun login(username: String, password: String) {
         val name = username.trim()
         if (name.isEmpty() || password.isEmpty()) {
@@ -335,6 +398,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 _myName.value = resp.user?.username ?: name
                 _loggedIn.value = true
                 _login.value = _login.value.copy(busy = false, error = null)
+                _authMode.value = null
                 refreshAll()
                 connectChatWs()
                 loadChat()
@@ -356,6 +420,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _partner.value = null
         _syncNote.value = null
         _login.value = LoginState()
+        _register.value = RegisterState()
+        _authMode.value = null
         _chatMessages.value = emptyList()
         _chatUnread.value = 0
         _chatPartner.value = null

@@ -21,6 +21,9 @@ import java.util.concurrent.TimeUnit
 data class LoginRequest(val username: String, val password: String)
 
 @Serializable
+data class RegisterRequest(val username: String, val password: String, val avatar: String)
+
+@Serializable
 data class LoginResponse(val user: UserDto? = null)
 
 @Serializable
@@ -194,6 +197,33 @@ object Api {
         // 优先用响应头里的；兜底再用 CookieJar 接到的
         val token = (fromHeader ?: cookieJar.session)?.takeIf { it.isNotBlank() }
             ?: throw ApiException("登录成功但没拿到会话 Cookie，检查是否连到了正确的后端")
+        onToken(token)
+        return resp ?: LoginResponse()
+    }
+
+    /**
+     * 注册：POST /api/register（免邀请码，只建账号、不建组）。
+     * 成功后同样拿到会话 Cookie，走 onToken 存起来。
+     */
+    suspend fun register(
+        username: String,
+        password: String,
+        avatar: String,
+        onToken: (String) -> Unit,
+    ): LoginResponse {
+        val body = json.encodeToString(
+            RegisterRequest.serializer(),
+            RegisterRequest(username.trim(), password, avatar),
+        )
+        var fromHeader: String? = null
+        val text = send("POST", "api/register", body) { cookies ->
+            fromHeader = cookies[COOKIE_NAME]
+        }
+        val resp = runCatching {
+            json.decodeFromString(LoginResponse.serializer(), text)
+        }.getOrNull()
+        val token = (fromHeader ?: cookieJar.session)?.takeIf { it.isNotBlank() }
+            ?: throw ApiException("注册成功但没拿到会话 Cookie，检查是否连到了正确的后端")
         onToken(token)
         return resp ?: LoginResponse()
     }

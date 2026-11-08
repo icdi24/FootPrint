@@ -1,6 +1,10 @@
 // 我的页：资料、统计、流水、系数设置、数据与备份。
 const MePage = {
   async render(root) {
+    if (App.isGuest()) {
+      this.renderGuest(root);
+      return;
+    }
     root.innerHTML = '<div class="page-loading">加载中…</div>';
     let stats;
     try {
@@ -121,6 +125,69 @@ const MePage = {
     });
     this.loadPairCard(root);
     this.loadLedger(root);
+  },
+
+  // 游客视图：完整「我的」界面结构（资料卡、统计、菜单入口），数据为空，点任何入口跳登录。
+  renderGuest(root) {
+    const statItems = [
+      ['本月得分', '—', 'coin'],
+      ['当前余额', '—', 'coin'],
+      ['最长连续', '—', 'flame'],
+      ['本月完成率', '—', 'target'],
+      ['时间投入', '—', 'clock'],
+      ['被质疑次数', '—', 'alert'],
+    ];
+    root.innerHTML = `
+      <header class="page-head">
+        <div>
+          <div class="hello">我的</div>
+          <div class="date-line">登录后查看你的脚印</div>
+        </div>
+      </header>
+      <section class="profile-card">
+        <span class="ps-avatar big">🐾</span>
+        <div class="pc-main">
+          <div class="pc-name">游客</div>
+          <div class="pc-meta">登录后和对方互相监督</div>
+        </div>
+        <button class="ghost-btn">${window.icon('edit')} 改用户名</button>
+        <button class="ghost-btn">${window.icon('lock')} 改密码</button>
+      </section>
+      <section class="sec">
+        <div class="sec-head"><h2>这个月</h2></div>
+        <div class="stats-grid">
+          ${statItems.map(([k, v, ic]) => `
+            <div class="stat-cell">
+              <span class="sc-ico">${window.icon(ic)}</span>
+              <div class="sc-val">${v}</div>
+              <div class="sc-label">${k}</div>
+            </div>`).join('')}
+        </div>
+      </section>
+      <section class="sec">
+        <div class="sec-head"><h2>zoowy</h2></div>
+        <div class="menu-list">
+          <button class="menu-row">🐾<span>和 zoowy 聊聊</span><span class="menu-note">知道你的目标与打卡</span>${window.icon('right')}</button>
+          <button class="menu-row">${window.icon('me')}<span>我的画像</span><span class="menu-note">仅自己可见</span>${window.icon('right')}</button>
+        </div>
+      </section>
+      <section class="sec">
+        <div class="sec-head"><h2>设置</h2></div>
+        <div class="menu-list">
+          <button class="menu-row">🐾<span>AI 设置</span><span class="menu-note">确认与汇报</span>${window.icon('right')}</button>
+          <button class="menu-row">${window.icon('gear')}<span>积分系数</span><span class="menu-note">规则可调</span>${window.icon('right')}</button>
+          <button class="menu-row">${window.icon('doc')}<span>数据与备份</span><span class="menu-note">导出 · 快照</span>${window.icon('right')}</button>
+        </div>
+      </section>
+      <section class="sec">
+        <div class="sec-head"><h2>我的搭档</h2><span class="sec-count">邀请 · 绑定 · 解绑</span></div>
+        <div class="menu-list">
+          <button class="menu-row">🤝<span>配对 / 邀请码</span><span class="menu-note">登录后可见</span>${window.icon('right')}</button>
+        </div>
+      </section>
+      <p class="about-line">脚印 · 两个人互相看得见</p>
+    `;
+    UI.guestGate(root);
   },
 
   // ---- 我的搭档：邀请码 / 配对请求 / 解绑 / 组内动态 ----

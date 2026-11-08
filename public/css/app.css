@@ -1440,4 +1440,25 @@ code { background: var(--bg-2); border: 1px solid var(--line-strong); padding: 1
 .hall-wait { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--ink-2); }
 .hall-entry-actions { display: flex; gap: 8px; margin-top: 4px; }
 .hall-entry-actions .btn { flex: 1; }
+
+/* 访客（未登录）空状态 + 登录/注册入口 */
+.guest-empty, .guest-home {
+  text-align: center;
+  padding: 72px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.guest-emoji { font-size: 48px; line-height: 1; margin-bottom: 12px; }
+.guest-emoji.big { font-size: 64px; }
+.guest-title { font-size: 20px; font-weight: 600; }
+.guest-sub { font-size: 13px; color: var(--ink-2); line-height: 1.7; max-width: 280px; margin-bottom: 16px; }
+.auth-entry-actions { display: flex; gap: 12px; margin-top: 12px; }
+.auth-entry-actions .btn { min-width: 96px; }
+
+/* 「尚未登录/注册」弹窗 */
+.require-auth { text-align: center; padding: 8px 4px 4px; }
+.require-auth .ra-emoji { font-size: 40px; line-height: 1; margin-bottom: 12px; }
+.require-auth .ra-text { font-size: 14px; color: var(--ink-2); line-height: 1.7; }
 .hall-form-tip { font-size: 11px; color: var(--ink-2); line-height: 1.7; margin-top: 4px; }

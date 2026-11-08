@@ -1,6 +1,10 @@
 // 愿望单页：商品卡 + 兑换 + 兑换记录（V0.1 商品类）。
 const WishPage = {
   async render(root) {
+    if (App.isGuest()) {
+      this.renderGuest(root);
+      return;
+    }
     root.innerHTML = '<div class="page-loading">加载中…</div>';
     try {
       await this.draw(root);
@@ -8,6 +12,35 @@ const WishPage = {
       root.innerHTML = `<div class="empty big"><div class="empty-emoji">😿</div><div>${UI.esc(e.message)}</div><button class="btn primary" id="retry">重试</button></div>`;
       root.querySelector('#retry').addEventListener('click', () => WishPage.render(root));
     }
+  },
+
+  // 游客视图：完整界面（新建按钮、余额横幅、愿望列表），数据为空，点任何入口跳登录。
+  renderGuest(root) {
+    root.innerHTML = `
+      <header class="page-head wish-head">
+        <div>
+          <div class="hello">愿望单</div>
+          <div class="date-line">攒够分，换点真的</div>
+        </div>
+        <button class="ghost-btn" id="add-wish">${window.icon('plus')} 新建</button>
+      </header>
+      <section class="wish-balance">
+        <div>
+          <div class="wb-label">可用积分</div>
+          <div class="wb-val">0</div>
+        </div>
+        <div class="wb-yuan">≈ ¥0<span> · 1 元 = 10 分</span></div>
+      </section>
+      <section class="sec">
+        <div class="sec-head"><h2>想要的东西</h2></div>
+        <div class="empty">
+          <div class="empty-emoji">🎁</div>
+          <div class="empty-title">愿望单还是空的</div>
+          <div class="empty-sub">把想买的东西放进来，填上真实价格，系统按 1 元 = 10 分换算</div>
+        </div>
+      </section>
+    `;
+    UI.guestGate(root);
   },
 
   async draw(root) {

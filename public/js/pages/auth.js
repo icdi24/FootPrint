@@ -39,6 +39,7 @@ const AuthPage = (() => {
       ${field('密码', 'login-pw', 'password', '密码')}
       <button class="btn primary block" id="login-btn">进入脚印</button>
       <button class="link-btn" id="to-register">还没有账号？注册</button>
+      <button class="link-btn" id="back-browse">← 返回逛逛</button>
       <p class="auth-hint" id="auth-err"></p>`;
     const err = card.querySelector('#auth-err');
     const doLogin = async () => {
@@ -49,7 +50,7 @@ const AuthPage = (() => {
         const data = await api.post('/api/login', { username, password });
         App.state.me = data.user;
         UI.toast(`欢迎回来，${data.user.username} 🐾`, 'ok');
-        App.showShell();
+        App.onAuthed();
       } catch (e) {
         err.textContent = e.message;
       }
@@ -57,6 +58,7 @@ const AuthPage = (() => {
     card.querySelector('#login-btn').addEventListener('click', doLogin);
     card.querySelector('#login-pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
     card.querySelector('#to-register').addEventListener('click', () => renderRegister(card));
+    card.querySelector('#back-browse').addEventListener('click', () => App.showShell());
   }
 
   function renderRegister(card) {
@@ -69,6 +71,7 @@ const AuthPage = (() => {
       ${avatarRow('av-row')}
       <button class="btn primary block" id="rg-btn">注册</button>
       <button class="link-btn" id="to-login">已有账号？去登录</button>
+      <button class="link-btn" id="back-browse">← 返回逛逛</button>
       <p class="auth-hint" id="rg-err"></p>`;
     const err = card.querySelector('#rg-err');
     let avatar = AVATARS[0];
@@ -90,7 +93,7 @@ const AuthPage = (() => {
         const data = await api.post('/api/register', { username, password, avatar });
         App.state.me = data.user;
         UI.toast(`欢迎加入，${data.user.username} 🐾`, 'ok');
-        App.showShell();
+        App.onAuthed();
       } catch (e) {
         err.textContent = e.message;
       }
@@ -98,6 +101,7 @@ const AuthPage = (() => {
     card.querySelector('#rg-btn').addEventListener('click', submit);
     card.querySelector('#rg-pw2').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
     card.querySelector('#to-login').addEventListener('click', () => renderLogin(card));
+    card.querySelector('#back-browse').addEventListener('click', () => App.showShell());
   }
 
   return { render };

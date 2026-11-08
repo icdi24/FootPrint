@@ -76,18 +76,32 @@ const App = (() => {
     document.getElementById('auth-screen').classList.add('hidden');
     document.getElementById('app-shell').classList.remove('hidden');
     renderTabbar();
-    showTab('home');
-    if (typeof Chat !== 'undefined') Chat.connect();
+    showTab(state.tab);
+    if (state.me && typeof Chat !== 'undefined') Chat.connect();
   }
 
-  function showAuth() {
+  // mode: 'login' | 'register'
+  function showAuth(mode = 'login') {
     document.getElementById('app-shell').classList.add('hidden');
     document.getElementById('auth-screen').classList.remove('hidden');
     if (typeof Chat !== 'undefined') Chat.disconnect();
-    if (typeof AuthPage !== 'undefined') AuthPage.render(document.getElementById('auth-screen'));
+    if (typeof AuthPage !== 'undefined') AuthPage.render(document.getElementById('auth-screen'), { register: mode === 'register' });
+  }
+
+  // 访客：未登录（仍能逛界面，只是不能使用功能）
+  function isGuest() { return !state.me; }
+
+  // 登录/注册成功后：拉积分系数 + 回到当前 Tab 重渲染
+  async function onAuthed() {
+    try {
+      const cfg = await api.get('/api/settings');
+      state.pointsCfg = cfg.points;
+    } catch (e) { /* 系数拉不到就用默认 */ }
+    showShell();
   }
 
   async function boot() {
+    // 先探测登录态，但无论是否登录都进壳：未登录即「访客可逛」模式
     try {
       const me = await api.get('/api/me');
       state.me = me.user;
@@ -95,13 +109,13 @@ const App = (() => {
         const cfg = await api.get('/api/settings');
         state.pointsCfg = cfg.points;
       } catch (e) { /* 系数拉不到就用默认 */ }
-      showShell();
     } catch (e) {
-      showAuth();
+      state.me = null;
     }
+    showShell();
   }
 
-  return { state, pages, register, showTab, showShell, showAuth, boot, setChatUnread(n) { state.chatUnread = n; renderTabbar(); } };
+  return { state, pages, register, showTab, showShell, showAuth, isGuest, onAuthed, boot, setChatUnread(n) { state.chatUnread = n; renderTabbar(); } };
 })();
 
 document.addEventListener('DOMContentLoaded', () => App.boot());

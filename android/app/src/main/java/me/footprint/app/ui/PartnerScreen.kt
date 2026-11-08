@@ -89,6 +89,11 @@ private sealed class RejectTarget {
 
 @Composable
 fun PartnerScreen(vm: AppViewModel, onOpenUsageSettings: () -> Unit) {
+  val loggedIn by vm.loggedIn.collectAsStateWithLifecycle()
+  if (!loggedIn) {
+    GuestEmpty(vm = vm, emoji = "🤝", title = "登录后连接你的搭档", sub = "两个人互相看得见，登录后开始配对")
+    return
+  }
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
   val state = remember { PartnerState() }
