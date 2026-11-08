@@ -8,8 +8,220 @@
   <title>脚印 · 两个人的打卡与积分</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'><rect width='16' height='16' fill='%233F7C37'/><path fill='%23FFFDF6' d='M2 4h2v1h-2zM5 4h2v1h-2zM8 4h2v1h-2zM11 4h2v1h-2zM2 5h2v1h-2zM5 5h2v1h-2zM8 5h2v1h-2zM11 5h2v1h-2zM2 6h2v1h-2zM5 6h2v1h-2zM8 6h2v1h-2zM11 6h2v1h-2zM2 7h12v1H2zM2 8h12v1H2zM2 9h12v1H2zM3 10h10v1H3zM4 11h8v1H4z'/></svg>"/>
   <link rel="stylesheet" href="css/app.css"/>
+  <link rel="stylesheet" href="css/home-final.css"/>
+  <link rel="stylesheet" href="css/partner-final.css"/>
+  <link rel="stylesheet" href="css/wish-final.css"/>
+  <link rel="stylesheet" href="css/me-final.css"/>
+  <style>
+    /* 方向 A：现代简约 · 呼吸感与留白 · 双人脚印呼吸 Loading */
+    #stardew-loader {
+      position: fixed;
+      inset: 0;
+      background: #FAF7F0;
+      background-image: radial-gradient(#E8DFC8 1.2px, transparent 1.2px);
+      background-size: 14px 14px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 99999;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      transition: opacity 0.4s ease, visibility 0.4s;
+    }
+    #stardew-loader.loaded {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+    .minimal-loader-box {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 24px;
+      animation: floatGentle 3s ease-in-out infinite;
+    }
+    @keyframes floatGentle {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-4px); }
+    }
+    /* 双人脚印踏步动效区 */
+    .footsteps-stage {
+      position: relative;
+      width: 120px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .paw-unit {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+    }
+    /* 栗子的猫爪印（左） */
+    .paw-left {
+      animation: pawStepLeft 1.6s ease-in-out infinite;
+    }
+    /* 阿白的熊掌印（右） */
+    .paw-right {
+      animation: pawStepRight 1.6s ease-in-out infinite;
+      animation-delay: 0.8s;
+    }
+    @keyframes pawStepLeft {
+      0%, 100% { opacity: 0.25; transform: scale(0.92) translateY(2px); }
+      40% { opacity: 1; transform: scale(1.08) translateY(-3px); }
+      70% { opacity: 0.75; transform: scale(1) translateY(0); }
+    }
+    @keyframes pawStepRight {
+      0%, 100% { opacity: 0.25; transform: scale(0.92) translateY(2px); }
+      40% { opacity: 1; transform: scale(1.08) translateY(-3px); }
+      70% { opacity: 0.75; transform: scale(1) translateY(0); }
+    }
+    /* 脚印下方的呼吸光晕 */
+    .paw-glow {
+      position: absolute;
+      bottom: -6px;
+      width: 20px;
+      height: 4px;
+      border-radius: 50%;
+      background: rgba(63, 124, 55, 0.15);
+      filter: blur(2px);
+      animation: glowPulse 1.6s ease-in-out infinite;
+    }
+    @keyframes glowPulse {
+      0%, 100% { transform: scale(0.8); opacity: 0.2; }
+      50% { transform: scale(1.3); opacity: 0.6; }
+    }
+    /* 极简优雅的文字排版 */
+    .minimal-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #2F241D;
+      letter-spacing: 2px;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .minimal-title::before, .minimal-title::after {
+      content: '';
+      display: inline-block;
+      width: 12px;
+      height: 1px;
+      background: #C4B9A7;
+    }
+    .minimal-subtitle {
+      font-size: 11px;
+      color: #8C7F72;
+      letter-spacing: 1px;
+      margin-bottom: 20px;
+      font-weight: 400;
+    }
+    /* 细若发丝的极简进度条 */
+    .minimal-progress-track {
+      width: 128px;
+      height: 2px;
+      background: #E5DCCE;
+      border-radius: 2px;
+      overflow: hidden;
+      position: relative;
+    }
+    .minimal-progress-bar {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 0%;
+      background: #3F7C37;
+      border-radius: 2px;
+      animation: lineProgress 1.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    }
+    @keyframes lineProgress {
+      0% { width: 0%; }
+      40% { width: 55%; }
+      80% { width: 85%; }
+      100% { width: 100%; }
+    }
+
+    /* 页面切换/异步加载时的极简呼吸脚印 */
+    .page-cloud-loader, .page-loading {
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important;
+      justify-content: center !important;
+      padding: 60px 16px !important;
+      min-height: 220px;
+      animation: cloudFadeIn 0.3s ease-out;
+      color: #8C7F72 !important;
+      font-size: 12px !important;
+      letter-spacing: 1.5px;
+    }
+    @keyframes cloudFadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .mini-paw-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 12px;
+      align-items: center;
+    }
+    .mini-paw-dot {
+      animation: miniPawPulse 1.2s ease-in-out infinite alternate;
+    }
+    .mini-paw-dot:nth-child(2) { animation-delay: 0.6s; }
+    @keyframes miniPawPulse {
+      0% { opacity: 0.3; transform: scale(0.9); }
+      100% { opacity: 1; transform: scale(1.1); }
+    }
+  </style>
 </head>
 <body>
+  <!-- 方向 A：现代简约 · 留白与呼吸感 Loading -->
+  <div id="stardew-loader">
+    <div class="minimal-loader-box">
+      <div class="footsteps-stage">
+        <!-- 栗子的猫爪印 (浅暖橙) -->
+        <div class="paw-unit paw-left">
+          <svg viewBox="0 0 16 16" width="22" height="22" shape-rendering="crispEdges">
+            <!-- 猫咪脚印：中肉垫与 4 个小脚趾 -->
+            <rect x="2" y="3" width="2" height="3" fill="#C27835"/>
+            <rect x="5" y="1" width="3" height="3" fill="#C27835"/>
+            <rect x="9" y="1" width="3" height="3" fill="#C27835"/>
+            <rect x="13" y="3" width="2" height="3" fill="#C27835"/>
+            <rect x="4" y="6" width="9" height="7" fill="#C27835"/>
+            <rect x="5" y="13" width="7" height="2" fill="#C27835"/>
+          </svg>
+          <div class="paw-glow"></div>
+        </div>
+
+        <!-- 阿白的熊掌印 (森林绿/暖棕) -->
+        <div class="paw-unit paw-right">
+          <svg viewBox="0 0 16 16" width="22" height="22" shape-rendering="crispEdges">
+            <!-- 熊掌脚印：更圆实饱满 -->
+            <rect x="1" y="3" width="3" height="3" fill="#3F7C37"/>
+            <rect x="5" y="1" width="3" height="3" fill="#3F7C37"/>
+            <rect x="9" y="1" width="3" height="3" fill="#3F7C37"/>
+            <rect x="13" y="3" width="3" height="3" fill="#3F7C37"/>
+            <rect x="3" y="6" width="11" height="8" fill="#3F7C37"/>
+            <rect x="4" y="14" width="9" height="2" fill="#3F7C37"/>
+          </svg>
+          <div class="paw-glow"></div>
+        </div>
+      </div>
+
+      <div class="minimal-title">脚印 · FOOTPRINTS</div>
+      <div class="minimal-subtitle">一步一步 · 两人的今天</div>
+
+      <div class="minimal-progress-track">
+        <div class="minimal-progress-bar"></div>
+      </div>
+    </div>
+  </div>
   <div id="auth-screen" class="hidden"></div>
   <div id="app-shell" class="hidden">
     <main id="view"></main>
@@ -37,6 +249,14 @@
     App.register('wish', WishPage);
     App.register('partner', PartnerPage);
     App.register('me', MePage);
+
+    // 平滑隐藏星露谷风格加载层
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        const loader = document.getElementById('stardew-loader');
+        if (loader) loader.classList.add('loaded');
+      }, 1000);
+    });
   </script>
 </body>
 </html>

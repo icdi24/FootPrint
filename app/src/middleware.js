@@ -8,6 +8,17 @@ function makeMiddleware(db) {
       const cookies = parseCookies(req.headers.cookie);
       req.user = (await userByToken(db, cookies[COOKIE_NAME])) || null;
       req.token = cookies[COOKIE_NAME] || null;
+
+      // 本地部署模式：跳过登录，自动使用指定演示账号（仅 LOCAL_NO_LOGIN=1 时生效）
+      if (!req.user && String(process.env.LOCAL_NO_LOGIN || '').toLowerCase() === '1') {
+        const wanted = process.env.LOCAL_LOGIN_USER || '栗子';
+        req.user = await db.get(
+          'SELECT * FROM users WHERE login_name = ? OR nickname = ? ORDER BY id LIMIT 1',
+          [wanted, wanted]
+        ) || await db.get('SELECT * FROM users ORDER BY id LIMIT 1');
+        req.token = 'local-no-login';
+      }
+
       next();
     } catch (e) {
       next(e);

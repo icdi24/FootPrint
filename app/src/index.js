@@ -72,8 +72,8 @@ async function main() {
     res.json({ ok: true });
   });
 
-  // 静态前端
-  app.use(express.static(PUBLIC_DIR, { maxAge: '1h' }));
+  // 静态前端（本地演示关闭缓存，避免改了页面还看到旧文件）
+  app.use(express.static(PUBLIC_DIR, { maxAge: String(process.env.LOCAL_NO_LOGIN || '') === '1' ? 0 : '1h' }));
 
   // SPA 兜底
   app.use((req, res, next) => {

@@ -171,5 +171,49 @@ const UI = (() => {
     return t.content.firstElementChild;
   }
 
-  return { toast, sheet, confirm, numberRoll, fmtNum, fmtYuan, fmtDate, fmtDateShort, wdayCN, fmtTimeIso, greeting, esc, debounce, el };
+  function cloudLoading(text = '正在穿过云层... ☁️') {
+    return `
+      <div class="page-cloud-loader">
+        <div class="cloud-mini-stage">
+          <div class="cloud-mini-sun">
+            <svg viewBox="0 0 14 14" width="22" height="22" shape-rendering="crispEdges">
+              <rect x="5" y="0" width="4" height="2" fill="#EFA938"/>
+              <rect x="5" y="12" width="4" height="2" fill="#EFA938"/>
+              <rect x="0" y="5" width="2" height="4" fill="#EFA938"/>
+              <rect x="12" y="5" width="2" height="4" fill="#EFA938"/>
+              <rect x="3" y="3" width="8" height="8" fill="#F7CA44"/>
+              <rect x="4" y="4" width="6" height="6" fill="#FBE580"/>
+            </svg>
+          </div>
+          <div class="cloud-mini-body">
+            <svg viewBox="0 0 44 28" width="64" height="40" shape-rendering="crispEdges">
+              <rect x="10" y="4" width="24" height="2" fill="#281E19"/>
+              <rect x="6" y="6" width="6" height="2" fill="#281E19"/>
+              <rect x="32" y="6" width="6" height="2" fill="#281E19"/>
+              <rect x="4" y="8" width="4" height="2" fill="#281E19"/>
+              <rect x="36" y="8" width="4" height="2" fill="#281E19"/>
+              <rect x="2" y="10" width="4" height="12" fill="#281E19"/>
+              <rect x="38" y="10" width="4" height="12" fill="#281E19"/>
+              <rect x="4" y="22" width="36" height="2" fill="#281E19"/>
+              <rect x="6" y="8" width="32" height="14" fill="#FFFFFF"/>
+              <rect x="10" y="6" width="24" height="3" fill="#FFFFFF"/>
+              <rect x="4" y="11" width="36" height="10" fill="#FFFFFF"/>
+              <rect x="14" y="13" width="3" height="2" fill="#281E19"/>
+              <rect x="27" y="13" width="3" height="2" fill="#281E19"/>
+              <rect x="11" y="16" width="4" height="2" fill="#FFB0B0"/>
+              <rect x="29" y="16" width="4" height="2" fill="#FFB0B0"/>
+              <rect x="21" y="17" width="2" height="1" fill="#C46A62"/>
+            </svg>
+          </div>
+          <div class="cloud-mini-drops">
+            <span class="cmd-drop"></span>
+            <span class="cmd-drop"></span>
+            <span class="cmd-drop"></span>
+          </div>
+        </div>
+        <div class="cloud-mini-text">${esc(text)}</div>
+      </div>`;
+  }
+
+  return { toast, sheet, confirm, numberRoll, fmtNum, fmtYuan, fmtDate, fmtDateShort, wdayCN, fmtTimeIso, greeting, esc, debounce, el, cloudLoading };
 })();

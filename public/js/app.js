@@ -1,6 +1,6 @@
 // 应用壳：启动、认证门、Tab 路由、滑动指示条。
 const App = (() => {
-  const state = { me: null, partner: null, tab: 'home', refresh: {}, pointsCfg: null };
+  const state = { me: null, partner: null, tab: 'home', refresh: {}, pointsCfg: null, localNoLogin: false };
 
   // 客户端积分预览（与服务端同公式，用于弹层即时反馈）
   window.__DEFAULT_CFG = {
@@ -61,14 +61,35 @@ const App = (() => {
     state.tab = key;
     renderTabbar();
     const view = document.getElementById('view');
-    view.classList.remove('anim');
-    void view.offsetWidth; // 重启动画
-    view.classList.add('anim');
-    view.innerHTML = '';
+    view.style.transition = 'opacity 0.2s';
+    
+    // 1. 设置加载中状态
+    view.style.opacity = '0';
+    setTimeout(() => {
+        view.innerHTML = `<div class="page-cloud-loader">${UI.cloudLoading(
+            key === 'home' ? '正在整理今天的待办... 🐾' :
+            key === 'goals' ? '正在翻看这周的目标打卡... 🎯' :
+            key === 'wish' ? '正在查看心愿清单... 🎁' :
+            key === 'partner' ? '正在联络搭档的数据... 👫' :
+            '正在载入个人脚印... 🌿'
+        )}</div>`;
+        view.style.opacity = '1';
+    }, 50);
+
+    // 2. 异步执行页面渲染
     const holder = document.createElement('div');
     holder.className = 'page';
-    view.appendChild(holder);
-    pages[key].render(holder);
+    
+    // 确保 render 完成后再替换视图
+    pages[key].render(holder).then(() => {
+        view.style.opacity = '0';
+        setTimeout(() => {
+            view.innerHTML = '';
+            view.appendChild(holder);
+            view.style.opacity = '1';
+        }, 200);
+    });
+
     window.scrollTo(0, 0);
   }
 
@@ -80,6 +101,11 @@ const App = (() => {
   }
 
   function showAuth() {
+    // 本地免登录模式不允许回到登录页
+    if (state.localNoLogin) {
+      showShell();
+      return;
+    }
     document.getElementById('app-shell').classList.add('hidden');
     document.getElementById('auth-screen').classList.remove('hidden');
     if (typeof AuthPage !== 'undefined') AuthPage.render(document.getElementById('auth-screen'));
@@ -89,12 +115,15 @@ const App = (() => {
     try {
       const me = await api.get('/api/me');
       state.me = me.user;
+      state.localNoLogin = !!me.localNoLogin;
       try {
         const cfg = await api.get('/api/settings');
         state.pointsCfg = cfg.points;
       } catch (e) { /* 系数拉不到就用默认 */ }
       showShell();
+      document.getElementById('loader').style.display = 'none';
     } catch (e) {
+      document.getElementById('loader').style.display = 'none';
       showAuth();
     }
   }

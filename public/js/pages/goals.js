@@ -7,7 +7,7 @@ const GoalsPage = {
 
   async render(root) {
     if (!this.weekStart) this.weekStart = this._monday(new Date());
-    root.innerHTML = '<div class="page-loading">加载中…</div>';
+    root.innerHTML = UI.cloudLoading ? UI.cloudLoading('正在翻开这周的目标打卡... 🎯') : '<div class="page-loading">加载中…</div>';
     try {
       await this.draw(root);
     } catch (e) {

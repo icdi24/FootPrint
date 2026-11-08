@@ -168,7 +168,10 @@ module.exports = function authRoutes(db) {
   });
 
   r.get('/me', requireUser, (req, res) => {
-    res.json({ user: { id: req.user.id, loginName: req.user.login_name, nickname: req.user.nickname, avatar: req.user.avatar } });
+    res.json({
+      user: { id: req.user.id, loginName: req.user.login_name, nickname: req.user.nickname, avatar: req.user.avatar },
+      localNoLogin: String(process.env.LOCAL_NO_LOGIN || '').toLowerCase() === '1',
+    });
   });
 
   // 改昵称：只要求组内不重名（nickname 已无全局唯一约束），会话保持有效
