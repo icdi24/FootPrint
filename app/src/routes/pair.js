@@ -62,7 +62,18 @@ module.exports = function pairRoutes(db) {
   }
 
   async function statusFor(userId) {
-    const pid = await currentPairId(db, userId);
+    let pid = await currentPairId(db, userId);
+    // 僵尸关系：解绑后另一方仍留在 pair_members 里（组里只剩自己）。
+    // 视为未配对并顺手清理，让双方都能重新生成邀请码配对；历史业务数据不动。
+    if (pid && !(await pairOf(db, userId))) {
+      await db.run('DELETE FROM pair_members WHERE user_id = ?', [userId]);
+      const left = await db.get('SELECT COUNT(*) AS c FROM pair_members WHERE pair_id = ?', [pid]);
+      if (Number(left.c) === 0) {
+        await db.run("UPDATE pairs SET status = 'dissolved', dissolved_at = ? WHERE id = ? AND status = 'active'",
+          [nowIso(), pid]);
+      }
+      pid = null;
+    }
     if (!pid) {
       const inv = await ensureInvite(userId);
       // 别人申请了我的码
@@ -279,12 +290,10 @@ module.exports = function pairRoutes(db) {
           await c.run("UPDATE redemptions SET status = 'cancelled' WHERE id = ?", [red.id]);
           refunded += 1;
         }
-        // 4) 断开关系
-        await c.run('DELETE FROM pair_members WHERE user_id = ?', [req.user.id]);
-        const left = await c.get('SELECT COUNT(*) AS c FROM pair_members WHERE pair_id = ?', [pid]);
-        if (Number(left.c) === 0) {
-          await c.run("UPDATE pairs SET status = 'dissolved', dissolved_at = ? WHERE id = ?", [now, pid]);
-        }
+        // 4) 断开关系：组是两人的，一方解绑即整组解散，双方一起退出。
+        //    只删自己会让另一方留在单人组里，出现「有组无搭档」的僵尸状态，无法重新配对。
+        await c.run('DELETE FROM pair_members WHERE user_id IN (?, ?)', memberIds);
+        await c.run("UPDATE pairs SET status = 'dissolved', dissolved_at = ? WHERE id = ?", [now, pid]);
         // 5) 审计
         await c.run('INSERT INTO pair_events (pair_id, user_id, action, detail, created_at) VALUES (?, ?, ?, ?, ?)',
           [pid, req.user.id, 'unbind',

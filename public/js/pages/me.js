@@ -136,7 +136,8 @@ const MePage = {
     }
 
     // 已配对：搭档卡 + 解除绑定 + 组内动态
-    if (st.paired) {
+    // 必须同时有 partner：解绑后可能出现「有组无搭档」的过渡态，直接读 avatar 会炸
+    if (st.paired && st.partner) {
       const eventsHtml = st.events && st.events.length ? `
         <div class="menu-list">${st.events.map((e) => `
           <div class="menu-row"><span>${UI.esc(e.username)} · ${UI.esc(e.detail)}</span>
@@ -153,7 +154,7 @@ const MePage = {
         </div>`;
       const unbind = box.querySelector('#pair-unbind');
       if (unbind) unbind.addEventListener('click', async () => {
-        const yes = await UI.confirm('解除绑定后，对方立刻看不到你的数据；未完成的验收和未确认的兑换会作废。确定吗？', { okLabel: '解除绑定' });
+        const yes = await UI.confirm('解除绑定后整组解散，双方立刻看不到对方的数据；未完成的验收和未确认的兑换会作废。确定吗？', { okLabel: '解除绑定' });
         if (!yes) return;
         try {
           const d = await api.post('/api/pair/unbind', {});
