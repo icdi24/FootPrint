@@ -551,7 +551,7 @@ const GoalsPage = {
               });
               close();
               UI.toast('已提交，等对方验收', 'ok');
-              this.draw(root);
+              GoalsPage.draw(root);
             } catch (e) {
               submitting = false;
               UI.toast(e.message, 'err');

@@ -19,6 +19,9 @@ const PX_PAL = {
   K: '#E7D3A9', // 奶油暗
   p: '#B98BD6', // 浅紫
   P: '#6E4491', // 深紫
+  m: '#B9B2A4', // 鼠灰（浅）
+  M: '#8B8275', // 鼠灰（暗）
+  n: '#F2A6B8', // 鼠粉（耳 / 鼻）
 };
 
 const PX_ART = {
@@ -276,6 +279,21 @@ const PX_ART = {
     '..oGGGGGGo..',
     '.oGGGGGGGGo.',
     '....oooo....',
+  ],
+  // 小老鼠：zoowy 贴边浮标专用（粉耳 + 灰脸 + 胡须）
+  mouse: [
+    '..ooo..ooo..',
+    '.onno..onno.',
+    '.onmo..onmo.',
+    '..oommmmoo..',
+    '.ommmmmmmmo.',
+    'omkmmmmmmkmo',
+    'omommmmmmomo',
+    'ommmmnnmmmmo',
+    '.ommmmmmmmo.',
+    '...oommoo...',
+    '...o.oo.o...',
+    '............',
   ],
 };
 

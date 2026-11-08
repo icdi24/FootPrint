@@ -2,7 +2,7 @@
 // 会话、任务编号与提议/草案确认全部走 /api/zoowy/*；Key 录入、图片、
 // 摘要上下文 / 深度思考 / 智能搜索均不提供（第二批）。
 const ZoowyChat = {
-  open({ bigGoalId = null, title = 'zoowy', onApplied } = {}) {
+  open({ bigGoalId = null, title = 'zoowy', onApplied, surface } = {}) {
     const body = UI.el(`
       <div class="zc-body">
         <div class="zc-toolbar">
@@ -272,7 +272,9 @@ const ZoowyChat = {
         send();
       }
     });
-    UI.sheet({ title: UI.esc(title), body, actions: [{ label: '关闭' }] });
+    // surface:'floating' 时换成右下角悬浮窗（ZoowyFloat），其余入口仍走底部 sheet
+    if (surface === 'floating' && window.ZoowyFloat) window.ZoowyFloat.mount(body, title);
+    else UI.sheet({ title: UI.esc(title), body, actions: [{ label: '关闭' }] });
     run('正在加载聊天记录…', async () => {
       const d = await api.get('/api/zoowy/messages?limit=40');
       messages = (d && d.messages) || [];
