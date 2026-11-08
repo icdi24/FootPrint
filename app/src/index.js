@@ -72,8 +72,17 @@ async function main() {
     res.json({ ok: true });
   });
 
-  // 静态前端
-  app.use(express.static(PUBLIC_DIR, { maxAge: '1h' }));
+  // 静态前端：HTML/JS/CSS 用 no-cache（每次带 ETag 重新验证）。
+  // 不能给 1h 强缓存——否则部署后浏览器仍拿着旧 JS，出现「后端修好了前端没更新」的假故障。
+  app.use(express.static(PUBLIC_DIR, {
+    setHeaders(res, filePath) {
+      if (/\.(html|js|css)$/i.test(filePath)) {
+        res.setHeader('Cache-Control', 'public, no-cache');
+      } else {
+        res.setHeader('Cache-Control', 'public, max-age=1h');
+      }
+    },
+  }));
 
   // SPA 兜底
   app.use((req, res, next) => {
