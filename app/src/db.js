@@ -356,6 +356,8 @@ async function openDb(connString) {
   await pool.query('ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS daily_enabled INTEGER NOT NULL DEFAULT 0');
   // 迁移：管理员标记（后台入口用，默认 0）
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER NOT NULL DEFAULT 0');
+  // 迁移：微信式「状态」——单列 JSON（emoji/label/text/group/at），NULL = 没设；不改 SCHEMA 真源
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT');
   // 迁移：注册与配对改造 —— 邀请码绑人不绑组，pair_id 可空；两列记录待确认请求
   await pool.query('ALTER TABLE pair_invites ALTER COLUMN pair_id DROP NOT NULL');
   await pool.query('ALTER TABLE pair_invites ADD COLUMN IF NOT EXISTS requested_by INTEGER REFERENCES users(id)');

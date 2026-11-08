@@ -1,4 +1,32 @@
 // 我们页：对方可见的一切 —— 状态对比、对方目标、今日打卡与驳回。
+// ---------------------------------------------------------------
+// 抽屉分组：把 10 个板块收成 4 组，避免页面一拉到底。
+// 分组靠已有 section 的标题识别，不用改任何模板字符串。
+// ---------------------------------------------------------------
+const PV_GROUPS = [
+  { key: 'today',  icon: '📌', title: '今天要处理', desc: '待验收 · ta 今天的打卡' },
+  { key: 'stats',  icon: '📊', title: '数据对比',   desc: '并排看看 · 手机时长 · 7 天趋势' },
+  { key: 'plan',   icon: '🗺️', title: 'ta 的计划',   desc: '大目标 · 日常目标' },
+  { key: 'record', icon: '🎁', title: '共同记录',   desc: '分享的 · 最近兑换' },
+];
+const PV_RULES = [
+  [/验收|今天的打卡/, 'today'],
+  [/并排|手机|时长/, 'stats'],
+  [/大目标|的目标/, 'plan'],
+  [/分享|兑换/, 'record'],
+];
+const PV_STORE = 'footprint.partner.drawers';
+function pvLoadState() {
+  try {
+    const v = JSON.parse(localStorage.getItem(PV_STORE) || 'null');
+    if (v && typeof v === 'object') return v;
+  } catch (e) { /* 隐私模式下忽略 */ }
+  return { today: true, stats: false, plan: false, record: false };
+}
+function pvSaveState(s) {
+  try { localStorage.setItem(PV_STORE, JSON.stringify(s)); } catch (e) { /* ignore */ }
+}
+
 const PartnerPage = {
   async render(root) {
     root.innerHTML = '<div class="page-loading">加载中…</div>';
@@ -30,11 +58,13 @@ const PartnerPage = {
     const { partner, partnerStats, myStats, partnerGoals, partnerToday, today, pendingVerifications } = data;
 
     // 手机时长单独拉：失败只让卡片降级，不拖垮整页
-    const [mineRes, partnerUsageRes, rangeRes] = await Promise.allSettled([
+    const [mineRes, partnerUsageRes, rangeRes, statusRes] = await Promise.allSettled([
       api.get('/api/usage/today'),
       api.get('/api/usage/partner'),
       api.get('/api/usage/range?days=7'),
+      StatusUI.fetch(),
     ]);
+    const partnerStatus = statusRes.status === 'fulfilled' ? statusRes.value.partner : null;
     const usageHtml = PartnerPage.usageSection(mineRes, partnerUsageRes, partner)
       + this.weekChart(rangeRes.status === 'fulfilled' ? rangeRes.value : null, partner);
     const { partnerBigGoals = [], sharedDiaries = [], sharedProfile = [] } = data;
@@ -57,15 +87,12 @@ const PartnerPage = {
           <div class="pc-today-num">${today.checked}<span>/${today.expected}</span></div>
           <div class="pc-today-label">今日打卡</div>
         </div>
+        <div class="st-pbox" id="partner-status-box">${StatusUI.partnerRow(partnerStatus)}</div>
       </section>
 
       <section class="sec">
         <div class="sec-head"><h2>并排看看</h2><span class="sec-count">不比输赢</span></div>
-        <div class="compare-card">
-          ${compareCol('我', App.state.me, myStats, false)}
-          <div class="cmp-divider"></div>
-          ${compareCol(UI.esc(partner.username), partner, partnerStats, true)}
-        </div>
+        ${compareChart(App.state.me, myStats, partner, partnerStats)}
       </section>
 
       ${usageHtml}
@@ -157,6 +184,22 @@ const PartnerPage = {
       </section>
     `;
 
+    // 先归类折叠，再绑定内部事件（DOM 移动不会丢监听器）
+    const pendingCount = (pendingVerifications && pendingVerifications.length) || 0;
+    this.buildGroups(root, {
+      today: {
+        text: pendingCount ? `${pendingCount} 条待验收` : `${partnerToday.length} 条打卡`,
+        alert: !!pendingCount,
+      },
+      plan: { text: `${partnerGoals.filter((g) => g.status === 'active').length} 个目标` },
+      record: { text: `${sharedDiaries.length + (data.partnerRecentRedemptions || []).length} 条记录` },
+    });
+
+    animateCompareBars(root);
+
+    // 对方状态：常驻在概览卡内（不进抽屉），数据已随页面并行取回
+    StatusUI.mountPartner(root);
+
     root.querySelectorAll('.btn-reject').forEach((btn) => {
       btn.addEventListener('click', () => {
         const c = partnerToday.find((x) => x.id === Number(btn.dataset.id));
@@ -198,6 +241,80 @@ const PartnerPage = {
         UI.sheet({ title: `${UI.esc(partner.username)} 分享的日报 · ${UI.fmtDate(d.diary_date)}`, body, actions: [{ label: '关闭', onClick: (close) => close() }] });
       });
     });
+  },
+
+  // 把已有 section 按标题归类，收进 4 个可折叠抽屉；状态记在 localStorage
+  buildGroups(root, meta = {}) {
+    const anchor = root.querySelector('.partner-card');
+    if (!anchor) return;
+
+    const bucket = { today: [], stats: [], plan: [], record: [] };
+    root.querySelectorAll('section.sec').forEach((sec) => {
+      const h2 = sec.querySelector('.sec-head h2');
+      const title = h2 ? h2.textContent : '';
+      const hit = PV_RULES.find(([re]) => re.test(title));
+      bucket[hit ? hit[1] : 'record'].push(sec);
+    });
+
+    const state = pvLoadState();
+    const host = document.createElement('div');
+    host.className = 'pv-groups';
+    anchor.after(host);
+
+    const tools = document.createElement('div');
+    tools.className = 'pv-tools';
+    tools.innerHTML = `<span class="pv-tools-label">${PV_GROUPS.length} 个抽屉 · 点开看</span>
+      <button type="button" class="pv-tools-btn">全部展开</button>`;
+    host.appendChild(tools);
+    const toolsBtn = tools.querySelector('.pv-tools-btn');
+
+    const wraps = [];
+    PV_GROUPS.forEach((g) => {
+      const items = bucket[g.key];
+      if (!items.length) return;
+      const open = !!state[g.key];
+      const m = meta[g.key] || {};
+      const wrap = document.createElement('section');
+      wrap.className = 'pv-group' + (open ? ' open' : '');
+      wrap.dataset.key = g.key;
+      wrap.innerHTML = `
+        <button type="button" class="pv-head${m.alert ? ' pv-alert' : ''}"
+                aria-expanded="${open}" aria-controls="pv-body-${g.key}">
+          <span class="pv-ico">${g.icon}</span>
+          <span class="pv-txt"><b>${g.title}</b><small>${g.desc}</small></span>
+          <span class="pv-badge">${m.text || `${items.length} 个板块`}</span>
+          <span class="pv-arrow" aria-hidden="true"></span>
+        </button>
+        <div class="pv-body" id="pv-body-${g.key}"><div class="pv-inner"></div></div>`;
+      const inner = wrap.querySelector('.pv-inner');
+      items.forEach((s) => inner.appendChild(s));
+      const body = wrap.querySelector('.pv-body');
+      body.inert = !open;
+      host.appendChild(wrap);
+      wraps.push({ wrap, head: wrap.querySelector('.pv-head'), body, g, open });
+    });
+
+    const syncTools = () => {
+      toolsBtn.textContent = wraps.every((w) => w.open) ? '全部收起' : '全部展开';
+    };
+    const setOpen = (w, open) => {
+      w.open = open;
+      w.wrap.classList.toggle('open', open);
+      w.head.setAttribute('aria-expanded', String(open));
+      w.body.inert = !open;
+      state[w.g.key] = open;
+      pvSaveState(state);
+      syncTools();
+      // 展开图表抽屉时重播柱条生长（收起时播过一次，用户看不见）
+      if (open && w.g.key === 'stats') requestAnimationFrame(() => animateCompareBars(root));
+    };
+
+    wraps.forEach((w) => w.head.addEventListener('click', () => setOpen(w, !w.open)));
+    toolsBtn.addEventListener('click', () => {
+      const allOpen = wraps.every((w) => w.open);
+      wraps.forEach((w) => setOpen(w, !allOpen));
+    });
+    syncTools();
   },
 
   // 待审核详情（P5-#21）：描述、验收标准、自述、证据、第几次提交、历史驳回理由
@@ -492,18 +609,66 @@ const PartnerPage = {
   },
 };
 
-function compareCol(name, user, stats, isPartner) {
-  const rows = [
-    ['本月得分', `+${UI.fmtNum(stats.monthPoints)}`],
-    ['连续天数', `${stats.currentStreak} 天`],
-    ['本月完成率', stats.completion === null ? '—' : `${stats.completion}%`],
-    ['时间投入', `${(stats.timeInvestMin / 60).toFixed(1)} 小时`],
-    ['当前余额', UI.fmtNum(stats.balance)],
-  ];
+// 进入「我们」页时柱条从左生长；减弱动效 / GSAP 未加载时直接显示最终宽度
+function animateCompareBars(root) {
+  const bars = root.querySelectorAll('.cmp-fill');
+  if (!bars.length || !window.gsap || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  requestAnimationFrame(() => {
+    if (!bars[0].isConnected) return;
+    window.gsap.fromTo(bars,
+      { scaleX: 0 },
+      { scaleX: 1, transformOrigin: 'left center', duration: 0.55, ease: 'power2.out',
+        stagger: 0.045, delay: 0.18, clearProps: 'transform' });
+  });
+}
+
+// 并排看看：每项指标一个专属色，同项内两人按该项最大值归一化成长度。
+// 颜色、指标、格式都集中在这张表里，改这里就够了。
+// 「我」= 实心柱，「ta」= 同色斜纹柱；量纲不同的指标不跨项比长度。
+const COMPARE_METRICS = [
+  { label: '本月得分',   color: '#D9A03A', get: (s) => s.monthPoints,        fmt: (v) => `+${UI.fmtNum(v)}` },
+  { label: '连续天数',   color: '#3F7C37', get: (s) => s.currentStreak,      fmt: (v) => `${v} 天` },
+  { label: '本月完成率', color: '#35608F', get: (s) => s.completion,         fmt: (v) => `${v}%` },
+  { label: '时间投入',   color: '#2E7C86', get: (s) => s.timeInvestMin / 60, fmt: (v) => `${v.toFixed(1)} 小时` },
+  { label: '当前余额',   color: '#B44A40', get: (s) => s.balance,            fmt: (v) => UI.fmtNum(v) },
+];
+
+function compareChart(me, myStats, partner, partnerStats) {
+  const meName = `${me && me.avatar ? UI.esc(me.avatar) + ' ' : ''}我`;
+  const taName = `${partner.avatar ? UI.esc(partner.avatar) + ' ' : ''}${UI.esc(partner.username)}`;
+  const num = (v) => {
+    const n = Number(v);
+    return v === null || v === undefined || !Number.isFinite(n) ? null : Math.max(0, n);
+  };
+  const groups = COMPARE_METRICS.map((m) => {
+    const a = num(m.get(myStats || {}));
+    const b = num(m.get(partnerStats || {}));
+    const max = Math.max(a || 0, b || 0, 1);
+    const pct = (v) => v === null ? 0 : (v > 0 ? Math.max(4, Math.round((v / max) * 100)) : 0);
+    const text = (v) => v === null ? '—' : m.fmt(v);
+    return `
+      <div class="cmp-group" style="--metric:${m.color}">
+        <div class="cmp-metric"><i class="cmp-dot"></i>${m.label}</div>
+        <div class="cmp-bar-row">
+          <span class="cmp-who">我</span>
+          <span class="cmp-track"><i class="cmp-fill me" style="width:${pct(a)}%" title="${text(a)}"></i></span>
+          <b class="cmp-val">${text(a)}</b>
+        </div>
+        <div class="cmp-bar-row">
+          <span class="cmp-who">ta</span>
+          <span class="cmp-track"><i class="cmp-fill ta" style="width:${pct(b)}%" title="${text(b)}"></i></span>
+          <b class="cmp-val">${text(b)}</b>
+        </div>
+      </div>`;
+  }).join('');
   return `
-    <div class="cmp-col">
-      <div class="cmp-name">${user.avatar || ''} ${name}</div>
-      ${rows.map(([k, v]) => `<div class="cmp-row"><span>${k}</span><b>${v}</b></div>`).join('')}
+    <div class="compare-card cmp-chart">
+      <div class="cmp-legend">
+        <span><i class="cmp-sw solid"></i>${meName}</span>
+        <span><i class="cmp-sw stripe"></i>${taName}</span>
+        <em>同项内比长短</em>
+      </div>
+      ${groups}
     </div>`;
 }
 

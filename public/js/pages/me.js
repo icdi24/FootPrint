@@ -2,10 +2,11 @@
 const MePage = {
   async render(root) {
     root.innerHTML = '<div class="page-loading">加载中…</div>';
-    let stats;
+    let stats, myStatus;
     try {
-      const d = await api.get('/api/stats');
-      stats = d.stats;
+      const [statsRes, statusRes] = await Promise.all([api.get('/api/stats'), StatusUI.fetch()]);
+      stats = statsRes.stats;
+      myStatus = statusRes.mine;
     } catch (e) {
       root.innerHTML = `<div class="empty big"><div class="empty-emoji">😿</div><div>${UI.esc(e.message)}</div><button class="btn primary" id="retry">重试</button></div>`;
       root.querySelector('#retry').addEventListener('click', () => MePage.render(root));
@@ -13,13 +14,14 @@ const MePage = {
     }
 
     const me = App.state.me;
+    // 每项一个彩色像素徽章 + 一个专属色调，图标定义在 js/pixel-art.js
     const statItems = [
-      ['本月得分', `+${UI.fmtNum(stats.monthPoints)}`, 'coin'],
-      ['当前余额', UI.fmtNum(stats.balance), 'coin'],
-      ['最长连续', `${stats.bestStreak} 天`, 'flame'],
-      ['本月完成率', stats.completion === null ? '—' : `${stats.completion}%`, 'target'],
-      ['时间投入', `${(stats.timeInvestMin / 60).toFixed(1)} 小时`, 'clock'],
-      ['被质疑次数', `${stats.rejectedCount}`, 'alert'],
+      ['本月得分', `+${UI.fmtNum(stats.monthPoints)}`, 'score', 'gold'],
+      ['当前余额', UI.fmtNum(stats.balance), 'purse', 'wood'],
+      ['最长连续', `${stats.bestStreak} 天`, 'flame', 'berry'],
+      ['本月完成率', stats.completion === null ? '—' : `${stats.completion}%`, 'bullseye', 'leaf'],
+      ['时间投入', `${(stats.timeInvestMin / 60).toFixed(1)} 小时`, 'hourglass', 'sky'],
+      ['被质疑次数', `${stats.rejectedCount}`, 'lens', 'plum'],
     ];
 
     root.innerHTML = `
@@ -40,12 +42,17 @@ const MePage = {
         <button class="ghost-btn" id="change-pw">${window.icon('lock')} 改密码</button>
       </section>
 
+      <section class="sec st-sec">
+        <div class="sec-head"><h2>我的状态</h2><span class="sec-count">对方可见</span></div>
+        <div id="my-status-box">${StatusUI.mineChip(myStatus)}</div>
+      </section>
+
       <section class="sec">
         <div class="sec-head"><h2>这个月</h2></div>
         <div class="stats-grid">
-          ${statItems.map(([k, v, ic]) => `
-            <div class="stat-cell">
-              <span class="sc-ico">${window.icon(ic)}</span>
+          ${statItems.map(([k, v, ic, tone]) => `
+            <div class="stat-cell sc-${tone}">
+              <span class="sc-badge">${window.pixelIcon ? window.pixelIcon(ic) : window.icon(ic)}</span>
               <div class="sc-val">${v}</div>
               <div class="sc-label">${k}</div>
             </div>`).join('')}
@@ -121,6 +128,10 @@ const MePage = {
     });
     this.loadPairCard(root);
     this.loadLedger(root);
+
+    // 状态：数据已随页面并行取回，只需绑定点击（委托，重绘不丢）
+    StatusUI.mountMine(root);
+    StatusUI.syncAvatarBadge(myStatus);
   },
 
   // ---- 我的搭档：邀请码 / 配对请求 / 解绑 / 组内动态 ----

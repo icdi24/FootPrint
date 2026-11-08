@@ -47,7 +47,7 @@ const App = (() => {
     if (!bar) return;
     bar.innerHTML = `<div class="tab-slider"></div>` + TABS.map((t) => `
       <button class="tab-item ${state.tab === t.key ? 'active' : ''}" data-key="${t.key}">
-        <span class="tab-ico">${window.icon(t.icon)}</span>
+        <span class="tab-ico">${window.pixelIcon ? window.pixelIcon(t.icon, 'tab-art') : window.icon(t.icon)}</span>
         <span class="tab-label">${t.label}</span>
       </button>`).join('');
     bar.className = `tabbar sel-${TABS.findIndex((t) => t.key === state.tab)}`;
@@ -56,20 +56,71 @@ const App = (() => {
     });
   }
 
+  // 切页漂浮动效：参数集中在这里，改风格只改这一处
+  const ANIM = { dur: 0.46, ease: 'power3.out', drift: 18, lift: 16, stagger: 0.035 };
+  let activeKey = null;
+  let stopDeco = null; // 上一次切页的分区图标观察器
+
+  function playTransition(holder, key, dir) {
+    const gsap = window.gsap;
+    // 库没加载 / 系统开启「减弱动态效果」时，降级为原来的直接切换
+    if (!gsap || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    const run = () => {
+      if (!holder.isConnected || activeKey !== key) return; // 快速连点：丢弃过期动画
+      gsap.fromTo(holder,
+        { autoAlpha: 0, x: (dir >= 0 ? 1 : -1) * ANIM.drift, y: ANIM.lift, scale: 0.985 },
+        { autoAlpha: 1, x: 0, y: 0, scale: 1, duration: ANIM.dur, ease: ANIM.ease,
+          overwrite: 'auto', clearProps: 'transform,opacity,visibility' });
+      // 顶层块错落上浮，制造轻盈的错层漂浮感；跳过已有 CSS stagger 动画的元素
+      const kids = Array.from(holder.children)
+        .filter((el) => !el.classList.contains('stagger-in')).slice(0, 12);
+      if (kids.length > 1) {
+        gsap.fromTo(kids,
+          { autoAlpha: 0, y: 9 },
+          { autoAlpha: 1, y: 0, duration: 0.38, stagger: ANIM.stagger, ease: 'sine.out',
+            delay: 0.05, overwrite: 'auto', clearProps: 'transform,opacity,visibility' });
+      }
+    };
+
+    // 多数页面是异步渲染（先塞 .page-loading 再换内容），等真实内容落定再播，避免动效空转
+    if (!holder.querySelector('.page-loading')) { run(); return; }
+    holder.style.visibility = 'hidden';
+    let done = false;
+    const obs = new MutationObserver(() => {
+      if (!holder.querySelector('.page-loading')) finish();
+    });
+    obs.observe(holder, { childList: true });
+    const timer = setTimeout(finish, 1500); // 接口卡住时兜底，绝不让页面一直隐身
+    function finish() {
+      if (done) return;
+      done = true;
+      obs.disconnect();
+      clearTimeout(timer);
+      holder.style.visibility = '';
+      run();
+    }
+  }
+
   function showTab(key) {
     if (!pages[key]) return;
+    const prev = TABS.findIndex((t) => t.key === state.tab);
+    const next = TABS.findIndex((t) => t.key === key);
+    if (stopDeco) { stopDeco(); stopDeco = null; }
     state.tab = key;
+    activeKey = key;
     renderTabbar();
     const view = document.getElementById('view');
-    view.classList.remove('anim');
-    void view.offsetWidth; // 重启动画
-    view.classList.add('anim');
+    if (window.gsap) window.gsap.killTweensOf(view.querySelectorAll('.page'));
     view.innerHTML = '';
     const holder = document.createElement('div');
     holder.className = 'page';
     view.appendChild(holder);
     pages[key].render(holder);
+    // 各页多为异步渲染，等真实内容落定后给分区标题补上语义图标
+    stopDeco = window.SecIcons ? window.SecIcons.watch(holder) : null;
     window.scrollTo(0, 0);
+    playTransition(holder, key, next - prev);
   }
 
   function showShell() {
