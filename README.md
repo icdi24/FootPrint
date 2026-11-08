@@ -11,6 +11,8 @@
 
 ### 方式一：Docker Compose（推荐，一条命令起全部）
 
+首次启动前，复制 `.env.example` 为 `.env` 并设置 PostgreSQL 密码。
+
 ```bash
 docker compose up -d    # 起 PostgreSQL + 应用，数据落在 ./runtime/
 ```
@@ -56,8 +58,13 @@ npm start              # 默认 http://localhost:3000
 | `DATABASE_URL` | `postgres://postgres:footprint_dev_pw@localhost:5432/footprint` | PostgreSQL 连接串 |
 | `DATA_DIR` | `app/data` | 备份、日志、上传图片都在这里 |
 | `FOOTPRINT_VERBOSE` | 空 | 设 1 时把关键日志也打到控制台 |
+| `DEEPSEEK_CREDENTIAL_KEY` | 空 | 账号 API Key 的服务端加密密钥，由 32 随机字节编码成 Base64 |
+| `DEEPSEEK_API_KEY` | 空 | 后台 AI 工作流使用的部署者 DeepSeek API Key |
+| `DEEPSEEK_MODEL` | `deepseek-flash` | 后台工作流模型，可用 `deepseek-flash` 或 `deepseek-v4-pro` |
 
 时区固定按 `Asia/Shanghai` 判定"今天"与窗口；数据内部存 UTC。
+
+zoowy 连接 DeepSeek 官方 API。部署者按 `.env.example` 的命令生成并保存 `DEEPSEEK_CREDENTIAL_KEY`，用户登录后在 zoowy 中配置自己的 DeepSeek API Key。加密密钥换新后，旧账号配置需要重新录入。配置和使用 zoowy 时请通过 HTTPS 访问。
 
 ## 运维
 
