@@ -171,7 +171,9 @@ module.exports = function authRoutes(db) {
 
   r.post('/logout', async (req, res, next) => {
     try {
+      const uid = req.user && req.user.id;
       await destroySession(db, req.token);
+      if (uid) require('../ws').kickUser(uid);
       res.clearCookie(COOKIE_NAME, { path: '/' });
       res.json({ ok: true });
     } catch (e) { next(e); }
@@ -180,6 +182,7 @@ module.exports = function authRoutes(db) {
   r.post('/me/logout-all', requireUser, async (req, res, next) => {
     try {
       await destroyAllSessions(db, req.user.id);
+      require('../ws').kickUser(req.user.id);
       res.clearCookie(COOKIE_NAME, { path: '/' });
       log.log('logout_all', req.user.login_name);
       res.json({ ok: true });
@@ -217,6 +220,7 @@ module.exports = function authRoutes(db) {
       }
       await db.run('UPDATE users SET password_hash = ? WHERE id = ?', [hashPassword(newPassword), req.user.id]);
       await destroyAllSessions(db, req.user.id);
+      require('../ws').kickUser(req.user.id);
       log.log('password_change', req.user.login_name);
       res.json({ ok: true });
     } catch (e) { next(e); }

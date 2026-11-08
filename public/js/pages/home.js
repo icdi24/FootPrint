@@ -1,6 +1,51 @@
 // 首页：问候 + 积分横幅 + 今日待办 + 对方动态。
 const HomePage = {
   async render(root) {
+    if (App.isGuest()) {
+      const dateNow = new Date();
+      const dateStr = `${dateNow.getMonth() + 1}月${dateNow.getDate()}日 周${'日一二三四五六'[dateNow.getDay()]}`;
+      root.innerHTML = `
+        <header class="page-head home-head">
+          <div>
+            <div class="hello">${UI.greeting()}，游客 <span class="hello-avatar">🐾</span></div>
+            <div class="date-line">${dateStr}</div>
+          </div>
+        </header>
+
+        <section class="balance-banner">
+          <div class="bb-left">
+            <div class="bb-label">${window.icon('coin')} 可用积分</div>
+            <div class="bb-balance">0</div>
+            <div class="bb-yuan">≈ ¥0</div>
+          </div>
+          <div class="bb-right">
+            <div class="bb-chip" title="当前最长连续">${window.icon('flame')}<b>0</b> 天连续</div>
+            <div class="bb-chip">本月 +0</div>
+          </div>
+        </section>
+
+        <section class="sec">
+          <div class="sec-head"><h2>今日待办</h2></div>
+          <div class="empty">
+            <div class="empty-emoji">🌱</div>
+            <div class="empty-title">今天还没有目标</div>
+            <div class="empty-sub">去「目标」页建第一个打卡目标，两个人就都看得见了</div>
+            <button class="btn primary" id="go-goals">去建目标</button>
+          </div>
+        </section>
+
+        <section class="sec">
+          <div class="auth-entry-actions">
+            <button class="btn primary" data-auth="login">登录</button>
+            <button class="btn" data-auth="register">注册</button>
+          </div>
+        </section>
+      `;
+      UI.bindAuthEntry(root);
+      const goGoals = root.querySelector('#go-goals');
+      if (goGoals) goGoals.addEventListener('click', () => UI.requireAuth());
+      return;
+    }
     root.innerHTML = '<div class="page-loading">加载中…</div>';
     let data;
     try {

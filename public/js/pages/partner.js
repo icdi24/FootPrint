@@ -1,6 +1,10 @@
 // 我们页：对方可见的一切 —— 状态对比、对方目标、今日打卡与驳回。
 const PartnerPage = {
   async render(root) {
+    if (App.isGuest()) {
+      this.renderGuest(root);
+      return;
+    }
     root.innerHTML = '<div class="page-loading">加载中…</div>';
     try {
       await this.draw(root);
@@ -8,6 +12,26 @@ const PartnerPage = {
       root.innerHTML = `<div class="empty big"><div class="empty-emoji">😿</div><div>${UI.esc(e.message)}</div><button class="btn primary" id="retry">重试</button></div>`;
       root.querySelector('#retry').addEventListener('click', () => PartnerPage.render(root));
     }
+  },
+
+  // 游客视图：完整「我们」界面结构，未配对状态 + 配对入口，点任何入口跳登录。
+  renderGuest(root) {
+    root.innerHTML = `
+      <header class="page-head">
+        <div><div class="hello">我们</div><div class="date-line">互相看得见，才坚持得住</div></div>
+      </header>
+      <section class="sec">
+        <div class="empty big">
+          <div class="empty-emoji">🤝</div>
+          <div>还没有搭档。去『我的 → 我的搭档』看自己的邀请码，或输入对方的码完成配对；也可以去匹配大厅找搭子。</div>
+          <div class="hall-entry-actions">
+            <button class="btn primary" id="partner-go-me">去配对</button>
+            <button class="btn ghost" id="partner-hall">去匹配大厅</button>
+          </div>
+        </div>
+      </section>
+    `;
+    UI.guestGate(root);
   },
 
   async draw(root) {
@@ -20,11 +44,15 @@ const PartnerPage = {
         <section class="sec">
           <div class="empty big">
             <div class="empty-emoji">🤝</div>
-            <div>还没有搭档。去『我的 → 我的搭档』看自己的邀请码，或输入对方的码完成配对。</div>
-            <button class="btn primary" id="partner-go-me">去配对</button>
+            <div>还没有搭档。去『我的 → 我的搭档』看自己的邀请码，或输入对方的码完成配对；也可以去匹配大厅找搭子。</div>
+            <div class="hall-entry-actions">
+              <button class="btn primary" id="partner-go-me">去配对</button>
+              <button class="btn ghost" id="partner-hall">去匹配大厅</button>
+            </div>
           </div>
         </section>`;
       root.querySelector('#partner-go-me').addEventListener('click', () => App.showTab('me'));
+      root.querySelector('#partner-hall').addEventListener('click', () => HallPage.open());
       return;
     }
     const { partner, partnerStats, myStats, partnerGoals, partnerToday, today, pendingVerifications } = data;
@@ -57,6 +85,7 @@ const PartnerPage = {
           <div class="pc-today-num">${today.checked}<span>/${today.expected}</span></div>
           <div class="pc-today-label">今日打卡</div>
         </div>
+        <button class="btn ghost" id="partner-chat">💬 发消息</button>
       </section>
 
       <section class="sec">
@@ -198,6 +227,8 @@ const PartnerPage = {
         UI.sheet({ title: `${UI.esc(partner.username)} 分享的日报 · ${UI.fmtDate(d.diary_date)}`, body, actions: [{ label: '关闭', onClick: (close) => close() }] });
       });
     });
+
+    root.querySelector('#partner-chat')?.addEventListener('click', () => ChatSheet.open());
   },
 
   // 待审核详情（P5-#21）：描述、验收标准、自述、证据、第几次提交、历史驳回理由

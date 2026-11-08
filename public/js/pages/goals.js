@@ -6,6 +6,10 @@ const GoalsPage = {
   goalType: 'daily', // daily | stage
 
   async render(root) {
+    if (App.isGuest()) {
+      this.renderGuest(root);
+      return;
+    }
     if (!this.weekStart) this.weekStart = this._monday(new Date());
     root.innerHTML = '<div class="page-loading">加载中…</div>';
     try {
@@ -21,6 +25,39 @@ const GoalsPage = {
     const w = x.getDay();
     x.setDate(x.getDate() - (w === 0 ? 6 : w - 1));
     return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+  },
+
+  // 游客视图：展示完整界面结构（类型切换、周/月、网格、FAB），数据区为空，点任何入口都跳登录。
+  renderGuest(root) {
+    root.innerHTML = `
+      <header class="page-head goals-head">
+        ${this._typeSeg('daily')}
+        <div class="week-nav sub-nav">
+          <div class="seg">
+            <button data-v="week" class="on">周</button>
+            <button data-v="month">月</button>
+          </div>
+          <div class="week-nav">
+            <button class="nav-btn">${window.icon('left')}</button>
+            <span class="week-label">本周</span>
+            <button class="nav-btn">${window.icon('right')}</button>
+          </div>
+        </div>
+      </header>
+      <section class="grid-card">
+        <div class="grid-stats">
+          <div class="gs-item"><div class="gs-val">0</div><div class="gs-label">周得分</div></div>
+          <div class="gs-item"><div class="gs-val">0<span class="gs-dim">/0</span></div><div class="gs-label">打卡人次</div></div>
+          <div class="gs-item"><div class="gs-val">0</div><div class="gs-label">进行中目标</div></div>
+        </div>
+        <div class="grid-empty">
+          <div class="empty-emoji">🌱</div>
+          <div>还没有目标，点右下角 + 建一个</div>
+        </div>
+      </section>
+      <button class="fab" aria-label="新建目标">${window.icon('plus')}</button>
+    `;
+    UI.guestGate(root);
   },
 
   async draw(root) {

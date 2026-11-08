@@ -87,6 +87,11 @@ private fun sizeOf(bytes: Long): String {
 
 @Composable
 fun MeScreen(vm: AppViewModel) {
+  val loggedIn by vm.loggedIn.collectAsState()
+  if (!loggedIn) {
+    GuestEmpty(vm = vm, emoji = "🙂", title = "登录后查看你的脚印", sub = "资料、积分、统计都在登录后可见")
+    return
+  }
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
 

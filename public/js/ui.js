@@ -42,19 +42,20 @@ const UI = (() => {
       }
       requestAnimationFrame(() => wrap.classList.add('show'));
 
+      let closed = false;
       function close(result) {
+        if (closed) return;
+        closed = true;
         wrap.classList.remove('show');
-        setTimeout(() => wrap.remove(), 320);
+        setTimeout(() => {
+          wrap.remove();
+          // 关闭时回调（用于丢弃草稿等）；此前靠 transitionend 监听，
+          // 但 .sheet-wrap 自身无 transition，e.target 恒为子元素，回调从不触发。
+          if (opts.onClose) opts.onClose();
+        }, 320);
         resolve(result);
       }
       wrap.querySelector('.sheet-backdrop').addEventListener('click', () => close(null));
-      if (opts.onClose) {
-        // 关闭时回调（用于丢弃草稿）
-        const orig = opts.onClose;
-        wrap.addEventListener('transitionend', (e) => {
-          if (e.target === wrap && !wrap.classList.contains('show')) orig();
-        });
-      }
       wrap.querySelectorAll('.sheet-action').forEach((btn) => {
         btn.addEventListener('click', () => {
           const a = opts.actions[Number(btn.dataset.idx)];
@@ -171,5 +172,59 @@ const UI = (() => {
     return t.content.firstElementChild;
   }
 
-  return { toast, sheet, confirm, numberRoll, fmtNum, fmtYuan, fmtDate, fmtDateShort, wdayCN, fmtTimeIso, greeting, esc, debounce, el };
+  // 访客空状态：提示该功能需要登录，附「登录 / 注册」按钮。
+  // opts: {emoji, title, sub, tagline}
+  function guestPrompt(opts = {}) {
+    const emoji = opts.emoji || '🐾';
+    const title = opts.title || '登录后才能使用这个功能';
+    const sub = opts.sub || '';
+    return `
+      <div class="guest-empty">
+        <div class="guest-emoji">${emoji}</div>
+        <div class="guest-title">${title}</div>
+        ${sub ? `<div class="guest-sub">${sub}</div>` : ''}
+        <div class="auth-entry-actions">
+          <button class="btn primary" data-auth="login">登录</button>
+          <button class="btn" data-auth="register">注册</button>
+        </div>
+      </div>`;
+  }
+
+  // 给容器里的 [data-auth] 按钮绑定跳转到登录/注册页。
+  function bindAuthEntry(root) {
+    root.querySelectorAll('[data-auth]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (typeof App !== 'undefined') App.showAuth(btn.dataset.auth);
+      });
+    });
+  }
+
+  // 访客门：点功能按钮先弹「尚未登录/注册」确认框，再点击才进登录/注册页。
+  function requireAuth() {
+    UI.sheet({
+      title: '尚未登录 / 注册',
+      body: `<div class="require-auth">
+        <div class="ra-emoji">🐾</div>
+        <div class="ra-text">登录或注册后，才能使用这个功能。</div>
+      </div>`,
+      actions: [
+        { label: '再逛逛', onClick: (close) => close() },
+        { label: '注册', onClick: (close) => { close(); if (typeof App !== 'undefined') App.showAuth('register'); } },
+        { label: '登录', kind: 'primary', onClick: (close) => { close(); if (typeof App !== 'undefined') App.showAuth('login'); } },
+      ],
+    });
+  }
+
+  // 把容器里所有按钮 / FAB / 可点入口统一绑定为「点一下弹登录提示」。
+  // 用于游客「看得见全部功能入口，点了先提示，再确认进登录」。
+  function guestGate(root) {
+    root.querySelectorAll('button, .fab').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        requireAuth();
+      });
+    });
+  }
+
+  return { toast, sheet, confirm, numberRoll, fmtNum, fmtYuan, fmtDate, fmtDateShort, wdayCN, fmtTimeIso, greeting, esc, debounce, el, guestPrompt, bindAuthEntry, guestGate, requireAuth };
 })();

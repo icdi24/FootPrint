@@ -331,6 +331,41 @@ CREATE TABLE IF NOT EXISTS pair_events (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_pair_events_pair ON pair_events(pair_id);
+
+-- 搭子私聊消息：同组两人互相发文字（read_at NULL = 未读）
+CREATE TABLE IF NOT EXISTS pair_messages (
+  id SERIAL PRIMARY KEY,
+  pair_id INTEGER NOT NULL REFERENCES pairs(id),
+  sender_id INTEGER NOT NULL REFERENCES users(id),
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  read_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pair_messages_pair ON pair_messages(pair_id, id);
+
+-- 匹配大厅发布：无搭子用户公开「找搭子」信息（note + 目标摘要快照）
+CREATE TABLE IF NOT EXISTS hall_listings (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL UNIQUE REFERENCES users(id),
+  note TEXT NOT NULL DEFAULT '',
+  goal_summary TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active',   -- active / withdrawn
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_hall_listings_status ON hall_listings(status);
+
+-- 匹配大厅邀请：两个已登录账号互相组队（区别于邀请码的注册态入组）
+CREATE TABLE IF NOT EXISTS hall_invites (
+  id SERIAL PRIMARY KEY,
+  from_user_id INTEGER NOT NULL REFERENCES users(id),
+  to_user_id INTEGER NOT NULL REFERENCES users(id),
+  status TEXT NOT NULL DEFAULT 'pending',   -- pending / accepted / declined / cancelled
+  created_at TEXT NOT NULL,
+  responded_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_hall_invites_to ON hall_invites(to_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_hall_invites_from ON hall_invites(from_user_id, status);
 `;
 
 // 打开连接池并建表（异步）。
