@@ -1,12 +1,11 @@
-// AI 底座（P0-3）：阿里百炼 OpenAI 兼容客户端。
-// - 配置只从环境变量读：AI_BASE_URL / AI_API_KEY / AI_MODEL（默认 qwen-plus）
-// - 密钥只放服务器 .env，不进 git、不下发到 Web/Android
-// - 输出强制结构化 JSON：解析失败抛错、不写库、不伪造（调用方 catch 后原样保留旧数据）
-// - 每次调用写 ai_calls 记账（成功 / 失败都记；记账失败不影响主流程）
+// DeepSeek 官方客户端。密钥和模型由服务端环境或账号配置提供。
 const { nowIso } = require('./tz');
+const { assertContextBudget } = require('./agent/context-budget');
 
-const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
-const DEFAULT_MODEL = 'qwen-plus';
+const DEFAULT_BASE_URL = 'https://api.deepseek.com';
+const COMPLETIONS_URL = `${DEFAULT_BASE_URL}/chat/completions`;
+const DEFAULT_MODEL = 'deepseek-flash';
+const DEEPSEEK_MODELS = Object.freeze([DEFAULT_MODEL, 'deepseek-v4-pro']);
 
 class AiError extends Error {
   constructor(message, { kind = 'ai_error', status = 0, detail = '' } = {}) {
@@ -18,16 +17,20 @@ class AiError extends Error {
   }
 }
 
+function throwIfCancelled(signal) {
+  if (signal?.aborted) throw new AiError('本轮已停止', { kind: 'cancelled', status: 409 });
+}
+
 function aiConfig() {
   return {
-    baseUrl: (process.env.AI_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ''),
-    apiKey: process.env.AI_API_KEY || '',
-    model: process.env.AI_MODEL || DEFAULT_MODEL,
+    apiKey: (process.env.DEEPSEEK_API_KEY || '').trim(),
+    model: (process.env.DEEPSEEK_MODEL || '').trim() || DEFAULT_MODEL,
   };
 }
 
 function aiAvailable() {
-  return Boolean(aiConfig().apiKey);
+  const cfg = aiConfig();
+  return Boolean(cfg.apiKey) && DEEPSEEK_MODELS.includes(cfg.model);
 }
 
 // ---- ai_calls 记账（best effort，绝不抛出）----
@@ -50,28 +53,39 @@ async function recordSkip(db, { userId, workflow, action, detail = '' }) {
 }
 
 // ---- 调模型（原生 fetch，无 SDK 依赖）----
-// opts: { messages, tools, json=true, timeoutMs, userId, workflow, action, idempotencyKey, detail, db }
+// providerConfig 由服务端传入。未提供时使用旧工作流的部署者配置。
 // 返回 { content, toolCalls, usage }
-async function chat(db, opts) {
-  const cfg = aiConfig();
+async function chat(db, opts = {}) {
+  const cfg = Object.hasOwn(opts, 'providerConfig') ? opts.providerConfig : aiConfig();
   const {
-    messages, tools = undefined, json = false, timeoutMs = 45000,
+    messages, tools = undefined, json = false, timeoutMs = 45000, maxTokens = 8192, deepThinking = false, signal,
     userId = null, workflow = '', action = '', idempotencyKey = null, detail = '',
-  } = opts || {};
-  if (!cfg.apiKey) throw new AiError('未配置 AI_API_KEY，AI 功能不可用', { kind: 'no_key' });
+  } = opts;
+  throwIfCancelled(signal);
+  if (!cfg?.apiKey) throw new AiError('请先配置 DeepSeek API Key', { kind: 'no_key' });
+  if (!DEEPSEEK_MODELS.includes(cfg.model)) throw new AiError('DeepSeek 模型配置无效', { kind: 'invalid_model' });
+  if (!Number.isInteger(maxTokens) || maxTokens < 1) throw new AiError('输出 token 预算无效', { kind: 'invalid_budget' });
 
-  const body = { model: cfg.model, messages };
+  const thinking = deepThinking === true;
+  const body = { model: cfg.model, messages, thinking: { type: thinking ? 'enabled' : 'disabled' } };
+  if (thinking) body.reasoning_effort = 'high';
+  body.max_tokens = maxTokens;
   if (tools && tools.length) body.tools = tools;
   // 结构化 JSON：要求 prompt 里已说明要输出 JSON；失败重试一次，仍失败抛 bad_json
   if (json) body.response_format = { type: 'json_object' };
 
   const started = Date.now();
+  const deadline = started + timeoutMs;
   let result = null;
   let lastErr = null;
   const attempts = json ? 2 : 1;
   for (let i = 0; i < attempts; i++) {
     try {
-      result = await requestOnce(cfg, body, timeoutMs);
+      throwIfCancelled(signal);
+      assertContextBudget({ messages: body.messages, tools: body.tools, outputTokens: body.max_tokens });
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) throw new AiError('DeepSeek 请求超时', { kind: 'timeout' });
+      result = await requestOnce(cfg, body, remainingMs, signal);
       break;
     } catch (e) {
       lastErr = e;
@@ -95,49 +109,80 @@ async function chat(db, opts) {
     promptTokens: result.usage.prompt_tokens, completionTokens: result.usage.completion_tokens,
     totalTokens: result.usage.total_tokens, detail, idempotencyKey,
   });
+  throwIfCancelled(signal);
   return result;
 }
 
-async function requestOnce(cfg, body, timeoutMs) {
+async function requestOnce(cfg, body, timeoutMs, callerSignal) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
-  let res;
+  const signal = callerSignal ? AbortSignal.any([callerSignal, ac.signal]) : ac.signal;
   try {
-    res = await fetch(`${cfg.baseUrl}/chat/completions`, {
+    const res = await fetch(COMPLETIONS_URL, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${cfg.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-      signal: ac.signal,
+      signal,
+      redirect: 'error',
     });
-  } catch (e) {
-    if (e && e.name === 'AbortError') throw new AiError('AI 请求超时', { kind: 'timeout' });
-    throw new AiError(`AI 网络错误：${e.message}`, { kind: 'network' });
+    if (!res.ok) {
+      res.body?.cancel().catch(() => {});
+      throw new AiError(`DeepSeek 接口返回 ${res.status}`, { kind: 'http', status: res.status });
+    }
+
+    const data = await res.json();
+    throwIfCancelled(callerSignal);
+    if (ac.signal.aborted) throw new AiError('DeepSeek 请求超时', { kind: 'timeout' });
+    const choice = data?.choices?.[0];
+    if (choice?.finish_reason === 'length') {
+      throw new AiError('DeepSeek 在答复完成前达到输出上限，请缩小问题后再试', { kind: 'length' });
+    }
+    if (choice?.finish_reason === 'content_filter') {
+      throw new AiError('DeepSeek 中止了这次答复，请调整问题后再试', { kind: 'content_filter' });
+    }
+    if (choice?.finish_reason === 'aborted' || choice?.finish_reason === 'insufficient_system_resource') {
+      throw new AiError('DeepSeek 未完成答复，请稍后重试', { kind: 'interrupted' });
+    }
+    const msg = choice?.message;
+    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) throw new AiError('DeepSeek 返回结构异常', { kind: 'bad_json' });
+
+    const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+    if (choice.finish_reason === 'tool_calls' && !toolCalls.length) {
+      throw new AiError('DeepSeek 返回了不完整的工具调用', { kind: 'bad_json' });
+    }
+    if (toolCalls.some((call) => typeof call?.id !== 'string' || !call.id || call.type !== 'function')
+      || new Set(toolCalls.map((call) => call.id)).size !== toolCalls.length) {
+      throw new AiError('DeepSeek 返回了无效的工具调用', { kind: 'bad_json' });
+    }
+
+    const out = {
+      content: typeof msg.content === 'string' ? msg.content : '',
+      toolCalls,
+      usage: data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    };
+
+    if (body.thinking.type === 'enabled' && toolCalls.length) {
+      if (typeof msg.reasoning_content !== 'string') {
+        throw new AiError('DeepSeek 返回了不完整的深度思考结果', { kind: 'bad_json' });
+      }
+      // 仅用于当前请求内部的工具子轮回传。序列化结果时排除此字段。
+      Object.defineProperty(out, 'reasoningContent', { value: msg.reasoning_content });
+    }
+
+    if (body.response_format) {
+      out.parsed = parseJsonLoose(out.content);
+      if (!out.parsed) throw new AiError('DeepSeek 输出不是合法 JSON', { kind: 'bad_json' });
+    }
+    return out;
+  } catch (error) {
+    throwIfCancelled(callerSignal);
+    if (ac.signal.aborted) throw new AiError('DeepSeek 请求超时', { kind: 'timeout' });
+    if (error instanceof AiError) throw error;
+    if (error instanceof SyntaxError) throw new AiError('DeepSeek 响应不是合法 JSON', { kind: 'bad_json' });
+    throw new AiError('连接 DeepSeek 失败', { kind: 'network' });
   } finally {
     clearTimeout(timer);
   }
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new AiError(`AI 接口返回 ${res.status}`, { kind: 'http', status: res.status, detail: text.slice(0, 500) });
-  }
-
-  const data = await res.json();
-  const msg = data.choices && data.choices[0] && data.choices[0].message;
-  if (!msg) throw new AiError('AI 返回结构异常（无 choices）', { kind: 'bad_json' });
-
-  const out = {
-    content: msg.content || '',
-    toolCalls: Array.isArray(msg.tool_calls) ? msg.tool_calls : [],
-    usage: data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-  };
-
-  if (body.response_format) {
-    out.parsed = parseJsonLoose(out.content); // 解析失败为 null，由 chat() 重试
-    if (!out.parsed) {
-      throw new AiError('AI 输出不是合法 JSON', { kind: 'bad_json', detail: out.content.slice(0, 300) });
-    }
-  }
-  return out;
 }
 
 // 宽松 JSON 提取：剥掉 ```json 围栏、抓首尾大括号
@@ -157,6 +202,7 @@ function parseJsonLoose(text) {
 
 module.exports = {
   AiError,
+  throwIfCancelled,
   aiConfig,
   aiAvailable,
   chat,
@@ -165,4 +211,5 @@ module.exports = {
   parseJsonLoose,
   DEFAULT_BASE_URL,
   DEFAULT_MODEL,
+  DEEPSEEK_MODELS,
 };

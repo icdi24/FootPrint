@@ -22,30 +22,22 @@ module.exports = function wishRoutes(db) {
   async function loadOwnWish(req, res, next) {
     try {
       const item = await db.get('SELECT * FROM wish_items WHERE id = ?', [Number(req.params.id) || 0]);
-      if (!item) return res.status(404).json({ error: '愿望不存在' });
+      if (!item || item.status === 'deleted') return res.status(404).json({ error: '愿望不存在' });
       if (item.owner_id !== req.user.id) return res.status(403).json({ error: '只能操作自己的愿望单' });
       req.wish = item;
       next();
     } catch (e) { next(e); }
   }
 
-  async function inCooldown(item) {
+  async function cooldownMsg(item, conn = db) {
     if (!Number(item.cooldown_days)) return false;
-    const last = await db.get(
+    const last = await conn.get(
       `SELECT * FROM redemptions WHERE wish_item_id = ? AND status = 'done' ORDER BY fulfilled_at DESC LIMIT 1`,
       [item.id]
     );
-    if (!last || !last.fulfilled_at) return false;
-    return Date.now() - new Date(last.fulfilled_at).getTime() < Number(item.cooldown_days) * 86400000;
-  }
-
-  async function cooldownMsg(item) {
-    const last = await db.get(
-      `SELECT * FROM redemptions WHERE wish_item_id = ? AND status = 'done' ORDER BY fulfilled_at DESC LIMIT 1`,
-      [item.id]
-    );
+    if (!last?.fulfilled_at) return null;
     const left = Math.ceil((Number(item.cooldown_days) * 86400000 - (Date.now() - new Date(last.fulfilled_at).getTime())) / 86400000);
-    return `冷却中，${left} 天后可再兑换`;
+    return left > 0 ? `冷却中，${left} 天后可再兑换` : null;
   }
 
   // 我的愿望单 + 兑换记录 + 余额
@@ -59,12 +51,12 @@ module.exports = function wishRoutes(db) {
       const itemMap = new Map(items.map((i) => [i.id, i]));
       const balance = await balanceOf(db, req.user.id);
       const enriched = [];
-      for (const i of items) {
-        const cd = await inCooldown(i);
+      for (const i of items.filter((item) => item.status !== 'deleted')) {
+        const cd = i.status === 'active' ? await cooldownMsg(i) : null;
         enriched.push({
           ...i,
           redeemable: i.status === 'active' && balance >= Number(i.points_cost) && !cd,
-          cooldownMsg: cd ? await cooldownMsg(i) : null,
+          cooldownMsg: cd || null,
         });
       }
       res.json({
@@ -111,6 +103,25 @@ module.exports = function wishRoutes(db) {
     } catch (e) { next(e); }
   });
 
+  r.post('/wish/:id/cancel', mw.requireUser, loadOwnWish, async (req, res, next) => {
+    try {
+      if (req.wish.status === 'archived') return res.json({ ok: true });
+      const update = await db.run("UPDATE wish_items SET status='archived', updated_at=? WHERE id=? AND owner_id=? AND status='active'",
+        [nowIso(), req.wish.id, req.user.id]);
+      if (!update.changes) return res.status(409).json({ error: '愿望状态已变化，请刷新后再试' });
+      res.json({ ok: true });
+    } catch (e) { next(e); }
+  });
+
+  r.delete('/wish/:id', mw.requireUser, loadOwnWish, async (req, res, next) => {
+    try {
+      const update = await db.run("UPDATE wish_items SET status='deleted', updated_at=? WHERE id=? AND owner_id=? AND status='archived'",
+        [nowIso(), req.wish.id, req.user.id]);
+      if (!update.changes) return res.status(409).json({ error: '请先取消愿望再删除' });
+      res.json({ ok: true });
+    } catch (e) { next(e); }
+  });
+
   // 编辑愿望（改价留历史，双方可见）
   r.put('/wish/:id', mw.requireUser, loadOwnWish, async (req, res, next) => {
     try {
@@ -127,13 +138,10 @@ module.exports = function wishRoutes(db) {
         return res.status(400).json({ error: '积分价需为 1–1000000 的整数' });
       }
       const status = b.status !== undefined ? (b.status === 'active' ? 'active' : 'archived') : g.status;
-      if (price !== Number(g.price_cny) || pointsCost !== Number(g.points_cost)) {
-        await db.run('INSERT INTO wish_history (wish_id, changed_by, detail, created_at) VALUES (?, ?, ?, ?)',
-          [g.id, req.user.id, `参考价 ${g.price_cny}→${price} 元；积分价 ${g.points_cost}→${pointsCost}`, nowIso()]);
-        log.log('wish_price_change', `${req.user.nickname} 改价「${g.title}」`);
-      }
-      await db.run(
-        `UPDATE wish_items SET title=?, description=?, emoji=?, price_cny=?, points_cost=?, cooldown_days=?, status=?, updated_at=? WHERE id=?`,
+      const priceChanged = price !== Number(g.price_cny) || pointsCost !== Number(g.points_cost);
+      const changed = await tx(db, async (c) => {
+        const update = await c.run(
+        `UPDATE wish_items SET title=?, description=?, emoji=?, price_cny=?, points_cost=?, cooldown_days=?, status=?, updated_at=? WHERE id=? AND status=?`,
         [
           title,
           b.description !== undefined ? String(b.description).trim() : g.description,
@@ -144,8 +152,16 @@ module.exports = function wishRoutes(db) {
           status,
           nowIso(),
           g.id,
+          g.status,
         ]
-      );
+        );
+        if (!update.changes) return false;
+        if (priceChanged) await c.run('INSERT INTO wish_history (wish_id, changed_by, detail, created_at) VALUES (?, ?, ?, ?)',
+          [g.id, req.user.id, `参考价 ${g.price_cny}→${price} 元；积分价 ${g.points_cost}→${pointsCost}`, nowIso()]);
+        return true;
+      });
+      if (!changed) return res.status(409).json({ error: '愿望状态已变化，请刷新后再试' });
+      if (priceChanged) log.log('wish_price_change', `${req.user.nickname} 改价「${g.title}」`);
       res.json({ item: await db.get('SELECT * FROM wish_items WHERE id = ?', [g.id]) });
     } catch (e) { next(e); }
   });
@@ -153,14 +169,14 @@ module.exports = function wishRoutes(db) {
   // 兑换（商品类：提交即自动确认）
   r.post('/wish/:id/redeem', mw.requireUser, loadOwnWish, async (req, res, next) => {
     try {
-      const item = req.wish;
-      if (item.status !== 'active') return res.status(400).json({ error: '这个愿望已下架' });
-      const balance = await balanceOf(db, req.user.id);
-      const cost = Number(item.points_cost);
-      if (balance < cost) return res.status(400).json({ error: `积分不够：还差 ${cost - balance} 分` });
-      if (await inCooldown(item)) return res.status(400).json({ error: await cooldownMsg(item) });
-
       const result = await tx(db, async (c) => {
+        const item = await c.get('SELECT * FROM wish_items WHERE id=? AND owner_id=? FOR UPDATE', [req.wish.id, req.user.id]);
+        if (item.status !== 'active') return { error: '这个愿望已取消' };
+        const balance = await balanceOf(c, req.user.id);
+        const cost = Number(item.points_cost);
+        if (balance < cost) return { error: `积分不够：还差 ${cost - balance} 分` };
+        const cd = await cooldownMsg(item, c);
+        if (cd) return { error: cd };
         const info = await c.run(
           `INSERT INTO redemptions (wish_item_id, user_id, points_locked, points_charged, status, applied_at, confirmed_at)
            VALUES (?, ?, ?, ?, 'confirmed', ?, ?) RETURNING id`,
@@ -183,9 +199,10 @@ module.exports = function wishRoutes(db) {
           refId: redId,
           note: `兑换「${item.title}」确认扣减`,
         });
-        return { redId, balanceAfter: charge.balanceAfter };
+        return { redId, balanceAfter: charge.balanceAfter, item, cost };
       });
-      log.log('redeem', `${req.user.nickname} 兑换「${item.title}」−${cost} 分`);
+      if (result.error) return res.status(400).json({ error: result.error });
+      log.log('redeem', `${req.user.nickname} 兑换「${result.item.title}」−${result.cost} 分`);
       res.json({
         redemption: await db.get('SELECT * FROM redemptions WHERE id = ?', [result.redId]),
         balance: result.balanceAfter,
@@ -203,8 +220,9 @@ module.exports = function wishRoutes(db) {
       if (Date.now() - new Date(red.applied_at).getTime() > 2 * 3600000) {
         return res.status(400).json({ error: '超过 2 小时，不能撤回' });
       }
-      await tx(db, async (c) => {
-        await c.run(`UPDATE redemptions SET status='cancelled' WHERE id=?`, [red.id]);
+      const cancelled = await tx(db, async (c) => {
+        const update = await c.run(`UPDATE redemptions SET status='cancelled' WHERE id=? AND status='confirmed'`, [red.id]);
+        if (!update.changes) return false;
         await ledgerAdd(c, {
           userId: red.user_id,
           delta: Number(red.points_locked),
@@ -213,7 +231,9 @@ module.exports = function wishRoutes(db) {
           refId: red.id,
           note: '兑换撤回退分',
         });
+        return true;
       });
+      if (!cancelled) return res.status(409).json({ error: '兑换状态已变化，请刷新后再试' });
       log.log('redeem_cancel', `${req.user.nickname} 撤回兑换 #${red.id}`);
       res.json({ ok: true, balance: await balanceOf(db, req.user.id) });
     } catch (e) { next(e); }
@@ -226,7 +246,8 @@ module.exports = function wishRoutes(db) {
       if (!red) return res.status(404).json({ error: '兑换记录不存在' });
       if (red.user_id !== req.user.id) return res.status(403).json({ error: '只能操作自己的兑换' });
       if (red.status !== 'confirmed') return res.status(400).json({ error: '当前状态不能标记完成' });
-      await db.run(`UPDATE redemptions SET status='done', fulfilled_at=? WHERE id=?`, [nowIso(), red.id]);
+      const update = await db.run(`UPDATE redemptions SET status='done', fulfilled_at=? WHERE id=? AND status='confirmed'`, [nowIso(), red.id]);
+      if (!update.changes) return res.status(409).json({ error: '兑换状态已变化，请刷新后再试' });
       log.log('redeem_done', `${req.user.nickname} 兑换 #${red.id} 已完成`);
       res.json({ ok: true });
     } catch (e) { next(e); }

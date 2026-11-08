@@ -162,6 +162,33 @@ function validateGoalBody(body, partial = false) {
   return errors;
 }
 
+async function createGoal(db, ownerId, b, cfg) {
+  const status = b.active === false ? 'draft' : 'active';
+  const type = b.type === 'stage' ? 'stage' : 'daily';
+  const difficulty = Number(b.difficulty) || 3;
+  const estTotalMin = type === 'stage' ? (Number(b.est_total_min) || 600) : null;
+  const customPoints = (b.custom_points !== undefined && b.custom_points !== null && b.custom_points !== '')
+    ? Number(b.custom_points) : null;
+  const autoTotal = type === 'stage'
+    ? Math.min(Math.round(estTotalMin * cfg.unit * (cfg.difficulty[difficulty] || 1.5)), 1200)
+    : null;
+  const totalPoints = type === 'stage' ? (customPoints != null ? customPoints : autoTotal) : null;
+  const info = await db.run(
+    `INSERT INTO goals (owner_id, type, title, emoji, description, freq_mode, freq_n, weekdays,
+      window_start, window_end, duration_min, difficulty, start_date, end_date, status,
+      est_total_min, accept_criteria, total_points, custom_points, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    [ownerId, type, b.title.trim(), b.emoji || '🎯', String(b.description || '').trim(),
+      type === 'stage' ? 'daily' : (b.freq_mode || 'daily'), Number(b.freq_n) || 1,
+      b.freq_mode === 'weekdays' ? String(b.weekdays) : '',
+      type === 'stage' ? null : (b.window_start || null), type === 'stage' ? null : (b.window_end || null),
+      Number(b.duration_min) || 30, difficulty, b.start_date || todayStr(), b.end_date || null, status,
+      estTotalMin, type === 'stage' ? String(b.accept_criteria || '').trim() : null,
+      totalPoints, customPoints, nowIso(), nowIso()]
+  );
+  return Number(info.id);
+}
+
 module.exports = function goalsRoutes(db) {
   const r = express.Router();
   const mw = require('../middleware').makeMiddleware(db);
@@ -195,10 +222,14 @@ module.exports = function goalsRoutes(db) {
     try {
       const cfg = await getPoints(db);
       const type = req.query.type;
-      const typeFilter = type === 'daily' || type === 'stage' ? `AND type = '${type}'` : '';
+      const typeFilter = type === 'daily' || type === 'stage' ? `AND g.type = '${type}'` : '';
       const rows = await db.all(
-        `SELECT * FROM goals WHERE owner_id = ? AND status != 'archived' ${typeFilter}
-         ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END, id DESC`,
+        `SELECT g.*, (g.prerequisite_goal_id IS NOT NULL AND NOT EXISTS (
+           SELECT 1 FROM goals AS prior
+           WHERE prior.id=g.prerequisite_goal_id AND prior.owner_id=g.owner_id AND prior.status='achieved'
+         )) AS prerequisite_pending
+         FROM goals AS g WHERE g.owner_id = ? AND g.status != 'archived' ${typeFilter}
+         ORDER BY CASE g.status WHEN 'active' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END, g.id DESC`,
         [req.user.id]
       );
       const monthStart = todayStr().slice(0, 8) + '01';
@@ -352,51 +383,10 @@ module.exports = function goalsRoutes(db) {
     try {
       const errors = validateGoalBody(req.body);
       if (errors.length) return res.status(400).json({ error: errors[0] });
-      const b = req.body;
       const cfg = await getPoints(db);
-      const status = b.active === false ? 'draft' : 'active';
-      const type = b.type === 'stage' ? 'stage' : 'daily';
-      // 小目标：预估总时长 + 难度算总积分，封顶 1200（需求 5.4）
-      const difficulty = Number(b.difficulty) || 3;
-      const estTotalMin = type === 'stage' ? (Number(b.est_total_min) || 600) : null;
-      // 自定义积分：非空则固定给这个分（日常=单次固定分；小目标=总积分）
-      const customPoints = (b.custom_points !== undefined && b.custom_points !== null && b.custom_points !== '')
-        ? Number(b.custom_points) : null;
-      const autoTotal = type === 'stage'
-        ? Math.min(Math.round(estTotalMin * cfg.unit * (cfg.difficulty[difficulty] || 1.5)), 1200)
-        : null;
-      const totalPoints = type === 'stage' ? (customPoints != null ? customPoints : autoTotal) : null;
-      const info = await db.run(
-        `INSERT INTO goals (owner_id, type, title, emoji, description, freq_mode, freq_n, weekdays,
-          window_start, window_end, duration_min, difficulty, start_date, end_date, status,
-          est_total_min, accept_criteria, total_points, custom_points, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-        [
-          req.user.id,
-          type,
-          b.title.trim(),
-          b.emoji || '🎯',
-          String(b.description || '').trim(),
-          type === 'stage' ? 'daily' : (b.freq_mode || 'daily'), // stage 无频率，占位 daily
-          Number(b.freq_n) || 1,
-          b.freq_mode === 'weekdays' ? String(b.weekdays) : '',
-          type === 'stage' ? null : (b.window_start || null),
-          type === 'stage' ? null : (b.window_end || null),
-          Number(b.duration_min) || 30,
-          difficulty,
-          b.start_date || todayStr(),
-          b.end_date || null,
-          status,
-          estTotalMin,
-          type === 'stage' ? String(b.accept_criteria || '').trim() : null,
-          totalPoints,
-          customPoints,
-          nowIso(),
-          nowIso(),
-        ]
-      );
-      const goal = await db.get('SELECT * FROM goals WHERE id = ?', [Number(info.id)]);
-      log.log('goal_create', `${req.user.nickname} 建目标「${goal.title}」(${type})`);
+      const goalId = await createGoal(db, req.user.id, req.body, cfg);
+      const goal = await db.get('SELECT * FROM goals WHERE id = ?', [goalId]);
+      log.log('goal_create', `${req.user.nickname} 建目标「${goal.title}」(${goal.type})`);
       res.json({ goal: goalRow(goal, cfg) });
     } catch (e) { next(e); }
   });
@@ -411,7 +401,12 @@ module.exports = function goalsRoutes(db) {
          ORDER BY check_date DESC, id DESC`,
         [req.goal.id, monthStart]
       );
-      res.json({ goal: goalRow(req.goal, cfg), monthCheckins: month });
+      const prerequisite = req.goal.prerequisite_goal_id && await db.get(
+        "SELECT id FROM goals WHERE id = ? AND owner_id = ? AND status = 'achieved'",
+        [req.goal.prerequisite_goal_id, req.goal.owner_id]
+      );
+      const goal = { ...req.goal, prerequisite_pending: Boolean(req.goal.prerequisite_goal_id && !prerequisite) };
+      res.json({ goal: goalRow(goal, cfg), monthCheckins: month });
     } catch (e) { next(e); }
   });
 
@@ -477,8 +472,19 @@ module.exports = function goalsRoutes(db) {
   // 开始（草稿→进行中）
   r.post('/goals/:id/start', mw.requireUser, mw.requireGoalOwner, async (req, res, next) => {
     try {
-      if (req.goal.status !== 'draft') return res.status(400).json({ error: '只有草稿可以开始' });
-      await db.run(`UPDATE goals SET status='active', updated_at=? WHERE id=?`, [nowIso(), req.goal.id]);
+      const update = await db.run(
+        `UPDATE goals AS g SET status='active', updated_at=? WHERE g.id=? AND g.status='draft'
+         AND (g.prerequisite_goal_id IS NULL OR EXISTS (
+           SELECT 1 FROM goals AS prior
+           WHERE prior.id=g.prerequisite_goal_id AND prior.owner_id=g.owner_id AND prior.status='achieved'
+         ))`, [nowIso(), req.goal.id]
+      );
+      if (!update.changes) {
+        if (req.goal.status === 'draft' && req.goal.prerequisite_goal_id) {
+          return res.status(409).json({ error: '请先完成并通过前置小目标的验收' });
+        }
+        return res.status(400).json({ error: '只有草稿可以开始' });
+      }
       res.json({ ok: true });
     } catch (e) { next(e); }
   });
@@ -487,8 +493,26 @@ module.exports = function goalsRoutes(db) {
   r.post('/goals/:id/abandon', mw.requireUser, mw.requireGoalOwner, async (req, res, next) => {
     try {
       if (!['active', 'draft'].includes(req.goal.status)) return res.status(400).json({ error: '当前状态不能放弃' });
-      await db.run(`UPDATE goals SET status='abandoned', updated_at=? WHERE id=?`, [nowIso(), req.goal.id]);
+      const update = await db.run(
+        `UPDATE goals AS g SET status='abandoned', updated_at=? WHERE g.id=? AND g.status IN ('active', 'draft')
+         AND NOT EXISTS (SELECT 1 FROM goals AS next WHERE next.prerequisite_goal_id=g.id
+           AND next.owner_id=g.owner_id AND next.status IN ('draft', 'active', 'reviewing'))`,
+        [nowIso(), req.goal.id]
+      );
+      if (!update.changes) return res.status(409).json({ error: '目标状态已变化，或仍有后续步骤依赖它。请刷新或先处理后续步骤' });
       log.log('goal_abandon', `${req.user.nickname} 放弃目标「${req.goal.title}」`);
+      res.json({ ok: true });
+    } catch (e) { next(e); }
+  });
+
+  r.delete('/goals/:id', mw.requireUser, mw.requireGoalOwner, async (req, res, next) => {
+    try {
+      if (req.goal.status === 'archived') return res.json({ ok: true });
+      const update = await db.run(
+        "UPDATE goals SET status='archived', updated_at=? WHERE id=? AND owner_id=? AND status='abandoned'",
+        [nowIso(), req.goal.id, req.user.id]
+      );
+      if (!update.changes) return res.status(409).json({ error: '请先放弃目标再删除' });
       res.json({ ok: true });
     } catch (e) { next(e); }
   });
@@ -523,6 +547,10 @@ module.exports = function goalsRoutes(db) {
       const points = effectivePoints(g, duration, inWin, cfg);
 
       const result = await tx(db, async (c) => {
+        const active = await c.get("SELECT id FROM goals WHERE id=? AND status='active' FOR UPDATE", [g.id]);
+        if (!active) return null;
+        const duplicate = await c.get("SELECT id FROM check_ins WHERE goal_id=? AND check_date=? AND status='credited'", [g.id, today]);
+        if (duplicate) return { duplicate: true };
         const info = await c.run(
           `INSERT INTO check_ins (goal_id, user_id, check_date, duration_min, in_window, points, is_makeup, evidence_text, evidence_id, status, created_at)
            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 'credited', ?) RETURNING id`,
@@ -541,6 +569,8 @@ module.exports = function goalsRoutes(db) {
         const streak = await updateStreakAndMilestones(c, freshGoal, cfg, await creditedDatesFor(c, g.id));
         return { ciId, led, streak };
       });
+      if (!result) return res.status(409).json({ error: '目标状态已变化，请刷新后再试' });
+      if (result.duplicate) return res.status(409).json({ error: '今天已经打过卡了' });
       log.log('checkin', `${req.user.nickname} 打卡「${g.title}」+${points} 分`);
       res.json({
         checkin: await db.get('SELECT * FROM check_ins WHERE id = ?', [result.ciId]),
@@ -561,8 +591,9 @@ module.exports = function goalsRoutes(db) {
       if (ci.status !== 'credited') return res.status(400).json({ error: '这条打卡已失效' });
       const hours = (Date.now() - new Date(ci.created_at).getTime()) / 3600000;
       if (hours > 24) return res.status(400).json({ error: '超过 24 小时不能撤销，只能由对方驳回或双方手动修正' });
-      await tx(db, async (c) => {
-        await c.run(`UPDATE check_ins SET status='revoked' WHERE id=?`, [ci.id]);
+      const revoked = await tx(db, async (c) => {
+        const changed = await c.run(`UPDATE check_ins SET status='revoked' WHERE id=? AND status='credited'`, [ci.id]);
+        if (!changed.changes) return false;
         await ledgerAdd(c, {
           userId: ci.user_id,
           delta: -Number(ci.points),
@@ -572,7 +603,9 @@ module.exports = function goalsRoutes(db) {
           note: '撤销打卡',
         });
         await recomputeStreakAfterRemoval(c, ci.goal_id);
+        return true;
       });
+      if (!revoked) return res.status(409).json({ error: '这条打卡已失效，请刷新后再试' });
       log.log('checkin_revoke', `${req.user.nickname} 撤销打卡 #${ci.id}`);
       res.json({ ok: true, balance: await balanceOf(db, req.user.id) });
     } catch (e) { next(e); }
@@ -588,8 +621,9 @@ module.exports = function goalsRoutes(db) {
       if (ci.status !== 'credited') return res.status(400).json({ error: '这条打卡已失效' });
       const reason = String((req.body && req.body.reason) || '').trim();
       if (!reason || reason.length > 200) return res.status(400).json({ error: '请填写 1–200 字的驳回理由' });
-      await tx(db, async (c) => {
-        await c.run(`UPDATE check_ins SET status='rejected', reason=? WHERE id=?`, [reason, ci.id]);
+      const rejected = await tx(db, async (c) => {
+        const changed = await c.run(`UPDATE check_ins SET status='rejected', reason=? WHERE id=? AND status='credited'`, [reason, ci.id]);
+        if (!changed.changes) return false;
         await ledgerAdd(c, {
           userId: ci.user_id,
           delta: -Number(ci.points),
@@ -599,7 +633,9 @@ module.exports = function goalsRoutes(db) {
           note: `对方驳回：${reason}`,
         });
         await recomputeStreakAfterRemoval(c, ci.goal_id);
+        return true;
       });
+      if (!rejected) return res.status(409).json({ error: '这条打卡已失效，请刷新后再试' });
       log.log('checkin_reject', `${req.user.nickname} 驳回 ${partner.nickname} 的打卡 #${ci.id}`);
       res.json({ ok: true });
     } catch (e) { next(e); }
@@ -637,7 +673,9 @@ module.exports = function goalsRoutes(db) {
       const partner = await mw.partnerOf(req.user.id);
       if (!partner) return res.status(400).json({ error: '还没有搭档，无法验收' });
 
-      await tx(db, async (c) => {
+      const submitted = await tx(db, async (c) => {
+        const active = await c.run("UPDATE goals SET status='reviewing', updated_at=? WHERE id=? AND status='active'", [nowIso(), g.id]);
+        if (!active.changes) return false;
         const prev = await c.get(`SELECT * FROM verifications WHERE goal_id = ? ORDER BY id DESC LIMIT 1`, [g.id]);
         const submitCount = prev ? Number(prev.submit_count) + 1 : 1;
         await c.run(
@@ -645,9 +683,33 @@ module.exports = function goalsRoutes(db) {
            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
           [g.id, req.user.id, partner.id, submitCount, evidenceText, evidenceIds.join(','), selfStatement, nowIso()]
         );
-        await c.run(`UPDATE goals SET status='reviewing', updated_at=? WHERE id=?`, [nowIso(), g.id]);
+        return true;
       });
+      if (!submitted) return res.status(409).json({ error: '目标状态已变化，请刷新后再试' });
       log.log('verify_submit', `${req.user.nickname} 提交验收「${g.title}」`);
+      res.json({ ok: true });
+    } catch (e) { next(e); }
+  });
+
+  r.post('/goals/:id/withdraw', mw.requireUser, mw.requireGoalOwner, async (req, res, next) => {
+    try {
+      const g = req.goal;
+      if (g.type !== 'stage' || g.status !== 'reviewing') return res.status(409).json({ error: '只有待验收的小目标可以撤回' });
+      const withdrawn = await tx(db, async (c) => {
+        const pending = await c.get(
+          "SELECT id FROM verifications WHERE goal_id=? AND submitter_id=? AND status='pending' ORDER BY id DESC LIMIT 1",
+          [g.id, req.user.id]
+        );
+        if (!pending) return false;
+        const update = await c.run(
+          "UPDATE verifications SET status='cancelled', reason='本人撤回', decided_at=? WHERE id=? AND status='pending'",
+          [nowIso(), pending.id]
+        );
+        if (!update.changes) return false;
+        await c.run("UPDATE goals SET status='active', updated_at=? WHERE id=? AND status='reviewing'", [nowIso(), g.id]);
+        return true;
+      });
+      if (!withdrawn) return res.status(409).json({ error: '这条验收已处理，请刷新后再试' });
       res.json({ ok: true });
     } catch (e) { next(e); }
   });
@@ -726,8 +788,9 @@ module.exports = function goalsRoutes(db) {
       const overdue = g.end_date && todayStr() > g.end_date;
       if (overdue) points = Math.round(points * 0.9);
 
-      await tx(db, async (c) => {
-        await c.run(`UPDATE verifications SET status='approved', decided_at=? WHERE id=?`, [nowIso(), v.id]);
+      const approved = await tx(db, async (c) => {
+        const update = await c.run(`UPDATE verifications SET status='approved', decided_at=? WHERE id=? AND status='pending'`, [nowIso(), v.id]);
+        if (!update.changes) return false;
         await c.run(`UPDATE goals SET status='achieved', updated_at=? WHERE id=?`, [nowIso(), g.id]);
         // 计划链联动：链上小目标达成 → plan_status='done'；并释放下一个（提前完成 → 提前露面）
         if (g.big_goal_id) {
@@ -745,7 +808,9 @@ module.exports = function goalsRoutes(db) {
             note: `小目标「${g.title}」${overdue ? '逾期完成（90%）' : '达成'}`,
           });
         }
+        return true;
       });
+      if (!approved) return res.status(409).json({ error: '这条验收已处理，请刷新后再试' });
       log.log('verify_approve', `${req.user.nickname} 通过 ${g.title} 的验收 +${points} 分`);
 
       // AI 进度分析（P2-#11）：异步触发，不阻塞验收响应；失败只记 ai_calls，不影响验收结果
@@ -776,10 +841,13 @@ module.exports = function goalsRoutes(db) {
       const reason = String((req.body && req.body.reason) || '').trim();
       if (!reason || reason.length > 200) return res.status(400).json({ error: '请填写 1–200 字的驳回理由' });
       const g = await db.get('SELECT * FROM goals WHERE id = ?', [v.goal_id]);
-      await tx(db, async (c) => {
-        await c.run(`UPDATE verifications SET status='rejected', reason=?, decided_at=? WHERE id=?`, [reason, nowIso(), v.id]);
+      const rejected = await tx(db, async (c) => {
+        const update = await c.run(`UPDATE verifications SET status='rejected', reason=?, decided_at=? WHERE id=? AND status='pending'`, [reason, nowIso(), v.id]);
+        if (!update.changes) return false;
         await c.run(`UPDATE goals SET status='active', updated_at=? WHERE id=?`, [nowIso(), v.goal_id]);
+        return true;
       });
+      if (!rejected) return res.status(409).json({ error: '这条验收已处理，请刷新后再试' });
       log.log('verify_reject', `${req.user.nickname} 驳回「${g.title}」的验收：${reason}`);
       res.json({ ok: true });
     } catch (e) { next(e); }
@@ -787,3 +855,6 @@ module.exports = function goalsRoutes(db) {
 
   return r;
 };
+
+module.exports.createGoal = createGoal;
+module.exports.validateGoalBody = validateGoalBody;

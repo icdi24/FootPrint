@@ -168,6 +168,19 @@ CREATE TABLE IF NOT EXISTS big_goals (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS planning_drafts (
+  id SERIAL PRIMARY KEY,
+  owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  goal TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('stage', 'daily')),
+  weekly_minutes INTEGER,
+  revision INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL CHECK (status IN ('clarifying', 'ready', 'applied')),
+  proposal JSONB NOT NULL,
+  result JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_planning_drafts_owner ON planning_drafts(owner_id, id DESC);
+
 -- 个人画像：每用户一份、分块存（basic/resume/skills/goal_progress/important…）
 -- status: active 正常 / void AI 标失效（删除只标失效，不物理删）
 CREATE TABLE IF NOT EXISTS user_profiles (
@@ -235,6 +248,54 @@ CREATE TABLE IF NOT EXISTS zoowy_messages (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_zoowy_msg_session ON zoowy_messages(session_id);
+CREATE TABLE IF NOT EXISTS zoowy_compactions (
+  session_id INTEGER PRIMARY KEY REFERENCES zoowy_sessions(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  through_message_id INTEGER NOT NULL,
+  summary TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS zoowy_model_settings (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  model TEXT NOT NULL,
+  encrypted_key TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS zoowy_attachments (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  mime TEXT NOT NULL,
+  payload BYTEA NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS zoowy_turns (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  request_id TEXT NOT NULL,
+  input JSONB NOT NULL,
+  state TEXT NOT NULL,
+  result JSONB,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, request_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_zoowy_running_turn ON zoowy_turns(user_id) WHERE state = 'running';
+CREATE TABLE IF NOT EXISTS zoowy_offers (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  session_id INTEGER NOT NULL REFERENCES zoowy_sessions(id),
+  payload JSONB NOT NULL,
+  result JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS zoowy_preferences (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  source_message_id INTEGER NOT NULL REFERENCES zoowy_messages(id),
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  revision INTEGER NOT NULL DEFAULT 1,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, key)
+);
 
 -- AI 调用记账：成功 / 跳过 / 失败都记（skip = AI 判断不用改、整轮没调模型）
 CREATE TABLE IF NOT EXISTS ai_calls (
@@ -327,6 +388,8 @@ async function openDb(connString) {
   await pool.query('ALTER TABLE goals ADD COLUMN IF NOT EXISTS planned_date TEXT');
   await pool.query('ALTER TABLE goals ADD COLUMN IF NOT EXISTS plan_order INTEGER');
   await pool.query("ALTER TABLE goals ADD COLUMN IF NOT EXISTS plan_status TEXT");
+  await pool.query('ALTER TABLE goals ADD COLUMN IF NOT EXISTS prerequisite_goal_id INTEGER');
+  await pool.query('ALTER TABLE zoowy_preferences ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE');
   // 迁移：画像块分享标记（P3：默认仅自己，主动分享后对方可见）
   await pool.query('ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS shared INTEGER NOT NULL DEFAULT 0');
   // partner_id 仅保留作回滚兼容，新代码一律读 pair_members

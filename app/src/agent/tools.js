@@ -26,7 +26,7 @@ async function snapshotPlan(db, bigGoalId, source, reason) {
   const bg = await db.get('SELECT * FROM big_goals WHERE id = ?', [bigGoalId]);
   if (!bg) return;
   const chain = await db.all(
-    `SELECT id, title, emoji, description, accept_criteria, planned_date, plan_order, plan_status, status
+    `SELECT id, title, emoji, description, accept_criteria, planned_date, plan_order, plan_status, status, prerequisite_goal_id
      FROM goals WHERE big_goal_id = ? ORDER BY COALESCE(plan_order, 999999), id`,
     [bigGoalId]
   );
@@ -376,7 +376,7 @@ const WHITELIST = {
   progress: ['read_my_goals', 'read_big_goal', 'read_checkins', 'write_big_goal_progress', 'patch_my_profile'],
   daily: ['read_my_goals', 'read_big_goal', 'read_checkins', 'read_my_profile', 'read_my_usage', 'read_my_diaries', 'write_my_diary', 'patch_my_profile'],
   // chat 保留调用能力，但同一套白名单机制：读全 + 排计划相关写；不给写日报/写进度（防伪造）
-  chat: ['read_my_profile', 'read_my_goals', 'read_big_goal', 'read_checkins', 'read_my_usage', 'read_my_diaries', 'create_plan_goal', 'shift_plan_dates', 'patch_my_profile'],
+  chat: [], // Chat passes an owner-scoped tool set through its turn runner.
 };
 
 // 工具名 → OpenAI tools 格式

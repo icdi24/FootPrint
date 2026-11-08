@@ -19,6 +19,8 @@ const usageRoutes = require('./routes/usage');
 const bigGoalsRoutes = require('./routes/biggoals');
 const diariesRoutes = require('./routes/diaries');
 const zoowyRoutes = require('./routes/zoowy');
+const deepSeekRoutes = require('./routes/deepseek');
+const zoowyAttachmentsRoutes = require('./routes/zoowy-attachments');
 const { scheduleDaily } = require('./agent/workflows/daily');
 const { scheduleAutoApprove } = require('./verify-auto');
 
@@ -61,6 +63,8 @@ async function main() {
   app.use('/api', bigGoalsRoutes(db));
   app.use('/api', diariesRoutes(db));
   app.use('/api', zoowyRoutes(db));
+  app.use('/api', deepSeekRoutes(db));
+  app.use('/api', zoowyAttachmentsRoutes(db));
   app.use('/api', require('./routes/pair')(db));
   app.use('/api', require('./routes/admin')(db));
 
@@ -95,7 +99,7 @@ async function main() {
     if (!res.headersSent) res.status(500).json({ error: '服务器开小差了' });
   });
 
-  app.listen(PORT, () => {
+  app.listen(PORT, process.env.HOST || undefined, () => {
     console.log('');
     console.log('  🐾 脚印 V0.1 已启动');
     console.log(`  ➜ 本机访问  http://localhost:${PORT}`);

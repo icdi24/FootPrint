@@ -242,12 +242,17 @@ module.exports = function opsRoutes(db, dataDir) {
     } catch (e) { next(e); }
   });
 
-  // 备份
-  r.get('/backups', mw.requireUser, (req, res) => {
+  const requireAdmin = (req, res, next) => {
+    if (!Number(req.user.is_admin)) return res.status(403).json({ error: '需要管理员权限' });
+    next();
+  };
+
+  // 全量备份包含其他账号的数据。
+  r.get('/backups', mw.requireUser, requireAdmin, (req, res) => {
     res.json({ backups: backup.listBackups(dataDir) });
   });
 
-  r.post('/backups', mw.requireUser, async (req, res, next) => {
+  r.post('/backups', mw.requireUser, requireAdmin, async (req, res, next) => {
     try {
       const info = await backup.backupNow(db, dataDir);
       log.log('backup_manual', `${req.user.nickname} 手动快照 ${info.name}`);
@@ -255,7 +260,7 @@ module.exports = function opsRoutes(db, dataDir) {
     } catch (e) { next(e); }
   });
 
-  r.get('/backups/:name', mw.requireUser, (req, res) => {
+  r.get('/backups/:name', mw.requireUser, requireAdmin, (req, res) => {
     const name = String(req.params.name);
     if (!/^app-\d{4}-\d{2}-\d{2}\.json$/.test(name)) return res.status(400).json({ error: '文件名不对' });
     const p = path.join(backup.backupsDir(dataDir), name);
@@ -264,7 +269,7 @@ module.exports = function opsRoutes(db, dataDir) {
   });
 
   // 全量导出（JSON + CSV 打包 zip）
-  r.get('/export', mw.requireUser, async (req, res, next) => {
+  r.get('/export', mw.requireUser, requireAdmin, async (req, res, next) => {
     try {
       const zip = await buildExportZip(db);
       const date = todayStr();

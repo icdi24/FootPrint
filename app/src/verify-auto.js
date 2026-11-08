@@ -16,8 +16,9 @@ async function autoApproveOverdue(db, logMod) {
       const g = await db.get('SELECT * FROM goals WHERE id = ?', [v.goal_id]);
       if (!g) continue;
       const { ledgerAdd, tx } = require('./db');
-      await tx(db, async (c) => {
-        await c.run(`UPDATE verifications SET status='approved', decided_at=? WHERE id=?`, [nowIso(), v.id]);
+      const approved = await tx(db, async (c) => {
+        const update = await c.run(`UPDATE verifications SET status='approved', decided_at=? WHERE id=? AND status='pending'`, [nowIso(), v.id]);
+        if (!update.changes) return false;
         await c.run(`UPDATE goals SET status='achieved', updated_at=? WHERE id=?`, [nowIso(), g.id]);
         const points = Number(g.total_points) || 0;
         if (points > 0) {
@@ -30,7 +31,9 @@ async function autoApproveOverdue(db, logMod) {
             note: `小目标「${g.title}」超时自动通过`,
           });
         }
+        return true;
       });
+      if (!approved) continue;
       if (logMod) logMod.log('verify_auto', `小目标「${g.title}」超时自动通过 +${g.total_points} 分`);
       done += 1;
     }

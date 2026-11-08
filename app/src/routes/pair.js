@@ -112,8 +112,9 @@ module.exports = function pairRoutes(db) {
         // 2) 在途验收作废，目标回 active
         const vs = await c.all("SELECT id, goal_id FROM verifications WHERE pair_id = ? AND status = 'pending'", [pid]);
         for (const v of vs) {
-          await c.run("UPDATE verifications SET status = 'cancelled', reason = '解绑作废', decided_at = ? WHERE id = ?",
+          const update = await c.run("UPDATE verifications SET status = 'cancelled', reason = '解绑作废', decided_at = ? WHERE id = ? AND status = 'pending'",
             [now, v.id]);
+          if (!update.changes) continue;
           await c.run("UPDATE goals SET status = 'active' WHERE id = ? AND status = 'reviewing'", [v.goal_id]);
           cancelledVerifications += 1;
         }

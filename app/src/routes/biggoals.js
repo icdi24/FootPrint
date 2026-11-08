@@ -8,7 +8,7 @@ const express = require('express');
 const { nowIso, todayStr } = require('../tz');
 const { makeMiddleware } = require('../middleware');
 const { IMPLEMENTATIONS, snapshotPlan } = require('../agent/tools');
-const { planIntro, confirmPlan } = require('../agent/workflows/plan');
+const { tx } = require('../db');
 const log = require('../log');
 
 function isValidDate(s) {
@@ -18,20 +18,26 @@ function isValidDate(s) {
 // 惰性释放：planned 且到日期的 → released，保持「released 且未完成」至多 2 个（首页露 1–2 个）
 async function releaseChain(db, bigGoalId, ownerId) {
   const cur = await db.get(
-    "SELECT COUNT(*) AS c FROM goals WHERE big_goal_id = ? AND owner_id = ? AND plan_status = 'released' AND status NOT IN ('achieved','abandoned')",
+    "SELECT COUNT(*) AS c FROM goals WHERE big_goal_id = ? AND owner_id = ? AND plan_status = 'released' AND status IN ('draft','active','reviewing')",
     [bigGoalId, ownerId]
   );
   let slots = Math.max(0, 2 - Number(cur.c));
   if (!slots) return;
   const due = await db.all(
-    `SELECT id FROM goals WHERE big_goal_id = ? AND owner_id = ? AND plan_status = 'planned'
-       AND planned_date IS NOT NULL AND planned_date <= ?
-     ORDER BY COALESCE(plan_order, 999999), planned_date, id`,
+    `SELECT g.id FROM goals AS g WHERE g.big_goal_id = ? AND g.owner_id = ? AND g.plan_status = 'planned'
+       AND g.status IN ('draft','active')
+       AND EXISTS (SELECT 1 FROM big_goals AS bg WHERE bg.id=g.big_goal_id AND bg.status='active')
+       AND g.planned_date IS NOT NULL AND g.planned_date <= ?
+       AND (g.prerequisite_goal_id IS NULL OR EXISTS (
+         SELECT 1 FROM goals AS prior
+         WHERE prior.id=g.prerequisite_goal_id AND prior.owner_id=g.owner_id AND prior.status='achieved'
+       ))
+     ORDER BY COALESCE(g.plan_order, 999999), g.planned_date, g.id`,
     [bigGoalId, ownerId, todayStr()]
   );
   for (const g of due) {
     if (slots <= 0) break;
-    await db.run("UPDATE goals SET plan_status = 'released', updated_at = ? WHERE id = ?", [nowIso(), g.id]);
+    await db.run("UPDATE goals SET plan_status='released', updated_at=? WHERE id=? AND status IN ('draft','active') AND plan_status='planned'", [nowIso(), g.id]);
     slots -= 1;
   }
 }
@@ -39,10 +45,14 @@ async function releaseChain(db, bigGoalId, ownerId) {
 // 链的展示形态（含未启动的全部）
 async function chainOf(db, bigGoalId, ownerId) {
   return db.all(
-    `SELECT id, title, emoji, description, status, accept_criteria, est_total_min, difficulty,
-            planned_date, plan_order, plan_status, start_date, end_date, streak_count, updated_at
-     FROM goals WHERE big_goal_id = ? AND owner_id = ? AND status != 'archived'
-     ORDER BY COALESCE(plan_order, 999999), COALESCE(planned_date, '9999-12-31'), id`,
+    `SELECT g.id, g.title, g.emoji, g.description, g.status, g.accept_criteria, g.est_total_min, g.difficulty,
+            g.planned_date, g.plan_order, g.plan_status, g.start_date, g.end_date, g.streak_count, g.updated_at,
+            (g.prerequisite_goal_id IS NOT NULL AND NOT EXISTS (
+              SELECT 1 FROM goals AS prior
+              WHERE prior.id=g.prerequisite_goal_id AND prior.owner_id=g.owner_id AND prior.status='achieved'
+            )) AS prerequisite_pending
+     FROM goals AS g WHERE g.big_goal_id = ? AND g.owner_id = ? AND g.status != 'archived'
+     ORDER BY COALESCE(g.plan_order, 999999), COALESCE(g.planned_date, '9999-12-31'), g.id`,
     [bigGoalId, ownerId]
   );
 }
@@ -58,6 +68,12 @@ function bigGoalsRoutes(db) {
       req.bigGoal = bg;
       next();
     } catch (e) { next(e); }
+  };
+  const EDITABLE = (req, res, next) => {
+    if (req.bigGoal.status === 'abandoned' || req.bigGoal.status === 'archived') {
+      return res.status(409).json({ error: '已放弃或删除的大目标不能修改' });
+    }
+    next();
   };
 
   // 创建大目标
@@ -98,6 +114,7 @@ function bigGoalsRoutes(db) {
   // 大目标详情：整条路线（含未启动）+ 客观计数；顺带惰性释放
   r.get('/biggoals/:id', mw.requireUser, OWN, async (req, res, next) => {
     try {
+      if (req.bigGoal.status === 'archived') return res.status(404).json({ error: '大目标不存在' });
       await releaseChain(db, req.bigGoal.id, req.user.id);
       const bg = await db.get('SELECT * FROM big_goals WHERE id = ?', [req.bigGoal.id]);
       const chain = await chainOf(db, req.bigGoal.id, req.user.id);
@@ -106,8 +123,42 @@ function bigGoalsRoutes(db) {
     } catch (e) { next(e); }
   });
 
+  r.post('/biggoals/:id/abandon', mw.requireUser, OWN, async (req, res, next) => {
+    try {
+      const result = await tx(db, async (c) => {
+        const goal = await c.get('SELECT status FROM big_goals WHERE id=? AND owner_id=? FOR UPDATE', [req.bigGoal.id, req.user.id]);
+        if (goal.status === 'abandoned') return 'ok';
+        if (goal.status !== 'active') return 'invalid';
+        const children = await c.all(
+          "SELECT id,status FROM goals WHERE big_goal_id=? AND owner_id=? AND status IN ('draft','active','reviewing') ORDER BY id FOR UPDATE",
+          [req.bigGoal.id, req.user.id]
+        );
+        if (children.some((g) => g.status === 'reviewing')) return 'reviewing';
+        const now = nowIso();
+        await c.run("UPDATE goals SET status='abandoned', updated_at=? WHERE big_goal_id=? AND owner_id=? AND status IN ('draft','active')",
+          [now, req.bigGoal.id, req.user.id]);
+        await c.run("UPDATE big_goals SET status='abandoned', updated_at=? WHERE id=?", [now, req.bigGoal.id]);
+        await snapshotPlan(c, req.bigGoal.id, 'user', 'abandon');
+        return 'ok';
+      });
+      if (result === 'reviewing') return res.status(409).json({ error: '请先撤回或完成待验收的小目标' });
+      if (result !== 'ok') return res.status(409).json({ error: '当前状态不能放弃' });
+      res.json({ ok: true });
+    } catch (e) { next(e); }
+  });
+
+  r.delete('/biggoals/:id', mw.requireUser, OWN, async (req, res, next) => {
+    try {
+      if (req.bigGoal.status === 'archived') return res.json({ ok: true });
+      const update = await db.run("UPDATE big_goals SET status='archived', updated_at=? WHERE id=? AND owner_id=? AND status='abandoned'",
+        [nowIso(), req.bigGoal.id, req.user.id]);
+      if (!update.changes) return res.status(409).json({ error: '请先放弃大目标再删除' });
+      res.json({ ok: true });
+    } catch (e) { next(e); }
+  });
+
   // 改大目标（标题/图标/描述/状态）
-  r.patch('/biggoals/:id', mw.requireUser, OWN, async (req, res, next) => {
+  r.patch('/biggoals/:id', mw.requireUser, OWN, EDITABLE, async (req, res, next) => {
     try {
       const b = req.body || {};
       if (b.title !== undefined) {
@@ -123,8 +174,9 @@ function bigGoalsRoutes(db) {
         await db.run('UPDATE big_goals SET description = ?, updated_at = ? WHERE id = ?', [String(b.description).trim(), nowIso(), req.bigGoal.id]);
       }
       if (b.status !== undefined) {
-        if (!['active', 'done', 'archived'].includes(b.status)) return res.status(400).json({ error: 'status 不对' });
-        await db.run('UPDATE big_goals SET status = ?, updated_at = ? WHERE id = ?', [b.status, nowIso(), req.bigGoal.id]);
+        if (!['active', 'done'].includes(b.status)) return res.status(400).json({ error: '请通过放弃或删除操作更改状态' });
+        const update = await db.run("UPDATE big_goals SET status=?, updated_at=? WHERE id=? AND status IN ('active','done')", [b.status, nowIso(), req.bigGoal.id]);
+        if (!update.changes) return res.status(409).json({ error: '大目标状态已变化' });
       }
       const bg = await db.get('SELECT * FROM big_goals WHERE id = ?', [req.bigGoal.id]);
       res.json({ bigGoal: bg });
@@ -132,7 +184,7 @@ function bigGoalsRoutes(db) {
   });
 
   // 绑已有小目标到链上（goal 必须是自己的 stage 目标）
-  r.post('/biggoals/:id/goals', mw.requireUser, OWN, async (req, res, next) => {
+  r.post('/biggoals/:id/goals', mw.requireUser, OWN, EDITABLE, async (req, res, next) => {
     try {
       const b = req.body || {};
       const goal = await db.get("SELECT * FROM goals WHERE id = ? AND owner_id = ?", [Number(b.goal_id) || 0, req.user.id]);
@@ -148,25 +200,31 @@ function bigGoalsRoutes(db) {
         const m = await db.get('SELECT COALESCE(MAX(plan_order), 0) AS m FROM goals WHERE big_goal_id = ?', [req.bigGoal.id]);
         order = Number(m.m) + 1;
       }
-      await db.run(
-        "UPDATE goals SET big_goal_id = ?, planned_date = ?, plan_order = ?, plan_status = 'planned', updated_at = ? WHERE id = ?",
-        [req.bigGoal.id, planned, order, nowIso(), goal.id]
-      );
-      await snapshotPlan(db, req.bigGoal.id, 'user', `bind:${goal.title}`);
-      const updated = await db.get('SELECT * FROM goals WHERE id = ?', [goal.id]);
+      const updated = await tx(db, async (c) => {
+        const parent = await c.get("SELECT id FROM big_goals WHERE id=? AND status IN ('active','done') FOR UPDATE", [req.bigGoal.id]);
+        if (!parent) return null;
+        const bound = await c.run(
+          "UPDATE goals SET big_goal_id=?, planned_date=?, plan_order=?, plan_status='planned', updated_at=? WHERE id=? AND status NOT IN ('abandoned','archived') AND (big_goal_id IS NULL OR big_goal_id=?)",
+          [req.bigGoal.id, planned, order, nowIso(), goal.id, req.bigGoal.id]
+        );
+        if (!bound.changes) return null;
+        await snapshotPlan(c, req.bigGoal.id, 'user', `bind:${goal.title}`);
+        return c.get('SELECT * FROM goals WHERE id = ?', [goal.id]);
+      });
+      if (!updated) return res.status(409).json({ error: '目标状态已变化，请刷新后再试' });
       res.json({ goal: updated });
     } catch (e) { next(e); }
   });
 
   // 手改链上小目标（日期/内容/顺序）。手改优先：AI 重排默认不动手改过的（重排只处理 planned）
-  r.patch('/biggoals/:id/goals/:goalId', mw.requireUser, OWN, async (req, res, next) => {
+  r.patch('/biggoals/:id/goals/:goalId', mw.requireUser, OWN, EDITABLE, async (req, res, next) => {
     try {
       const goal = await db.get(
         'SELECT * FROM goals WHERE id = ? AND owner_id = ? AND big_goal_id = ?',
         [Number(req.params.goalId) || 0, req.user.id, req.bigGoal.id]
       );
       if (!goal) return res.status(404).json({ error: '链上没有这个目标' });
-      if (goal.status === 'achieved' || goal.status === 'abandoned') {
+      if (['achieved','abandoned','archived'].includes(goal.status)) {
         return res.status(400).json({ error: '已达成/已放弃的小目标锁死，不能改' });
       }
       const b = req.body || {};
@@ -199,7 +257,7 @@ function bigGoalsRoutes(db) {
   });
 
   // 整体顺延/提前：复用 agent 工具里的同一实现（手改与 AI 重排同一套链路）
-  r.post('/biggoals/:id/shift', mw.requireUser, OWN, async (req, res, next) => {
+  r.post('/biggoals/:id/shift', mw.requireUser, OWN, EDITABLE, async (req, res, next) => {
     try {
       const b = req.body || {};
       const impl = IMPLEMENTATIONS.shift_plan_dates;
@@ -213,7 +271,7 @@ function bigGoalsRoutes(db) {
   });
 
   // 调序：只动 planned 的
-  r.post('/biggoals/:id/reorder', mw.requireUser, OWN, async (req, res, next) => {
+  r.post('/biggoals/:id/reorder', mw.requireUser, OWN, EDITABLE, async (req, res, next) => {
     try {
       const orders = Array.isArray(req.body && req.body.orders) ? req.body.orders : [];
       if (!orders.length || orders.length > 50) return res.status(400).json({ error: 'orders 需为 1–50 项' });
@@ -224,7 +282,7 @@ function bigGoalsRoutes(db) {
           [Number(o.goal_id) || 0, req.user.id, req.bigGoal.id]
         );
         if (!goal) continue;
-        if (goal.plan_status !== 'planned' || goal.status === 'achieved' || goal.status === 'abandoned') continue; // 锁死
+        if (goal.plan_status !== 'planned' || ['achieved','abandoned','archived'].includes(goal.status)) continue;
         const ord = Number(o.plan_order);
         if (!Number.isInteger(ord) || ord < 1) continue;
         await db.run('UPDATE goals SET plan_order = ?, updated_at = ? WHERE id = ?', [ord, nowIso(), goal.id]);
@@ -236,7 +294,7 @@ function bigGoalsRoutes(db) {
   });
 
   // 解绑（只允许未启动的；目标本身不删）
-  r.delete('/biggoals/:id/goals/:goalId', mw.requireUser, OWN, async (req, res, next) => {
+  r.delete('/biggoals/:id/goals/:goalId', mw.requireUser, OWN, EDITABLE, async (req, res, next) => {
     try {
       const goal = await db.get(
         'SELECT * FROM goals WHERE id = ? AND owner_id = ? AND big_goal_id = ?',
@@ -244,43 +302,16 @@ function bigGoalsRoutes(db) {
       );
       if (!goal) return res.status(404).json({ error: '链上没有这个目标' });
       if (goal.plan_status !== 'planned') return res.status(400).json({ error: '已释放/已达成的小目标不能解绑' });
-      await db.run(
-        'UPDATE goals SET big_goal_id = NULL, planned_date = NULL, plan_order = NULL, plan_status = NULL, updated_at = ? WHERE id = ?',
+      const update = await db.run(
+        `UPDATE goals AS g SET big_goal_id=NULL, planned_date=NULL, plan_order=NULL, plan_status=NULL,
+           prerequisite_goal_id=NULL, updated_at=? WHERE g.id=? AND g.plan_status='planned'
+         AND NOT EXISTS (SELECT 1 FROM goals AS next WHERE next.prerequisite_goal_id=g.id
+           AND next.owner_id=g.owner_id AND next.status IN ('draft', 'active', 'reviewing'))`,
         [nowIso(), goal.id]
       );
+      if (!update.changes) return res.status(409).json({ error: '目标状态已变化，或仍有后续步骤依赖它。请刷新或先移出后续步骤' });
       await snapshotPlan(db, req.bigGoal.id, 'user', `unbind:${goal.title}`);
       res.json({ ok: true });
-    } catch (e) { next(e); }
-  });
-
-  // ---- zoowy plan 入口（#9 后端部分：创建表单「让 zoowy 帮忙拆」+ 详情页「重新规划」）----
-  // 第一步：自检信息够不够 → 不够问一个问题（带建议答案）/ 够了出候选（不写库）
-  r.post('/zoowy/plan/intro', mw.requireUser, async (req, res, next) => {
-    try {
-      const b = req.body || {};
-      if (!aiAvailable()) return res.status(503).json({ error: 'AI 未配置，zoowy 不可用' });
-      const out = await planIntro({
-        db, userId: req.user.id,
-        bigGoalId: Number(b.big_goal_id) || 0,
-        mode: b.mode === 'idea' ? 'idea' : 'auto',
-        userMessage: String(b.message || '').slice(0, 1000),
-        force: Boolean(b.force),
-        history: Array.isArray(b.history) ? b.history.slice(-5).map((h) => ({ q: String(h && h.q || '').slice(0, 300), a: String(h && h.a || '').slice(0, 500) })) : [],
-      });
-      res.json(out);
-    } catch (e) { next(e); }
-  });
-
-  // 第二步：用户勾选候选 = 一次确认 → 走白名单工具创建
-  r.post('/zoowy/plan/confirm', mw.requireUser, async (req, res, next) => {
-    try {
-      const b = req.body || {};
-      const out = await confirmPlan({
-        db, userId: req.user.id,
-        bigGoalId: Number(b.big_goal_id) || 0,
-        items: Array.isArray(b.items) ? b.items : [],
-      });
-      res.json(out);
     } catch (e) { next(e); }
   });
 
@@ -290,7 +321,3 @@ function bigGoalsRoutes(db) {
 module.exports = bigGoalsRoutes;
 // 供验收通过路由联动释放下一个（goals.js approve）
 bigGoalsRoutes.releaseChain = releaseChain;
-
-function aiAvailable() {
-  return Boolean(process.env.AI_API_KEY);
-}
