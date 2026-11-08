@@ -10,7 +10,7 @@ const MAX_NOTE = 200;
 
 const httpError = (status, message) => Object.assign(new Error(message), { status });
 
-const userBrief = (u) => ({ id: u.id, nickname: u.nickname, avatar: u.avatar });
+const userBrief = (u) => ({ id: u.id, username: u.login_name, avatar: u.avatar });
 
 // 该用户当前 active 的日常/小目标摘要（最多 5 条），发布时快照。
 async function goalSummaryOf(db, uid) {
@@ -29,7 +29,7 @@ module.exports = function hallRoutes(db) {
 
   const toListing = (row, relation) => ({
     userId: row.user_id,
-    nickname: row.nickname,
+    username: row.username,
     avatar: row.avatar,
     note: row.note,
     goalSummary: row.goal_summary,
@@ -54,17 +54,17 @@ module.exports = function hallRoutes(db) {
       // 收/发邀请补全对方昵称头像
       const incoming = [];
       for (const inv of incomingRows) {
-        const u = await db.get('SELECT id, nickname, avatar FROM users WHERE id = ?', [inv.from_user_id]);
+        const u = await db.get('SELECT id, login_name, avatar FROM users WHERE id = ?', [inv.from_user_id]);
         if (u) incoming.push({ id: inv.id, fromUser: userBrief(u), createdAt: inv.created_at });
       }
       const outgoing = [];
       for (const inv of outgoingRows) {
-        const u = await db.get('SELECT id, nickname, avatar FROM users WHERE id = ?', [inv.to_user_id]);
+        const u = await db.get('SELECT id, login_name, avatar FROM users WHERE id = ?', [inv.to_user_id]);
         if (u) outgoing.push({ id: inv.id, toUser: userBrief(u), createdAt: inv.created_at });
       }
 
       const rows = await db.all(
-        `SELECT l.user_id, l.note, l.goal_summary, l.created_at, u.nickname, u.avatar
+        `SELECT l.user_id, l.note, l.goal_summary, l.created_at, u.login_name AS username, u.avatar
          FROM hall_listings l
          JOIN users u ON u.id = l.user_id
          WHERE l.status = 'active' AND l.user_id != ?

@@ -109,7 +109,7 @@ const HallPage = {
         <div class="hall-card-head">
           <span class="hall-avatar">${UI.esc(l.avatar)}</span>
           <div class="hall-who">
-            <div class="hall-nick">${UI.esc(l.nickname)}</div>
+            <div class="hall-nick">${UI.esc(l.username)}</div>
             <div class="hall-time">${UI.fmtTimeIso(l.createdAt)}</div>
           </div>
         </div>
@@ -128,7 +128,7 @@ const HallPage = {
       <div class="hall-invite">
         <span class="hall-avatar">${UI.esc(inv.fromUser.avatar)}</span>
         <div class="hall-who">
-          <div class="hall-nick">${UI.esc(inv.fromUser.nickname)} 邀请你组队</div>
+          <div class="hall-nick">${UI.esc(inv.fromUser.username)} 邀请你组队</div>
           <div class="hall-time">${UI.fmtTimeIso(inv.createdAt)}</div>
         </div>
         <div class="hall-btn-row">
@@ -141,7 +141,7 @@ const HallPage = {
       <div class="hall-invite">
         <span class="hall-avatar">${UI.esc(inv.toUser.avatar)}</span>
         <div class="hall-who">
-          <div class="hall-nick">你邀请了 ${UI.esc(inv.toUser.nickname)}</div>
+          <div class="hall-nick">你邀请了 ${UI.esc(inv.toUser.username)}</div>
           <div class="hall-time">${UI.fmtTimeIso(inv.createdAt)}</div>
         </div>
         <div class="hall-btn-row"><button class="btn ghost" data-cancel="${inv.id}">取消</button></div>

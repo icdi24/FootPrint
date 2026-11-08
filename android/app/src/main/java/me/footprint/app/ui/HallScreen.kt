@@ -216,7 +216,7 @@ private fun InvitesSection(
                 Text((from?.avatar ?: "🐾"), style = PixelType.Title)
                 Spacer(Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("${from?.nickname ?: "有人"} 邀请你组队", style = PixelType.Body, color = PixelColors.Ink)
+                    Text("${from?.username ?: "有人"} 邀请你组队", style = PixelType.Body, color = PixelColors.Ink)
                     Text(AppViewModel.clockOf(inv.createdAt)?.let { "于 $it" } ?: "", style = PixelType.Small, color = PixelColors.Ink3)
                 }
                 Spacer(Modifier.width(8.dp))
@@ -237,7 +237,7 @@ private fun InvitesSection(
                 Text((to?.avatar ?: "🐾"), style = PixelType.Title)
                 Spacer(Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("你邀请了 ${to?.nickname ?: "对方"}", style = PixelType.Body, color = PixelColors.Ink)
+                    Text("你邀请了 ${to?.username ?: "对方"}", style = PixelType.Body, color = PixelColors.Ink)
                     Text("待对方确认", style = PixelType.Small, color = PixelColors.Ink3)
                 }
                 Spacer(Modifier.width(8.dp))
@@ -275,7 +275,7 @@ private fun ListingsSection(
                     Text(l.avatar ?: "🐾", style = PixelType.Title)
                     Spacer(Modifier.width(8.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(l.nickname, style = PixelType.Body, color = PixelColors.Ink)
+                        Text(l.username, style = PixelType.Body, color = PixelColors.Ink)
                         Text(AppViewModel.clockOf(l.createdAt)?.let { "于 $it" } ?: "", style = PixelType.Small, color = PixelColors.Ink3)
                     }
                 }
