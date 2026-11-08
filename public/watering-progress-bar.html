@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>App 加载页 · 浇水进度条</title>
+<!--
+  取自 1794120041921-sdoszkbn2xh.html 的 App 加载页骨架。
+  原页面的像素浇水场景 canvas、Logo 木牌、底部贴士已移除，
+  加载动画只保留「提示 + 百分比 + 12 格田垄进度条」这一块。
+  字体走 Google Fonts；离线时退回系统字体。
+  接入真实加载进度：window.WateringBar.setProgress(0~1)，调用后自动停止演示循环。
+-->
+<link rel="stylesheet" href="https://fonts.googleapis.cn/css2?family=Press+Start+2P&family=ZCOOL+KuaiLe&family=Noto+Sans+SC:wght@400;500;700&display=swap" />
+<style>
+  :root{
+    --ink:#3E2A1E;
+    --cream:#F6EBD5;
+    --fabric:#F0E1C2;
+    --wood-deep:#C79A5B;
+    --soil:#8B5E3C;
+    --soil-dry:#B98355;
+    --soil-wet:#5A3A26;
+    --sun:#F4B942;
+    --leaf:#7CB342;
+    --leaf-dark:#4E8B3A;
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; min-height:100%; }
+
+  /* ---------- App 页面外壳 ---------- */
+  .loader-root{
+    min-height:100vh; width:100%;
+    display:flex; justify-content:center;
+    background-color:#E3D0AC;
+    background-image:
+      repeating-linear-gradient(0deg, rgba(90,58,38,.05) 0 1px, transparent 1px 4px),
+      repeating-linear-gradient(90deg, rgba(90,58,38,.05) 0 1px, transparent 1px 4px);
+  }
+  .phone-canvas{
+    position:relative;
+    width:100%; max-width:390px; min-height:100vh;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:46px 24px 30px;
+    overflow:hidden;
+  }
+  /* 麻布 / 手作点阵底纹 */
+  .fabric{
+    background-color:var(--fabric);
+    background-image:
+      repeating-linear-gradient(0deg, rgba(90,58,38,.055) 0 1px, transparent 1px 3px),
+      repeating-linear-gradient(90deg, rgba(90,58,38,.055) 0 1px, transparent 1px 3px);
+  }
+  /* 四角像素刺绣装饰 */
+  .corner{ position:absolute; width:14px; height:14px; opacity:.5; }
+  .corner::before,.corner::after{ content:''; position:absolute; background:var(--wood-deep); }
+  .corner::before{ width:14px; height:3px; top:6px; left:0; }
+  .corner::after{ width:3px; height:14px; top:0; left:6px; }
+  .corner.tl{ top:18px; left:18px; }
+  .corner.tr{ top:18px; right:18px; }
+  .corner.bl{ bottom:18px; left:18px; }
+  .corner.br{ bottom:18px; right:18px; }
+
+  /* ---------- 加载动画：只有这一块 ---------- */
+  .progress-block{ width:340px; max-width:100%; }
+  .progress-head{
+    display:flex; align-items:flex-end; justify-content:space-between;
+    margin-bottom:11px; gap:8px;
+  }
+  .loading-text{
+    font-family:'ZCOOL KuaiLe','Noto Sans SC',sans-serif;
+    font-size:16px; color:var(--ink); letter-spacing:.5px; line-height:1.5;
+  }
+  .dots i{ font-style:normal; opacity:.25; animation:dotblink 1.2s steps(1,end) infinite; }
+  .dots i:nth-child(1){ animation-delay:0s; }
+  .dots i:nth-child(2){ animation-delay:.2s; }
+  .dots i:nth-child(3){ animation-delay:.4s; }
+  @keyframes dotblink{ 0%,70%{opacity:.22} 15%,55%{opacity:1} }
+
+  .pct{
+    font-family:'Press Start 2P','Courier New',monospace;
+    font-size:19px; line-height:1; color:var(--sun);
+    min-width:82px; text-align:right;
+    text-shadow:2px 2px 0 var(--ink);
+    white-space:nowrap;
+  }
+
+  /* 12 格像素田垄进度条 */
+  .grow-bar{
+    display:flex; gap:3px; width:100%;
+    padding:6px;
+    background:#C9A272;
+    border:3px solid var(--ink);
+    box-shadow:inset 0 3px 0 rgba(62,42,30,.24), 0 3px 0 var(--soil);
+  }
+  .gc{ position:relative; flex:1; height:30px; --g:0; }
+  .gc-soil{
+    position:absolute; left:0; right:0; bottom:0; height:17px;
+    background:var(--soil-dry);
+    border:2px solid var(--ink);
+    box-shadow:inset 0 2px 0 #CF9A6B, inset 0 -2px 0 #966540;
+    transition:background .18s steps(2,end);
+  }
+  .gc-soil::before,.gc-soil::after{
+    content:''; position:absolute; width:2px; height:2px; background:rgba(62,42,30,.35);
+    bottom:3px;
+  }
+  .gc-soil::before{ left:3px; } .gc-soil::after{ right:3px; }
+  .gc.active .gc-soil{ background:#96683F; box-shadow:inset 0 2px 0 #B98355, inset 0 -2px 0 #6B452B; }
+  .gc.done .gc-soil{ background:var(--soil-wet); box-shadow:inset 0 2px 0 #7A5033, inset 0 -2px 0 #3F2718; }
+  .gc.done .gc-soil::before,.gc.done .gc-soil::after{ background:#8ED3E6; }
+
+  .gc-plant{
+    position:absolute; bottom:17px; left:50%; transform:translateX(-50%);
+    width:16px; height:calc(11px * var(--g));
+    opacity:0; transition:opacity .15s linear;
+  }
+  .gc.sprouted .gc-plant{ opacity:1; }
+  .gc-plant .st{ position:absolute; left:7px; bottom:0; width:2px; height:100%; background:#4E8B3A; }
+  .gc-plant .lf{ position:absolute; top:0; width:5px; height:3px; background:var(--leaf); }
+  .gc-plant .lf.l{ left:1px; }
+  .gc-plant .lf.r{ right:1px; background:#9BD45B; }
+  .gc-plant .fr{
+    position:absolute; top:-3px; left:6px; width:4px; height:4px;
+    background:var(--sun); border:1px solid #C77E22; opacity:0;
+  }
+  .gc.mature .fr{ opacity:1; }
+  .gc-drop{
+    position:absolute; top:-3px; left:50%; transform:translateX(-50%);
+    width:3px; height:4px; background:#BFEAF7; opacity:0;
+  }
+  .gc.active .gc-drop{ opacity:1; animation:drip .5s steps(2,end) infinite; }
+  @keyframes drip{ 0%{ transform:translate(-50%,-3px); opacity:1 } 100%{ transform:translate(-50%,8px); opacity:0 } }
+
+  .bar-legend{
+    display:flex; justify-content:space-between; align-items:center;
+    margin-top:9px;
+    font-family:'Press Start 2P','Courier New',monospace;
+    font-size:6.5px; color:#9A7148; letter-spacing:.4px;
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .dots i, .gc.active .gc-drop{ animation:none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="loader-root">
+  <div class="phone-canvas fabric">
+
+    <span class="corner tl"></span><span class="corner tr"></span>
+    <span class="corner bl"></span><span class="corner br"></span>
+
+    <!-- 加载动画：提示 + 百分比 + 像素田垄进度条 -->
+    <section class="progress-block">
+      <div class="progress-head">
+        <div class="loading-text">加载中<span class="dots"><i>.</i><i>.</i><i>.</i></span></div>
+        <div class="pct" id="pct" aria-live="off">00%</div>
+      </div>
+      <div class="grow-bar" id="growBar" role="progressbar" aria-label="浇水 / 作物生长进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+      <div class="bar-legend"><span>DRY SOIL</span><span>WATERING &amp; GROWING</span><span>HARVESTED</span></div>
+    </section>
+
+  </div>
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  var bar   = document.getElementById('growBar');
+  var pctEl = document.getElementById('pct');
+  var cells = [];
+  var clamp = function(v,a,b){ return v<a?a:(v>b?b:v); };
+
+  /* 生成 12 格田垄 */
+  for(var i=0;i<12;i++){
+    var d = document.createElement('div');
+    d.className = 'gc';
+    d.innerHTML = '<span class="gc-plant"><i class="st"></i><i class="lf l"></i><i class="lf r"></i><i class="fr"></i></span>'+
+                  '<span class="gc-drop"></span><span class="gc-soil"></span>';
+    bar.appendChild(d);
+    cells.push(d);
+  }
+
+  var lastPct = -1;
+  function updateBar(t){
+    var pct = Math.min(100, Math.floor(t*100));
+    if(pct !== lastPct){
+      pctEl.textContent = (pct<10?'0':'') + pct + '%';
+      bar.setAttribute('aria-valuenow', String(pct));
+      lastPct = pct;
+    }
+    for(var i=0;i<12;i++){
+      var g = clamp(t*12 - i, 0, 1);
+      var el = cells[i];
+      el.style.setProperty('--g', g.toFixed(3));
+      el.classList.toggle('sprouted', g > 0.04);
+      el.classList.toggle('active',   g > 0.04 && g <= 0.6);
+      el.classList.toggle('done',     g > 0.6);
+      el.classList.toggle('mature',   g > 0.84);
+    }
+  }
+
+  /* 演示：4.5s 一轮。原稿 11s 是给整幕场景动画配的，现在只剩进度条。 */
+  var DUR = 4500;
+  var t0 = Date.now() - 0.23*DUR;
+  var manual = false;
+
+  if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+    updateBar(0.23);
+  } else {
+    (function loop(){
+      if(!manual) updateBar(((Date.now()-t0) % DUR) / DUR);
+      requestAnimationFrame(loop);
+    })();
+  }
+
+  /* 接入真实加载进度：WateringBar.setProgress(0~1) */
+  window.WateringBar = {
+    setProgress: function(p){ manual = true; updateBar(clamp(p, 0, 1)); }
+  };
+})();
+</script>
+</body>
+</html>
