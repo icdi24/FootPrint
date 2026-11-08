@@ -24,3 +24,28 @@ public/app-debug.apk
 
 # 过程工作区：数据导出 / 备份 / 演练产物（含口令哈希，不进 Git）
 migration/
+
+# ---------------------------------------------------------------
+# 以下为 2026-11-08 整理后新增规则
+# ---------------------------------------------------------------
+
+# 设计流水线一次性产物（脚本已归档到 archive/design-pipeline）
+__pycache__/
+_gi_png/
+_gi_svg/
+_test_fix_png/
+_test_fix_svg/
+_retro_svg/
+_gen_shot.png
+
+# 原始参考素材与截图证据：体积大、非代码，本地保留不入库
+archive/references/
+shots/
+设计参考/
+手机实际截图/
+UI示例/
+
+# 编辑器 / 工具本地状态
+.obsidian/
+.vscode/
+.idea/
