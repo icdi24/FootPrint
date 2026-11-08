@@ -30,13 +30,18 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import me.footprint.app.net.Api
 import me.footprint.app.net.ApiException
+import me.footprint.app.net.AiSettingsPayload
 import me.footprint.app.net.BackupEntry
 import me.footprint.app.net.Difficulty
 import me.footprint.app.net.Freq
 import me.footprint.app.net.LedgerItem
 import me.footprint.app.net.PointsConfig
+import me.footprint.app.net.ProfileChangesResponse
+import me.footprint.app.net.ProfileVersionDto
+import me.footprint.app.net.ProfileVersionsResponse
 import me.footprint.app.net.Session
 import me.footprint.app.net.StatsInner
+import me.footprint.app.net.UserSettings
 import me.footprint.app.net.Window
 import me.footprint.app.ui.theme.PixelColors
 import me.footprint.app.ui.theme.PixelType
@@ -45,7 +50,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * 「我的」页：个人信息 + 统计卡片 + 积分流水 + 改口令 + 积分系数 + 备份 + 登出。
+ * 「我的」页：个人信息 + 统计卡片 + 积分流水 + 改密码 + 积分系数 + 备份 + 登出。
  *
  * 只用基础组件（Box / Row / Column / PixelTextField），直角、2px 描边、硬投影，
  * 颜色和字号只用 PixelColors / PixelType。
@@ -90,22 +95,27 @@ fun MeScreen(vm: AppViewModel) {
   var ledger by remember { mutableStateOf<List<LedgerItem>>(emptyList()) }
   var settings by remember { mutableStateOf<PointsConfig?>(null) }
   var backups by remember { mutableStateOf<List<BackupEntry>>(emptyList()) }
+  var profileChanges by remember { mutableStateOf<ProfileChangesResponse?>(null) }
+  var profileVersions by remember { mutableStateOf<ProfileVersionsResponse?>(null) }
+  var aiSettings by remember { mutableStateOf<UserSettings?>(null) }
 
   var loading by remember { mutableStateOf(true) }
   var error by remember { mutableStateOf<String?>(null) }
   var partnerName by remember { mutableStateOf<String?>(null) }
   var myAvatar by remember { mutableStateOf("") }
 
-  // 提示消息（改口令/备份/系数保存等一次性反馈）
+  // 提示消息（改密码/备份/系数保存等一次性反馈）
   var toast by remember { mutableStateOf<String?>(null) }
 
   // ---- 弹层开关 ----
   var showPassword by remember { mutableStateOf(false) }
   var showPoints by remember { mutableStateOf(false) }
+  var showProfileChanges by remember { mutableStateOf(false) }
+  var showAiSettings by remember { mutableStateOf(false) }
 
-  // 我的昵称（优先 vm.myName，兜底 Session.nickname）
+  // 我的用户名（优先 vm.myName，兜底 Session.username）
   val myName by vm.myName.collectAsState()
-  val nickname = myName.ifBlank { Session.nickname(context).orEmpty() }
+  val username = myName.ifBlank { Session.username(context).orEmpty() }
 
   suspend fun loadAll() {
     val token = Session.token(context)
@@ -123,9 +133,9 @@ fun MeScreen(vm: AppViewModel) {
     } catch (e: Exception) {
       error = e.message ?: "加载统计失败"
     }
-    // 搭档昵称：getStats 不带参返回的是自己，必须走 /api/partner 拿搭档
+    // 搭档用户名：getStats 不带参返回的是自己，必须走 /api/partner 拿搭档
     try {
-      partnerName = Api.getPartnerPage(token).partner?.nickname
+      partnerName = Api.getPartnerPage(token).partner?.username
     } catch (e: Exception) {
       // 没搭档/失败都不阻塞其它模块
     }
@@ -144,6 +154,16 @@ fun MeScreen(vm: AppViewModel) {
     } catch (e: Exception) {
       // 备份失败不阻塞其它模块
     }
+    try {
+      profileChanges = Api.getProfileChanges(token, 5)
+    } catch (e: Exception) {
+      // 画像变更失败不阻塞其它模块
+    }
+    try {
+      aiSettings = Api.getAiSettings(token)
+    } catch (e: Exception) {
+      // AI 设置失败不阻塞其它模块
+    }
     loading = false
   }
 
@@ -157,7 +177,7 @@ fun MeScreen(vm: AppViewModel) {
     ) {
       // ===== 顶部个人信息 =====
       ProfileHeader(
-        nickname = nickname.ifBlank { "我" },
+        username = username.ifBlank { "我" },
         partnerName = partnerName,
         avatar = myAvatar,
       )
@@ -184,10 +204,27 @@ fun MeScreen(vm: AppViewModel) {
 
       Spacer(Modifier.height(16.dp))
 
-      // ===== 改口令 / 积分系数 入口 =====
+      // ===== 画像变更：zoowy 改了什么 =====
+      ProfileChangesSection(
+        data = profileChanges,
+        onOpen = {
+          scope.launch {
+            val t = Session.token(context)
+            if (t != null) {
+              try { profileVersions = Api.getProfileVersions(t, 20) } catch (e: Exception) { /* 忽略 */ }
+            }
+          }
+          showProfileChanges = true
+        },
+      )
+
+      Spacer(Modifier.height(16.dp))
+
+      // ===== 改密码 / 积分系数 / AI 设置 入口 =====
       SettingsActions(
         onPassword = { showPassword = true },
         onPoints = { showPoints = true },
+        onAiSettings = { showAiSettings = true },
       )
 
       Spacer(Modifier.height(16.dp))
@@ -228,7 +265,7 @@ fun MeScreen(vm: AppViewModel) {
       onDismiss = { showPassword = false },
       onSuccess = {
         showPassword = false
-        toast = "口令已修改，可能需要重新登录"
+        toast = "密码已修改，可能需要重新登录"
       },
     )
   }
@@ -256,6 +293,40 @@ fun MeScreen(vm: AppViewModel) {
     }
   }
 
+  if (showProfileChanges) {
+    val d = profileChanges
+    if (d != null) {
+      ProfileChangesDialog(
+        data = d,
+        versions = profileVersions?.versions ?: emptyList(),
+        onDismiss = { showProfileChanges = false },
+        onChanged = { scope.launch { loadAll() } },
+      )
+    }
+  }
+
+  if (showAiSettings) {
+    val cur = aiSettings
+    if (cur != null) {
+      AiSettingsDialog(
+        initial = cur,
+        onDismiss = { showAiSettings = false },
+        onSave = { next ->
+          scope.launch {
+            val token = Session.token(context) ?: return@launch
+            try {
+              aiSettings = Api.updateAiSettings(token, next)
+              showAiSettings = false
+              toast = "AI 设置已保存"
+            } catch (e: Exception) {
+              toast = e.message ?: "保存失败"
+            }
+          }
+        },
+      )
+    }
+  }
+
   // ---- 提示 ----
   toast?.let { msg ->
     ToastBar(msg) { toast = null }
@@ -266,9 +337,9 @@ fun MeScreen(vm: AppViewModel) {
 // 各区块组件
 // ---------------------------------------------------------------------------
 
-/** 顶部个人信息：昵称 + 头像框 + 搭档监督文案 */
+/** 顶部个人信息：用户名 + 头像框 + 搭档监督文案 */
 @Composable
-private fun ProfileHeader(nickname: String, partnerName: String?, avatar: String) {
+private fun ProfileHeader(username: String, partnerName: String?, avatar: String) {
   PixelPanel(Modifier.fillMaxWidth()) {
     Row(
       modifier = Modifier.padding(16.dp),
@@ -284,13 +355,13 @@ private fun ProfileHeader(nickname: String, partnerName: String?, avatar: String
         contentAlignment = Alignment.Center,
       ) {
         Text(
-          text = avatar.ifBlank { nickname.take(1).ifBlank { "我" } },
+          text = avatar.ifBlank { username.take(1).ifBlank { "我" } },
           style = PixelType.Huge,
         )
       }
       Spacer(Modifier.width(12.dp))
       Column {
-        Text(nickname, style = PixelType.Title, color = PixelColors.Ink)
+        Text(username, style = PixelType.Title, color = PixelColors.Ink)
         Spacer(Modifier.height(4.dp))
         Text(
           text = if (partnerName.isNullOrBlank()) "还没有搭档" else "和 $partnerName 互相监督中",
@@ -405,15 +476,18 @@ private fun LedgerRow(item: LedgerItem) {
   }
 }
 
-/** 改口令 / 积分系数 两个入口按钮 */
+/** 改密码 / 积分系数 / AI 设置 三个入口按钮 */
 @Composable
-private fun SettingsActions(onPassword: () -> Unit, onPoints: () -> Unit) {
+private fun SettingsActions(onPassword: () -> Unit, onPoints: () -> Unit, onAiSettings: () -> Unit) {
   Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
     Box(Modifier.weight(1f)) {
-      PixelButton("改口令", onClick = onPassword, modifier = Modifier.fillMaxWidth())
+      PixelButton("改密码", onClick = onPassword, modifier = Modifier.fillMaxWidth())
     }
     Box(Modifier.weight(1f)) {
       PixelButton("积分系数", onClick = onPoints, modifier = Modifier.fillMaxWidth())
+    }
+    Box(Modifier.weight(1f)) {
+      PixelButton("AI 设置", onClick = onAiSettings, modifier = Modifier.fillMaxWidth())
     }
   }
 }
@@ -480,7 +554,7 @@ private fun ToastBar(message: String, onDismiss: () -> Unit) {
 // 弹层
 // ---------------------------------------------------------------------------
 
-/** 改口令弹层 */
+/** 改密码弹层 */
 @Composable
 private fun PasswordDialog(onDismiss: () -> Unit, onSuccess: () -> Unit) {
   val context = LocalContext.current
@@ -493,12 +567,12 @@ private fun PasswordDialog(onDismiss: () -> Unit, onSuccess: () -> Unit) {
   Overlay {
     PixelPanel(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
       Column(Modifier.padding(16.dp)) {
-        Text("改口令", style = PixelType.Title, color = PixelColors.Ink)
+        Text("改密码", style = PixelType.Title, color = PixelColors.Ink)
         Spacer(Modifier.height(12.dp))
         PixelTextField(
           value = oldPwd,
           onValueChange = { oldPwd = it; err = null },
-          placeholder = "旧口令",
+          placeholder = "旧密码",
           modifier = Modifier.fillMaxWidth(),
           isPassword = true,
         )
@@ -506,7 +580,7 @@ private fun PasswordDialog(onDismiss: () -> Unit, onSuccess: () -> Unit) {
         PixelTextField(
           value = newPwd,
           onValueChange = { newPwd = it; err = null },
-          placeholder = "新口令（至少 6 位）",
+          placeholder = "新密码（至少 6 位）",
           modifier = Modifier.fillMaxWidth(),
           isPassword = true,
         )
@@ -524,11 +598,11 @@ private fun PasswordDialog(onDismiss: () -> Unit, onSuccess: () -> Unit) {
               "确定",
               onClick = {
                 if (oldPwd.isBlank() || newPwd.isBlank()) {
-                  err = "旧口令和新口令都要填"
+                  err = "旧密码和新密码都要填"
                   return@PixelButton
                 }
                 if (newPwd.length < 6) {
-                  err = "新口令至少 6 位"
+                  err = "新密码至少 6 位"
                   return@PixelButton
                 }
                 busy = true
@@ -724,5 +798,231 @@ private fun parseCfg(
     )
   } catch (e: Exception) {
     null
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 画像变更：改了什么 / 明细 / 版本回滚 / AI 设置（v1.2 双端对齐）
+// ---------------------------------------------------------------------------
+
+private fun workflowLabel(wf: String): String = when (wf) {
+  "chat" -> "聊天"
+  "plan" -> "拆计划"
+  "progress" -> "进度分析"
+  "daily" -> "日报"
+  "user" -> "你手动"
+  else -> wf.ifBlank { "zoowy" }
+}
+
+/** 「我」页画像变更区块：未读红点 + 最近一条摘要 */
+@Composable
+private fun ProfileChangesSection(data: ProfileChangesResponse?, onOpen: () -> Unit) {
+  PixelPanel(Modifier.fillMaxWidth()) {
+    Column(Modifier.padding(16.dp)) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("画像变更", style = PixelType.Title, color = PixelColors.Ink)
+        Spacer(Modifier.width(8.dp))
+        val unread = data?.unread ?: 0
+        if (unread > 0) {
+          Text("● $unread 条新的", style = PixelType.Small, color = PixelColors.OrangeDeep)
+        }
+        Spacer(Modifier.weight(1f))
+        PixelSmallButton("查看全部", onClick = onOpen)
+      }
+      Spacer(Modifier.height(10.dp))
+      val last = data?.items?.firstOrNull()
+      if (last == null) {
+        Text("还没有变更。zoowy 记住新信息时会在这里告诉你改了什么。",
+          style = PixelType.Small, color = PixelColors.Ink3)
+      } else {
+        Text(last.summary, style = PixelType.Body, color = PixelColors.Ink)
+        Spacer(Modifier.height(4.dp))
+        val tail = if (last.reported) "" else " · 静默留痕"
+        Text("${ledgerTime(last.createdAt)} · ${workflowLabel(last.workflow)}$tail",
+          style = PixelType.Small, color = PixelColors.Ink3)
+      }
+    }
+  }
+}
+
+/** 变更记录弹层：明细展开 / 版本历史与回滚 / 全部标已读 */
+@Composable
+private fun ProfileChangesDialog(
+  data: ProfileChangesResponse,
+  versions: List<ProfileVersionDto>,
+  onDismiss: () -> Unit,
+  onChanged: () -> Unit,
+) {
+  val context = LocalContext.current
+  val scope = rememberCoroutineScope()
+  var expanded by remember { mutableStateOf<Long?>(null) }
+  var err by remember { mutableStateOf<String?>(null) }
+
+  Overlay {
+    PixelPanel(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+      Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
+        Text("画像变更记录", style = PixelType.Title, color = PixelColors.Ink)
+        Spacer(Modifier.height(6.dp))
+        Text("每次改动都留痕；关掉「改完汇报」只是不推红点，这里照样能翻到。",
+          style = PixelType.Small, color = PixelColors.Ink3)
+        Spacer(Modifier.height(12.dp))
+
+        if (data.items.isEmpty()) {
+          Text("还没有变更。", style = PixelType.Small, color = PixelColors.Ink3)
+        } else {
+          data.items.forEach { item ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Column(Modifier.weight(1f)) {
+                Text(item.summary, style = PixelType.Body, color = PixelColors.Ink)
+                val tail = if (item.reported) "" else " · 静默留痕"
+                Text("${ledgerTime(item.createdAt)} · ${workflowLabel(item.workflow)}$tail",
+                  style = PixelType.Small, color = PixelColors.Ink3)
+              }
+              Spacer(Modifier.width(6.dp))
+              PixelSmallButton(if (expanded == item.id) "收起" else "明细", onClick = {
+                expanded = if (expanded == item.id) null else item.id
+              })
+            }
+            if (expanded == item.id) {
+              Column(Modifier.padding(start = 8.dp, top = 6.dp)) {
+                if (item.detail.isEmpty()) {
+                  Text("（无明细）", style = PixelType.Small, color = PixelColors.Ink3)
+                } else {
+                  item.detail.forEach { c ->
+                    val reason = c.reason.ifBlank { "—" }
+                    val evidence = c.evidence.ifBlank { "—" }
+                    Text("${c.op} · ${c.block}", style = PixelType.Small, color = PixelColors.Ink2)
+                    Text("理由：$reason", style = PixelType.Small, color = PixelColors.Ink3)
+                    Text("依据：$evidence", style = PixelType.Small, color = PixelColors.Ink3)
+                    if (c.before.isNotBlank()) {
+                      Text("原：${c.before.take(80)}", style = PixelType.Small, color = PixelColors.Ink3)
+                    }
+                    if (c.after.isNotBlank()) {
+                      Text("新：${c.after.take(80)}", style = PixelType.Small, color = PixelColors.Ink3)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                  }
+                }
+              }
+            }
+            Spacer(Modifier.height(8.dp))
+            Box(Modifier.fillMaxWidth().height(2.dp).background(PixelColors.Line))
+            Spacer(Modifier.height(8.dp))
+          }
+        }
+
+        Text("版本历史（可回滚）", style = PixelType.Title, color = PixelColors.Ink)
+        Spacer(Modifier.height(6.dp))
+        if (versions.isEmpty()) {
+          Text("还没有版本快照。", style = PixelType.Small, color = PixelColors.Ink3)
+        } else {
+          versions.forEach { v ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Text("#${v.id} ${ledgerTime(v.createdAt)} · ${v.blockCount} 块 · ${v.changedBy}",
+                style = PixelType.Small, color = PixelColors.Ink2, modifier = Modifier.weight(1f))
+              Spacer(Modifier.width(6.dp))
+              PixelSmallButton("回滚", onClick = {
+                scope.launch {
+                  val token = Session.token(context)
+                  if (token == null) {
+                    err = "未登录"
+                    return@launch
+                  }
+                  try {
+                    Api.rollbackProfileVersion(token, v.id)
+                    onChanged()
+                    onDismiss()
+                  } catch (e: Exception) {
+                    err = e.message ?: "回滚失败"
+                  }
+                }
+              })
+            }
+            Spacer(Modifier.height(6.dp))
+          }
+        }
+
+        err?.let {
+          Spacer(Modifier.height(8.dp))
+          Text(it, style = PixelType.Small, color = PixelColors.Red)
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          Box(Modifier.weight(1f)) {
+            PixelSmallButton("全部已读", onClick = {
+              scope.launch {
+                val token = Session.token(context) ?: return@launch
+                try {
+                  Api.markProfileChangesRead(token)
+                  onChanged()
+                } catch (e: Exception) {
+                  err = e.message ?: "操作失败"
+                }
+              }
+            })
+          }
+          Box(Modifier.weight(1f)) {
+            PixelSmallButton("关闭", onClick = onDismiss)
+          }
+        }
+      }
+    }
+  }
+}
+
+/** AI 设置弹层：改完汇报 / 免确认 / AI 日报 */
+@Composable
+private fun AiSettingsDialog(
+  initial: UserSettings,
+  onDismiss: () -> Unit,
+  onSave: (AiSettingsPayload) -> Unit,
+) {
+  var skipConfirm by remember { mutableStateOf(initial.skipConfirm) }
+  var reportChanges by remember { mutableStateOf(initial.reportChanges) }
+  var dailyEnabled by remember { mutableStateOf(initial.dailyEnabled) }
+
+  Overlay {
+    PixelPanel(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+      Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
+        Text("AI 设置", style = PixelType.Title, color = PixelColors.Ink)
+        Spacer(Modifier.height(12.dp))
+        AiToggle("改完汇报", "开 = zoowy 每次改画像都告诉你改了什么；关 = 静默改，但留痕照写", reportChanges) {
+          reportChanges = it
+        }
+        Spacer(Modifier.height(8.dp))
+        AiToggle("免确认", "开 = 少弹确认窗（候选计划仍要你勾选）", skipConfirm) { skipConfirm = it }
+        Spacer(Modifier.height(8.dp))
+        AiToggle("AI 日报", "开 = 每晚 23:30 生成日报（会调用 AI）", dailyEnabled) { dailyEnabled = it }
+        Spacer(Modifier.height(12.dp))
+        Text("每人一份，两边互不影响。白名单不受开关影响。", style = PixelType.Small, color = PixelColors.Ink3)
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          Box(Modifier.weight(1f)) { PixelSmallButton("取消", onClick = onDismiss) }
+          Box(Modifier.weight(1f)) {
+            PixelSmallButton("保存", onClick = {
+              onSave(
+                AiSettingsPayload(
+                  skipConfirm = skipConfirm,
+                  reportChanges = reportChanges,
+                  dailyEnabled = dailyEnabled,
+                )
+              )
+            })
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun AiToggle(label: String, hint: String, on: Boolean, onChange: (Boolean) -> Unit) {
+  Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(Modifier.weight(1f)) {
+      Text(label, style = PixelType.Body, color = PixelColors.Ink)
+      Text(hint, style = PixelType.Small, color = PixelColors.Ink3)
+    }
+    Spacer(Modifier.width(8.dp))
+    PixelSmallButton(if (on) "开" else "关", onClick = { onChange(!on) }, filled = on)
   }
 }

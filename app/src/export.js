@@ -31,7 +31,9 @@ const TABLES = [
   'pair_messages',
 ];
 
-// 不是每张表都有 id 列（goal_milestones 是联合主键，settings/pair_invites 主键是 key/code），
+// 不是每张表都有 id 列（goal_milestones / pair_members 是联合主键，settings 主键是 key，
+// user_settings 主键是 user_id，pair_invites 主键是 code），
+// 统一 ORDER BY id 会让整个备份直接崩掉（日志里的 backup_fail: column "id" does not exist）
 // 统一 ORDER BY id 会让整个备份直接崩掉（日志里的 backup_fail: column "id" does not exist）
 const ORDER_BY = {
   goal_milestones: 'goal_id, threshold',

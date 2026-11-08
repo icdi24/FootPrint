@@ -6,6 +6,8 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "check:schema-doc": "node scripts/check-schema-doc.js",
+    "migrate:register-pair": "node scripts/migrate-register-pair.js",
     "reset-password": "node scripts/reset-password.js",
     "restore": "node scripts/restore.js"
   },

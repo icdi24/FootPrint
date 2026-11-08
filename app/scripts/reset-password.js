@@ -1,5 +1,5 @@
-// 重置口令：node scripts/reset-password.js <昵称> [新口令]
-// 不带新口令时用隐藏输入；重置后登出该用户全部设备。
+// 重置密码：node scripts/reset-password.js <用户名> [新密码]
+// 不带新密码时用隐藏输入；重置后登出该用户全部设备。
 const path = require('path');
 const readline = require('readline');
 const { openDb } = require('../src/db');
@@ -25,29 +25,29 @@ function promptHidden(question) {
 }
 
 (async () => {
-  const nickname = process.argv[2];
+  const username = process.argv[2];
   let password = process.argv[3];
-  if (!nickname) {
-    console.error('用法：node scripts/reset-password.js <昵称> [新口令]');
+  if (!username) {
+    console.error('用法：node scripts/reset-password.js <用户名> [新密码]');
     process.exit(1);
   }
   if (!password) {
-    password = await promptHidden(`为「${nickname}」设置新口令（至少 6 位，输入不回显）: `);
+    password = await promptHidden(`为「${username}」设置新密码（至少 8 位，输入不回显）: `);
   }
-  if (password.length < 6) {
-    console.error('口令至少 6 位');
+  if (password.length < 8) {
+    console.error('密码至少 8 位');
     process.exit(1);
   }
   const db = await openDb(DATABASE_URL);
   logMod.init(path.join(DATA_DIR, 'logs'));
-  const user = await db.get('SELECT * FROM users WHERE nickname = ?', [nickname]);
+  const user = await db.get('SELECT * FROM users WHERE login_name = ?', [username]);
   if (!user) {
-    console.error(`找不到昵称为「${nickname}」的账号`);
+    console.error(`找不到用户名为「${username}」的账号`);
     process.exit(1);
   }
   await db.run('UPDATE users SET password_hash = ? WHERE id = ?', [hashPassword(password), user.id]);
   await destroyAllSessions(db, user.id);
-  logMod.log('reset_password', `管理员重置了 ${nickname} 的口令`);
-  console.log(`已重置「${nickname}」的口令，全部设备已登出。`);
+  logMod.log('reset_password', `管理员重置了 ${username} 的密码`);
+  console.log(`已重置「${username}」的密码，全部设备已登出。`);
   process.exit(0);
 })();

@@ -20,7 +20,8 @@ const ZoowyChat = {
         return `<div class="zc-msg me"><div class="zc-text">${UI.esc(m.content)}</div></div>`;
       }
       const tools = m.tools && m.tools.length ? `<div class="zc-tools">🔧 用了：${m.tools.map(UI.esc).join('、')}</div>` : '';
-      return `<div class="zc-msg ai"><div class="zc-avatar">🐾</div><div class="zc-text">${UI.esc(m.content || '')}${tools}</div></div>`;
+      const pcs = m.profileChanges && m.profileChanges.length ? `<div class="zc-profile">📝 更新了画像：${m.profileChanges.map(UI.esc).join('；')}</div>` : '';
+      return `<div class="zc-msg ai"><div class="zc-avatar">🐾</div><div class="zc-text">${UI.esc(m.content || '')}${tools}${pcs}</div></div>`;
     }
 
     async function loadHistory() {
@@ -48,7 +49,7 @@ const ZoowyChat = {
       try {
         const r = await api.post('/api/zoowy/chat', { message: text, big_goal_id: bigGoalId });
         document.getElementById('zc-pending')?.remove();
-        list.insertAdjacentHTML('beforeend', bubble({ role: 'assistant', content: r.reply, tools: r.toolCalls }));
+        list.insertAdjacentHTML('beforeend', bubble({ role: 'assistant', content: r.reply, tools: r.toolCalls, profileChanges: (r.profileChanges || []).map((p) => p.summary) }));
         list.scrollTop = list.scrollHeight;
       } catch (e) {
         document.getElementById('zc-pending')?.remove();

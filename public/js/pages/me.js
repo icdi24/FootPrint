@@ -26,18 +26,18 @@ const MePage = {
       <header class="page-head">
         <div>
           <div class="hello">我的</div>
-          <div class="date-line">${UI.esc(me.nickname)} 的脚印</div>
+          <div class="date-line">${UI.esc(me.username)} 的脚印</div>
         </div>
       </header>
 
       <section class="profile-card">
         <span class="ps-avatar big">${UI.esc(me.avatar)}</span>
         <div class="pc-main">
-          <div class="pc-name">${UI.esc(me.nickname)}</div>
-          <div class="pc-meta">和 ${App.state.partner ? UI.esc(App.state.partner.nickname) : '对方'} 互相监督中</div>
+          <div class="pc-name">${UI.esc(me.username)}</div>
+          <div class="pc-meta">和 ${App.state.partner ? UI.esc(App.state.partner.username) : '对方'} 互相监督中</div>
         </div>
-        <button class="ghost-btn" id="change-nick">${window.icon('edit')} 改昵称</button>
-        <button class="ghost-btn" id="change-pw">${window.icon('lock')} 改口令</button>
+        <button class="ghost-btn" id="change-username">${window.icon('edit')} 改用户名</button>
+        <button class="ghost-btn" id="change-pw">${window.icon('lock')} 改密码</button>
       </section>
 
       <section class="sec">
@@ -71,6 +71,11 @@ const MePage = {
       </section>
 
       <section class="sec">
+        <div class="sec-head"><h2>画像变更</h2><span class="sec-count" id="pc-dot" style="display:none">● 有新的</span></div>
+        <div id="pc-box"><div class="ld-loading">加载中…</div></div>
+      </section>
+
+      <section class="sec">
         <div class="sec-head"><h2>设置</h2></div>
         <div class="menu-list">
           <button class="menu-row" id="m-ai-settings">🐾<span>AI 设置</span><span class="menu-note">确认与汇报</span>${window.icon('right')}</button>
@@ -92,7 +97,7 @@ const MePage = {
       <p class="about-line">脚印 · 两个人互相看得见</p>
     `;
 
-    root.querySelector('#change-nick').addEventListener('click', () => this.changeNickname(root));
+    root.querySelector('#change-username').addEventListener('click', () => this.changeUsername(root));
     root.querySelector('#change-pw').addEventListener('click', () => this.changePassword());
     root.querySelector('#m-points').addEventListener('click', () => this.pointsSettings());
     root.querySelector('#m-ai-settings').addEventListener('click', () => this.aiSettingsSheet());
@@ -100,8 +105,9 @@ const MePage = {
     root.querySelector('#m-zoowy').addEventListener('click', () => ZoowyChat.open({ title: 'zoowy' }));
     root.querySelector('#m-profile').addEventListener('click', () => this.profileSheet());
     this.loadDiary(root);
+    this.loadProfileChanges(root);
     root.querySelector('#logout').addEventListener('click', async () => {
-      const yes = await UI.confirm('退出登录？下次要用口令再进来。', { okLabel: '退出' });
+      const yes = await UI.confirm('退出登录？下次要用密码再进来。', { okLabel: '退出' });
       if (!yes) return;
       try { await api.post('/api/logout'); } catch (e) { /* 忽略 */ }
       App.showAuth();
@@ -117,7 +123,7 @@ const MePage = {
     this.loadLedger(root);
   },
 
-  // ---- 我的搭档：邀请码 / 解绑 / 组内动态 ----
+  // ---- 我的搭档：邀请码 / 配对请求 / 解绑 / 组内动态 ----
   async loadPairCard(root) {
     const box = root.querySelector('#pair-card');
     if (!box) return;
@@ -128,58 +134,114 @@ const MePage = {
       box.innerHTML = `<div class="ld-loading">${UI.esc(e.message)}</div>`;
       return;
     }
-    let invites = [];
-    if (st.canInvite) {
-      try { invites = (await api.get('/api/pair/invites')).invites || []; } catch (e) { /* 忽略 */ }
-    }
-    const partnerHtml = st.partner ? `
-      <div class="pair-row">
-        <span class="ps-avatar">${UI.esc(st.partner.avatar)}</span>
-        <span class="pair-name">${UI.esc(st.partner.nickname)}</span>
-        <span class="pair-tag">已绑定 · 互相监督中</span>
-      </div>` : '<div class="ld-loading">还没有搭档，生成邀请码请对方加入。</div>';
-    const inviteHtml = st.canInvite ? `
-      <button class="btn primary" id="pair-gen">生成邀请码</button>
-      ${invites.length ? `<div class="invite-list">${invites.map((v) => `
-        <div class="invite-row"><code>${UI.esc(v.code)}</code>
-          <span class="menu-note">${UI.esc(String(v.expires_at).slice(0, 16).replace('T', ' '))} 前有效</span>
-          <button class="ghost-btn" data-revoke="${UI.esc(v.code)}">撤销</button>
-        </div>`).join('')}</div>` : ''}` : '';
-    const eventsHtml = st.events && st.events.length ? `
-      <div class="menu-list">${st.events.map((e) => `
-        <div class="menu-row"><span>${UI.esc(e.nickname)} · ${UI.esc(e.detail)}</span>
-          <span class="menu-note">${UI.esc(String(e.createdAt).slice(0, 16).replace('T', ' '))}</span></div>`).join('')}</div>` : '';
-    box.innerHTML = `<div class="pair-card">${partnerHtml}${inviteHtml}
-      ${st.paired ? '<button class="logout-btn" id="pair-unbind">解除绑定</button>' : ''}
-      ${eventsHtml}</div>`;
 
-    const gen = box.querySelector('#pair-gen');
-    if (gen) gen.addEventListener('click', async () => {
+    // 已配对：搭档卡 + 解除绑定 + 组内动态
+    // 必须同时有 partner：解绑后可能出现「有组无搭档」的过渡态，直接读 avatar 会炸
+    if (st.paired && st.partner) {
+      const eventsHtml = st.events && st.events.length ? `
+        <div class="menu-list">${st.events.map((e) => `
+          <div class="menu-row"><span>${UI.esc(e.username)} · ${UI.esc(e.detail)}</span>
+            <span class="menu-note">${UI.esc(String(e.createdAt).slice(0, 16).replace('T', ' '))}</span></div>`).join('')}</div>` : '';
+      box.innerHTML = `
+        <div class="pair-card">
+          <div class="pair-row">
+            <span class="ps-avatar">${UI.esc(st.partner.avatar)}</span>
+            <span class="pair-name">${UI.esc(st.partner.username)}</span>
+            <span class="pair-tag">已绑定 · 互相监督中</span>
+          </div>
+          <button class="logout-btn" id="pair-unbind">解除绑定</button>
+          ${eventsHtml}
+        </div>`;
+      const unbind = box.querySelector('#pair-unbind');
+      if (unbind) unbind.addEventListener('click', async () => {
+        const yes = await UI.confirm('解除绑定后整组解散，双方立刻看不到对方的数据；未完成的验收和未确认的兑换会作废。确定吗？', { okLabel: '解除绑定' });
+        if (!yes) return;
+        try {
+          const d = await api.post('/api/pair/unbind', {});
+          UI.toast(`已解除绑定（作废验收 ${d.cancelledVerifications} 条、退分 ${d.refunded} 笔）`, 'ok');
+          MePage.render(root);
+        } catch (e) { UI.toast(e.message); }
+      });
+      return;
+    }
+
+    // 未配对：我的邀请码 + 换一个 + 申请配对 + 待确认 / 已发出的请求
+    const myCode = st.myCode || {};
+    const expires = String(myCode.expiresAt || '').slice(0, 16).replace('T', ' ');
+    const pendingHtml = st.pendingRequest ? `
+      <div class="pair-row">
+        <span class="pair-name">${UI.esc(st.pendingRequest.requester.username)} 想和你配对</span>
+        <button class="btn primary" id="pair-approve">同意</button>
+        <button class="ghost-btn" id="pair-reject">拒绝</button>
+      </div>` : '';
+    const myRequestHtml = st.myRequest ? `
+      <div class="pair-row">
+        <span class="pair-name">已向 ${UI.esc(st.myRequest.owner.username)} 发出申请，等对方确认</span>
+        <button class="ghost-btn" id="pair-withdraw">撤回</button>
+      </div>` : '';
+    box.innerHTML = `
+      <div class="pair-card">
+        <div class="pair-row">
+          <span class="pair-name">我的邀请码</span>
+          <code class="invite-code">${UI.esc(myCode.code)}</code>
+          <span class="menu-note">${UI.esc(expires)} 前有效</span>
+          <button class="ghost-btn" id="pair-revoke">换一个</button>
+        </div>
+        <label class="field">
+          <span class="field-label">输入对方的邀请码</span>
+          <input id="pair-join-code" type="text" placeholder="对方的邀请码" autocomplete="off"/>
+        </label>
+        <button class="btn primary" id="pair-join">申请配对</button>
+        ${pendingHtml}
+        ${myRequestHtml}
+        <p class="auth-hint">还没有搭档，把邀请码发给对方，或输入对方的码</p>
+      </div>`;
+
+    // 换一个新邀请码
+    const revoke = box.querySelector('#pair-revoke');
+    if (revoke) revoke.addEventListener('click', async () => {
       try {
-        const d = await api.post('/api/pair/invite', {});
-        UI.sheet({
-          title: '邀请码已生成',
-          body: `<p>把这串码发给对方，24 小时内有效、只能用一次：</p><p><code class="invite-code">${UI.esc(d.code)}</code></p>`,
-          actions: [{ label: '知道了', onClick: (close) => close() }],
-        });
+        await api.post(`/api/pair/invite/${encodeURIComponent(myCode.code)}/revoke`, {});
+        UI.toast('已换一个新邀请码', 'ok');
         this.loadPairCard(root);
       } catch (e) { UI.toast(e.message); }
     });
-    box.querySelectorAll('[data-revoke]').forEach((btn) => btn.addEventListener('click', async () => {
+
+    // 输入对方的码 → 只生成待确认请求，不建组
+    const join = box.querySelector('#pair-join');
+    if (join) join.addEventListener('click', async () => {
+      const code = box.querySelector('#pair-join-code').value.trim();
+      if (!code) { UI.toast('填一下对方的邀请码', 'warn'); return; }
       try {
-        await api.post(`/api/pair/invite/${btn.dataset.revoke}/revoke`, {});
-        UI.toast('已撤销', 'ok');
+        await api.post('/api/pair/join', { code });
+        UI.toast('申请已发出，等对方确认', 'ok');
         this.loadPairCard(root);
       } catch (e) { UI.toast(e.message); }
-    }));
-    const unbind = box.querySelector('#pair-unbind');
-    if (unbind) unbind.addEventListener('click', async () => {
-      const yes = await UI.confirm('解除绑定后，对方立刻看不到你的数据；未完成的验收和未确认的兑换会作废。确定吗？', { okLabel: '解除绑定' });
-      if (!yes) return;
+    });
+
+    // 有人申请和我配对：同意（此刻才建组）/ 拒绝
+    const approve = box.querySelector('#pair-approve');
+    if (approve) approve.addEventListener('click', async () => {
       try {
-        const d = await api.post('/api/pair/unbind', {});
-        UI.toast(`已解除绑定（作废验收 ${d.cancelledVerifications} 条、退分 ${d.refunded} 笔）`, 'ok');
+        await api.post(`/api/pair/request/${encodeURIComponent(st.pendingRequest.id)}/approve`, {});
+        UI.toast('配对成功 🐾', 'ok');
         MePage.render(root);
+      } catch (e) { UI.toast(e.message); }
+    });
+    const reject = box.querySelector('#pair-reject');
+    if (reject) reject.addEventListener('click', async () => {
+      try {
+        await api.post(`/api/pair/request/${encodeURIComponent(st.pendingRequest.id)}/reject`, {});
+        this.loadPairCard(root);
+      } catch (e) { UI.toast(e.message); }
+    });
+
+    // 我已发出的申请：撤回
+    const withdraw = box.querySelector('#pair-withdraw');
+    if (withdraw) withdraw.addEventListener('click', async () => {
+      try {
+        await api.delete(`/api/pair/request/${encodeURIComponent(st.myRequest.id)}`);
+        this.loadPairCard(root);
       } catch (e) { UI.toast(e.message); }
     });
   },
@@ -272,6 +334,109 @@ const MePage = {
               close();
               MePage.loadDiary(root);
             } catch (e) { UI.toast(e.message, 'err'); }
+          },
+        },
+      ],
+    });
+  },
+
+  // ---- 画像变更：zoowy 改了什么（红点）+ 明细 + 版本历史与回滚 ----
+  async loadProfileChanges(root) {
+    const box = root.querySelector('#pc-box');
+    const dot = root.querySelector('#pc-dot');
+    if (!box) return;
+    let d;
+    try {
+      d = await api.get('/api/me/profile/changes?limit=5');
+    } catch (e) {
+      box.innerHTML = `<div class="ld-empty">${UI.esc(e.message)}</div>`;
+      return;
+    }
+    if (d.unread) dot.style.display = '';
+    if (!d.items.length) {
+      box.innerHTML = '<div class="ld-empty">还没有变更。zoowy 记住新信息时会在这里告诉你改了什么。</div>';
+      return;
+    }
+    const last = d.items[0];
+    box.innerHTML = `
+      <div class="pc-card">
+        <div class="pc-sum">${UI.esc(last.summary || '（无摘要）')}</div>
+        <div class="pc-meta">${UI.fmtDate(last.createdAt)} · ${UI.esc(last.workflow)}${last.reported ? '' : ' · 静默留痕'}</div>
+      </div>
+      <button class="ghost-btn" id="pc-open">查看全部 · 版本历史与回滚 →</button>
+    `;
+    box.querySelector('#pc-open').addEventListener('click', () => this.profileChangesSheet());
+  },
+
+  async profileChangesSheet() {
+    let d, v;
+    try {
+      d = await api.get('/api/me/profile/changes?limit=50');
+      v = await api.get('/api/me/profile/versions?limit=20');
+    } catch (e) { return UI.toast(e.message, 'err'); }
+    const WF = { chat: '聊天', plan: '拆计划', progress: '进度分析', daily: '日报', user: '你手动', ai: 'zoowy' };
+    const body = document.createElement('div');
+    body.className = 'pc-body';
+    body.innerHTML = `
+      <div class="gf-hint">每次改动都留痕。关掉「改完汇报」只是不推红点，这里照样能翻到全部，也能一键回到任一历史版本。</div>
+      <div class="pc-list">
+        ${d.items.length ? d.items.map((it) => `
+          <div class="pc-item" data-id="${it.id}">
+            <div class="pc-head"><b>${UI.esc(it.summary || '（无摘要）')}</b><span class="pc-wf">${UI.esc(WF[it.workflow] || it.workflow)}</span></div>
+            <div class="pc-meta">${UI.fmtDate(it.createdAt)}${it.reported ? '' : ' · 静默留痕'}${it.read ? ' · 已读' : ' · 未读'}</div>
+            <div class="pc-detail hidden">
+              ${(it.detail || []).map((c) => `
+                <div class="pc-chg">
+                  <div class="pc-chg-h">${UI.esc(c.op)} · ${UI.esc(c.block)}</div>
+                  <div class="pc-chg-r">理由：${UI.esc(c.reason || '—')}</div>
+                  <div class="pc-chg-e">依据：${UI.esc(c.evidence || '—')}</div>
+                  ${c.before ? `<div class="pc-chg-b">原：${UI.esc(String(c.before).slice(0, 120))}</div>` : ''}
+                  ${c.after ? `<div class="pc-chg-b">新：${UI.esc(String(c.after).slice(0, 120))}</div>` : ''}
+                </div>`).join('')}
+            </div>
+          </div>`).join('') : '<div class="ld-empty">还没有变更。</div>'}
+      </div>
+      <div class="pc-vers">
+        <div class="pc-vers-h">版本历史（可回滚）</div>
+        ${v.versions.length ? v.versions.map((x) => `
+          <div class="pc-ver">
+            <span>#${x.id} ${UI.fmtDate(x.createdAt)} · ${x.blockCount} 块 · ${UI.esc(x.changedBy)}</span>
+            <button class="sc-btn ghost" data-rollback="${x.id}">回滚</button>
+          </div>`).join('') : '<div class="ld-empty">还没有版本快照。</div>'}
+      </div>
+    `;
+    body.querySelector('.pc-list').addEventListener('click', (e) => {
+      const item = e.target.closest('.pc-item');
+      if (!item) return;
+      const det = item.querySelector('.pc-detail');
+      if (det) det.classList.toggle('hidden');
+    });
+    body.querySelector('.pc-vers').addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-rollback]');
+      if (!btn) return;
+      const id = btn.dataset.rollback;
+      const yes = await UI.confirm(`回到版本 #${id}？当前画像会先存一份快照，随时能再回来。`, { okLabel: '回滚' });
+      if (!yes) return;
+      try {
+        await api.post(`/api/me/profile/versions/${id}/rollback`);
+        UI.toast('已回滚', 'ok');
+        this.profileChangesSheet();
+      } catch (err) { UI.toast(err.message, 'err'); }
+    });
+    UI.sheet({
+      title: '画像变更记录',
+      body,
+      actions: [
+        {
+          label: '全部标为已读', kind: 'primary',
+          async onClick(close) {
+            try {
+              await api.post('/api/me/profile/changes/read');
+              UI.toast('已标为已读', 'ok');
+              const dot = document.getElementById('pc-dot');
+              if (dot) dot.style.display = 'none';
+              close();
+            } catch (err) { UI.toast(err.message, 'err'); }
           },
         },
       ],
@@ -440,27 +605,27 @@ const MePage = {
     }
   },
 
-  async changeNickname(root) {
+  async changeUsername(root) {
     const body = document.createElement('div');
     body.className = 'pw-form';
     body.innerHTML = `
-      ${pwField('nick', '新昵称（最多 30 字）', 'text')}
-      <p class="auth-hint">改完对方那边会看到新昵称，登录还是用这个名字。</p>`;
+      ${pwField('username', '新用户名（最多 30 字）', 'text')}
+      <p class="auth-hint">改完对方看到的名字和登录用的名字都会变。</p>`;
     UI.sheet({
-      title: '修改昵称',
+      title: '修改用户名',
       body,
       actions: [
         {
-          label: '改昵称',
+          label: '改用户名',
           kind: 'primary',
           async onClick(close) {
-            const name = body.querySelector('#nick').value.trim();
-            if (!name) { UI.toast('昵称不能为空', 'warn'); return; }
+            const name = body.querySelector('#username').value.trim();
+            if (!name) { UI.toast('用户名不能为空', 'warn'); return; }
             try {
-              const d = await api.patch('/api/me', { nickname: name });
+              const d = await api.patch('/api/me', { username: name });
               App.state.me = d.user;
               close();
-              UI.toast('昵称已改', 'ok');
+              UI.toast('用户名已改', 'ok');
               MePage.render(root);
             } catch (e) {
               UI.toast(e.message, 'err');
@@ -475,27 +640,27 @@ const MePage = {
     const body = document.createElement('div');
     body.className = 'pw-form';
     body.innerHTML = `
-      ${pwField('old', '现在的口令', 'password')}
-      ${pwField('new', '新口令（至少 6 位）', 'password')}
-      ${pwField('new2', '再输一遍新口令', 'password')}
-      <p class="auth-hint">改完所有设备会登出，用新口令重新登录。忘了口令就用部署者的 reset-password 命令。</p>`;
+      ${pwField('old', '现在的密码', 'password')}
+      ${pwField('new', '新密码（至少 8 位）', 'password')}
+      ${pwField('new2', '再输一遍新密码', 'password')}
+      <p class="auth-hint">改完所有设备会登出，用新密码重新登录。忘了密码就用部署者的 reset-password 命令。</p>`;
     UI.sheet({
-      title: '修改口令',
+      title: '修改密码',
       body,
       actions: [
         {
-          label: '改口令',
+          label: '改密码',
           kind: 'primary',
           async onClick(close) {
             const oldPw = body.querySelector('#old').value;
             const npw = body.querySelector('#new').value;
             const npw2 = body.querySelector('#new2').value;
-            if (npw.length < 6) { UI.toast('新口令至少 6 位', 'warn'); return; }
-            if (npw !== npw2) { UI.toast('两次新口令不一样', 'warn'); return; }
+            if (npw.length < 8) { UI.toast('新密码至少 8 位', 'warn'); return; }
+            if (npw !== npw2) { UI.toast('两次新密码不一样', 'warn'); return; }
             try {
               await api.post('/api/me/password', { oldPassword: oldPw, newPassword: npw });
               close();
-              UI.toast('口令已改，重新登录一次', 'ok');
+              UI.toast('密码已改，重新登录一次', 'ok');
               App.showAuth();
             } catch (e) {
               UI.toast(e.message, 'err');
@@ -634,7 +799,7 @@ const MePage = {
             <li>把导出的 zip 里的 <code>data.json</code> 传上去</li>
             <li>执行 <code>node scripts/restore.js data.json</code></li>
           </ol>
-          <p class="dr-note">恢复前会自动给当前库做一份快照；忘记口令用 <code>node scripts/reset-password.js 昵称</code>。</p>
+          <p class="dr-note">恢复前会自动给当前库做一份快照；忘记密码用 <code>node scripts/reset-password.js 用户名</code>。</p>
         </div>
       `;
       body.querySelector('#bk-now').addEventListener('click', async () => {

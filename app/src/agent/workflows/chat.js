@@ -5,6 +5,7 @@ const { PERSONA } = require('../persona');
 const { runAgentLoop } = require('../gateway');
 const { ensureSession, recentMessages, appendMessage } = require('../session');
 const { todayStr, addDaysStr } = require('../../tz');
+const { getUserSettings } = require('../../settings');
 
 // 拼用户快照上下文：画像 / 活跃目标 / 今日打卡 / 最近日报 / 近 7 天时长
 async function buildUserContext(db, userId, bigGoalId) {
@@ -63,7 +64,8 @@ async function runChat({ db, userId, message, bigGoalId = null }) {
   const system = `${PERSONA}
 
 你在「我」页的聊天框里。下面是这位用户的实时数据（每次对话前刷新），回答尽量结合它，像了解他/她的朋友那样说话。
-需要更新计划或画像时可以调工具（白名单已限好）；用户没明确要改就别改。
+【主动记画像】对话里出现新的、明确的事实（能力、偏好、方向变化、重要事件、约束）时，主动用 patch_my_profile 更新画像：只改该改的块，每条必带 reason 和 evidence，拿不准就不改，别整段重写。改完在回复里用一句话带过。
+【别乱动计划】用户没明确要改计划时不要动计划；可以在回答里给建议。
 数据里没有的就直说没有，别编。回答简短：一般不超过 150 字，除非用户要详细展开。
 
 ${userContext}`;
@@ -79,11 +81,23 @@ ${userContext}`;
     idempotencyKey: null,
   });
 
-  // 会话落服务端：双方消息都存（meta 记工具调用，前端可展示）
-  await appendMessage(db, userId, session.id, 'user', text, bigGoalId ? { entry: 'big_goal', big_goal_id: Number(bigGoalId) } : null);
-  await appendMessage(db, userId, session.id, 'assistant', result.content, result.toolLog.length ? { tools: result.toolLog.map((t) => t.name) } : null);
+  // 画像变更：统一管线已写 profile_changes 留痕；这里只按 reportChanges 决定要不要把摘要送达用户
+  const st = await getUserSettings(db, userId);
+  const profileChanges = st.reportChanges
+    ? result.toolLog
+      .filter((t) => t.name === 'patch_my_profile' && t.result && t.result.ok && t.result.changes && t.result.changes.length)
+      .map((t) => ({ summary: t.result.summary, changes: t.result.changes, changeId: t.result.changeId }))
+    : [];
 
-  return { reply: result.content, sessionId: session.id, toolCalls: result.toolLog.map((t) => t.name) };
+  // 会话落服务端：双方消息都存（meta 记工具调用与画像变更，前端可展示）
+  const assistantMeta = {
+    ...(result.toolLog.length ? { tools: result.toolLog.map((t) => t.name) } : {}),
+    ...(profileChanges.length ? { profileChanges: profileChanges.map((p) => p.summary) } : {}),
+  };
+  await appendMessage(db, userId, session.id, 'user', text, bigGoalId ? { entry: 'big_goal', big_goal_id: Number(bigGoalId) } : null);
+  await appendMessage(db, userId, session.id, 'assistant', result.content, Object.keys(assistantMeta).length ? assistantMeta : null);
+
+  return { reply: result.content, sessionId: session.id, toolCalls: result.toolLog.map((t) => t.name), profileChanges };
 }
 
 module.exports = { runChat, buildUserContext };

@@ -41,10 +41,14 @@ async function planIntro({ db, userId, bigGoalId, mode = 'auto', userMessage = '
       "description": "一句话说明，可空",
       "emoji": "🎯"
     }
+  ],
+  "profile_patches": [   // enough=true 时给：本次访谈里识别到的、值得记进画像的新信息；没有就空数组
+    { "op": "add|update|delete", "block": "块名", "content": "完整新内容(add/update)", "reason": "必填：为什么改", "evidence": "依据：用户哪句话" }
   ]
 }
 
 拆法要求：每个小目标可独立验收；粒度一周到一个月一件；前紧后松留缓冲；别把「每天做什么」当小目标（那是日常目标的事）。
+画像规则：访谈里用户说出的新事实（背景、能力、方向、约束）值得记进画像时给 profile_patches，每条必带 reason 和 evidence；没有就空数组。补丁只是提议，用户勾选确认后才写库。
 ${force ? '\n用户已明确表示不再回答问题：无论信息够不够，本次 enough 必须为 true，直接基于现有信息给出最合理的候选（拿不准的在 description 里标注你的假设）。' : ''}`;
 
   const ctxBlock = `【大目标】${bg.title}（AI 进度 ${bg.progress}%）\n${bg.description}
@@ -72,7 +76,7 @@ ${mode === 'idea' ? `【用户自己的想法】${userMessage}` : '【启动方�
 }
 
 // 第二步：用户勾选候选 = 一次确认 → 走 plan 白名单的工具创建（同一套链路，写 plan_versions）
-async function confirmPlan({ db, userId, bigGoalId, items }) {
+async function confirmPlan({ db, userId, bigGoalId, items, profilePatches = [] }) {
   if (!Array.isArray(items) || !items.length) throw new Error('没勾任何候选');
   if (items.length > 10) throw new Error('一次最多创建 10 个');
   const bg = await db.get('SELECT * FROM big_goals WHERE id = ? AND owner_id = ?', [Number(bigGoalId), userId]);
@@ -101,7 +105,17 @@ async function confirmPlan({ db, userId, bigGoalId, items }) {
     else skipped.push({ title: item.title, error: r.error });
   }
   await snapshotPlan(db, bg.id, 'user', '用户勾选候选计划');
-  return { created, skipped };
+
+  // 用户确认后一并 apply 画像补丁：与计划创建走同一条「候选 → 确认 → 写库」链路
+  const out = { created, skipped };
+  if (Array.isArray(profilePatches) && profilePatches.length) {
+    const r = await executeTool(db, 'plan', userId, 'patch_my_profile', { patches: profilePatches.slice(0, 8) });
+    // reportChanges 关掉时：统一管线照常留痕，但不在响应里汇报
+    if (r.ok && r.changes && r.changes.length && r.reported) {
+      out.profileChanges = { summary: r.summary, changes: r.changes, changeId: r.changeId };
+    }
+  }
+  return out;
 }
 
 module.exports = { planIntro, confirmPlan };

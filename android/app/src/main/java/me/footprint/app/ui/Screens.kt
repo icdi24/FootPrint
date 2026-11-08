@@ -48,7 +48,7 @@ import android.widget.Toast
 fun LoginScreen(vm: AppViewModel) {
     val login by vm.login.collectAsStateWithLifecycle()
 
-    // 口令只放在本地 state 里，不塞进 ViewModel 长期持有
+    // 密码只放在本地 state 里，不塞进 ViewModel 长期持有
     var password: String by rememberSaveable { mutableStateOf("") }
 
     // 登录失败时把错误清掉的简单做法：用户一改动就重置
@@ -77,18 +77,18 @@ fun LoginScreen(vm: AppViewModel) {
 
             Spacer(Modifier.height(32.dp))
 
-            Text("昵称", style = PixelType.Small, color = PixelColors.Ink2, modifier = Modifier.fillMaxWidth())
+            Text("用户名", style = PixelType.Small, color = PixelColors.Ink2, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(6.dp))
             PixelTextField(
-                value = login.nickname,
-                onValueChange = vm::onNicknameChange,
+                value = login.username,
+                onValueChange = vm::onUsernameChange,
                 placeholder = "比如：栗子",
                 modifier = Modifier.fillMaxWidth(),
             )
 
             Spacer(Modifier.height(16.dp))
 
-            Text("口令", style = PixelType.Small, color = PixelColors.Ink2, modifier = Modifier.fillMaxWidth())
+            Text("密码", style = PixelType.Small, color = PixelColors.Ink2, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(6.dp))
             PixelTextField(
                 value = password,
@@ -113,7 +113,7 @@ fun LoginScreen(vm: AppViewModel) {
 
             PixelButton(
                 text = if (login.busy) "登录中…" else "登 录",
-                onClick = { vm.login(login.nickname, password) },
+                onClick = { vm.login(login.username, password) },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !login.busy,
             )
@@ -169,7 +169,7 @@ fun HomeScreen(vm: AppViewModel, onOpenUsageSettings: () -> Unit) {
             ) {
                 Column {
                     Text(
-                        text = greetingText() + "，" + (home?.me?.nickname ?: myName.ifBlank { "你好" }) + " " + (home?.me?.avatar ?: ""),
+                        text = greetingText() + "，" + (home?.me?.username ?: myName.ifBlank { "你好" }) + " " + (home?.me?.avatar ?: ""),
                         style = PixelType.Big,
                         color = PixelColors.Ink,
                     )
@@ -261,7 +261,7 @@ fun HomeScreen(vm: AppViewModel, onOpenUsageSettings: () -> Unit) {
 
             // ---- ta ----
             PartnerCard(
-                nickname = partner?.partner?.nickname ?: "ta",
+                username = partner?.partner?.username ?: "ta",
                 totalSeconds = partner?.totalSeconds ?: 0L,
                 apps = partner?.apps ?: emptyList(),
                 lastReportAt = partner?.lastReportAt,
@@ -472,7 +472,7 @@ private fun MyUsageCard(
 
 @Composable
 private fun PartnerCard(
-    nickname: String,
+    username: String,
     totalSeconds: Long,
     apps: List<AppUsage>,
     lastReportAt: String?,
@@ -480,7 +480,7 @@ private fun PartnerCard(
 ) {
     PixelPanel(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("$nickname · 今天", style = PixelType.Title, color = PixelColors.Ink)
+            Text("$username · 今天", style = PixelType.Title, color = PixelColors.Ink)
             Spacer(Modifier.height(8.dp))
 
             if (!hasPartner) {

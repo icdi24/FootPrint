@@ -31,12 +31,16 @@ module.exports = function zoowyRoutes(db) {
       const { session, messages } = await recentMessages(db, req.user.id, limit);
       res.json({
         sessionId: session.id,
-        messages: messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-          tools: m.meta ? (safeParse(m.meta).tools || null) : null,
-          createdAt: m.created_at,
-        })),
+        messages: messages.map((m) => {
+          const meta = m.meta ? safeParse(m.meta) : {};
+          return {
+            role: m.role,
+            content: m.content,
+            tools: meta.tools || null,
+            profileChanges: meta.profileChanges || null,
+            createdAt: m.created_at,
+          };
+        }),
       });
     } catch (e) { next(e); }
   });

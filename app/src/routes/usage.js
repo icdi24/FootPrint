@@ -110,7 +110,7 @@ module.exports = function usageRoutes(db) {
         ? Math.max(0, Math.round((Date.now() - new Date(s.lastReportAt).getTime()) / 60000))
         : null;
       res.json({
-        partner: { id: partner.id, nickname: partner.nickname, avatar: partner.avatar },
+        partner: { id: partner.id, username: partner.nickname, avatar: partner.avatar },
         date,
         totalSeconds: s.totalSeconds,
         apps: s.apps,
@@ -162,7 +162,7 @@ module.exports = function usageRoutes(db) {
       res.json({
         from, today, days,
         me: { series: await series(req.user.id) },
-        partner: partner ? { nickname: partner.nickname, avatar: partner.avatar, series: await series(partner.id) } : null,
+        partner: partner ? { username: partner.nickname, avatar: partner.avatar, series: await series(partner.id) } : null,
       });
     } catch (e) { next(e); }
   });
