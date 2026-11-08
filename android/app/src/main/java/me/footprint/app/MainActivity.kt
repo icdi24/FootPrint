@@ -25,8 +25,8 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import me.footprint.app.ui.AppViewModel
+import me.footprint.app.ui.AuthScreen
 import me.footprint.app.ui.HomeScreen
-import me.footprint.app.ui.LoginScreen
 import me.footprint.app.ui.MainScaffold
 import me.footprint.app.ui.theme.FootprintTheme
 import me.footprint.app.ui.theme.PixelColors
@@ -104,6 +104,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun RootScreen(vm: AppViewModel = viewModel()) {
     val loggedIn by vm.loggedIn.collectAsStateWithLifecycle()
+    val authMode by vm.authMode.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     val context = LocalContext.current
 
@@ -118,12 +119,15 @@ private fun RootScreen(vm: AppViewModel = viewModel()) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    if (loggedIn) {
+    // 访客可逛：始终显示主脚手架；未登录时各 Tab 显示空态 + 登录/注册入口，
+    // 点登录/注册弹认证页（authMode 非空），成功或「返回逛逛」后收起。
+    Box(modifier = Modifier.fillMaxSize()) {
         MainScaffold(
             vm = vm,
             onOpenUsageSettings = { UsageAccess.openSettings(context) },
         )
-    } else {
-        LoginScreen(vm = vm)
+        if (authMode != null) {
+            AuthScreen(vm = vm)
+        }
     }
 }

@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.footprint.app.net.Api
 import me.footprint.app.net.ApiException
 import me.footprint.app.net.Redemption
@@ -75,6 +76,11 @@ private data class WishForm(
 
 @Composable
 fun WishScreen(vm: AppViewModel) {
+  val loggedIn by vm.loggedIn.collectAsStateWithLifecycle()
+  if (!loggedIn) {
+    GuestEmpty(vm = vm, emoji = "🎁", title = "登录后开启愿望单", sub = "攒积分换真的，先从登录开始")
+    return
+  }
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
 

@@ -331,6 +331,88 @@ CREATE TABLE IF NOT EXISTS pair_events (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_pair_events_pair ON pair_events(pair_id);
+
+-- 搭子私聊消息：同组两人互相发文字（read_at NULL = 未读）
+CREATE TABLE IF NOT EXISTS pair_messages (
+  id SERIAL PRIMARY KEY,
+  pair_id INTEGER NOT NULL REFERENCES pairs(id),
+  sender_id INTEGER NOT NULL REFERENCES users(id),
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  read_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pair_messages_pair ON pair_messages(pair_id, id);
+
+-- 匹配大厅发布：无搭子用户公开「找搭子」信息（note + 目标摘要快照）
+CREATE TABLE IF NOT EXISTS hall_listings (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL UNIQUE REFERENCES users(id),
+  note TEXT NOT NULL DEFAULT '',
+  goal_summary TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active',   -- active / withdrawn
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_hall_listings_status ON hall_listings(status);
+
+-- 匹配大厅邀请：两个已登录账号互相组队（区别于邀请码的注册态入组）
+CREATE TABLE IF NOT EXISTS hall_invites (
+  id SERIAL PRIMARY KEY,
+  from_user_id INTEGER NOT NULL REFERENCES users(id),
+  to_user_id INTEGER NOT NULL REFERENCES users(id),
+  status TEXT NOT NULL DEFAULT 'pending',   -- pending / accepted / declined / cancelled
+  created_at TEXT NOT NULL,
+  responded_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_hall_invites_to ON hall_invites(to_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_hall_invites_from ON hall_invites(from_user_id, status);
+
+-- ===== zoowy v2：规划草案 / 任务状态机 / 提议卡片 / 会话摘要 =====
+
+-- 规划草案：唯一草案/确认/写入链路。big_goal_id 非空时复用已有大目标、只建小目标
+CREATE TABLE IF NOT EXISTS planning_drafts (
+  id SERIAL PRIMARY KEY,
+  owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  big_goal_id INTEGER REFERENCES big_goals(id),
+  goal TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('stage', 'daily')),
+  weekly_minutes INTEGER,
+  revision INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL CHECK (status IN ('clarifying', 'ready', 'applied')),
+  proposal JSONB NOT NULL,
+  result JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_planning_drafts_owner ON planning_drafts(owner_id, id DESC);
+
+-- 会话压缩摘要：只进本轮 prompt，不写画像、不触发留痕
+CREATE TABLE IF NOT EXISTS zoowy_compactions (
+  session_id INTEGER PRIMARY KEY REFERENCES zoowy_sessions(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  through_message_id INTEGER NOT NULL,
+  summary TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 单轮任务状态机：requestId 幂等 + 取消 + 结果回放
+CREATE TABLE IF NOT EXISTS zoowy_turns (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  request_id TEXT NOT NULL,
+  input JSONB NOT NULL,
+  state TEXT NOT NULL,
+  result JSONB,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, request_id)
+);
+
+-- 提议卡片：30 分钟新鲜度 + result 幂等
+CREATE TABLE IF NOT EXISTS zoowy_offers (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  session_id INTEGER NOT NULL REFERENCES zoowy_sessions(id),
+  payload JSONB NOT NULL,
+  result JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 `;
 
 // 打开连接池并建表（异步）。
@@ -362,12 +444,15 @@ async function openDb(connString) {
   await pool.query('ALTER TABLE pair_invites ALTER COLUMN pair_id DROP NOT NULL');
   await pool.query('ALTER TABLE pair_invites ADD COLUMN IF NOT EXISTS requested_by INTEGER REFERENCES users(id)');
   await pool.query('ALTER TABLE pair_invites ADD COLUMN IF NOT EXISTS requested_at TEXT');
+  // 迁移：zoowy v2 —— 草案支持复用已有大目标（幂等，与 SCHEMA 的列定义重复无害）
+  await pool.query('ALTER TABLE planning_drafts ADD COLUMN IF NOT EXISTS big_goal_id INTEGER REFERENCES big_goals(id)');
   const pairTables = [
     'goals', 'check_ins', 'point_ledger', 'goal_milestones', 'verifications',
     'wish_items', 'wish_history', 'redemptions', 'uploads', 'usage_daily',
     'big_goals', 'user_profiles', 'profile_versions', 'plan_versions',
     'diaries', 'zoowy_sessions', 'zoowy_messages', 'ai_calls', 'user_settings',
     'profile_changes',
+    'planning_drafts', 'zoowy_compactions', 'zoowy_turns', 'zoowy_offers',
   ];
   for (const t of pairTables) {
     await pool.query(`ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS pair_id INTEGER`);

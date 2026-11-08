@@ -277,8 +277,10 @@ module.exports = function pairRoutes(db) {
           await c.run("UPDATE goals SET status = 'active' WHERE id = ? AND status = 'reviewing'", [v.goal_id]);
           cancelledVerifications += 1;
         }
-        // 3) 已锁分未确认的兑换：写冲销流水（只增不改）+ 标记取消
-        const reds = await c.all("SELECT * FROM redemptions WHERE user_id IN (?, ?) AND status = 'applied'", memberIds);
+        // 3) 在途兑换：写冲销流水（只增不改）+ 标记取消
+        //    注意：兑换入口 wish.js 提交即写 'confirmed'，项目里不存在 'applied' 状态，
+        //    这里必须查 'confirmed'（在途）而非 'applied'，否则永远退不到分；收口按 user_id。
+        const reds = await c.all("SELECT * FROM redemptions WHERE user_id IN (?, ?) AND status = 'confirmed'", memberIds);
         for (const red of reds) {
           const bal = await c.get('SELECT COALESCE(SUM(delta),0) AS b FROM point_ledger WHERE user_id = ?', [red.user_id]);
           const after = Number(bal.b) + Number(red.points_locked);

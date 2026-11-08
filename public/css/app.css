@@ -299,6 +299,14 @@ img { max-width: 100%; }
 .tab-item.active { color: #FFFDF6; }
 .tab-item.active .tab-ico { transform: translateY(-1px); }
 .tab-label { font-weight: 400; }
+.tab-ico { position: relative; }
+.tab-badge {
+  position: absolute; top: -4px; right: -6px;
+  min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px;
+  background: #E5484D; color: #FFFDF6; border: 1px solid #FFFDF6;
+  font-size: 10px; font-style: normal; font-weight: 700; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
 .tab-slider {
   position: absolute; top: 6px; left: 0; width: 20%; height: calc(var(--tab-h) - 12px);
   background: var(--green);
@@ -1507,6 +1515,73 @@ code { background: var(--bg-2); border: 1px solid var(--line-strong); padding: 1
 .at-switch.on { background: var(--green-soft); border-color: var(--green); }
 .at-switch.on i { left: 22px; background: var(--green); }
 
+/* ===== 匹配大厅 ===== */
+.hall-body { min-width: 0; }
+.hall-sec { margin-bottom: 16px; }
+.hall-sec-title { font-size: 12px; font-family: var(--font-px-mono); color: var(--ink-2); margin-bottom: 8px; }
+.hall-mycard, .hall-mynone {
+  background: var(--card); border: 2px solid var(--line-strong); box-shadow: var(--sh-px-sm);
+  padding: 12px;
+}
+.hall-mynone { text-align: center; font-size: 12px; line-height: 1.8; color: var(--ink-2); padding: 18px 12px; }
+.hall-mynone .btn { margin-top: 10px; }
+.hall-mynote { font-size: 13px; line-height: 1.8; }
+.hall-mynote .muted { color: var(--ink-2); }
+.hall-mysum, .hall-sum { font-size: 11px; color: var(--ink-2); line-height: 1.7; margin-top: 6px; }
+.hall-card, .hall-invite {
+  background: var(--card); border: 2px solid var(--line); box-shadow: var(--sh-px-sm);
+  padding: 12px; margin-bottom: 8px;
+}
+.hall-card-head { display: flex; align-items: center; gap: 8px; }
+.hall-avatar { font-size: 22px; flex: none; }
+.hall-who { flex: 1; min-width: 0; }
+.hall-nick { font-size: 13px; font-family: var(--font-px-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hall-time { font-size: 11px; color: var(--ink-2); margin-top: 2px; }
+.hall-note { font-size: 12px; line-height: 1.8; margin-top: 8px; }
+.hall-btn-row { display: flex; gap: 8px; margin-top: 10px; }
+.hall-btn-row .btn { flex: 1; }
+.hall-wait { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--ink-2); }
+.hall-entry-actions { display: flex; gap: 8px; margin-top: 4px; }
+.hall-entry-actions .btn { flex: 1; }
+
+/* 访客（未登录）空状态 + 登录/注册入口 */
+.guest-empty, .guest-home {
+  text-align: center;
+  padding: 72px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.guest-emoji { font-size: 48px; line-height: 1; margin-bottom: 12px; }
+.guest-emoji.big { font-size: 64px; }
+.guest-title { font-size: 20px; font-weight: 600; }
+.guest-sub { font-size: 13px; color: var(--ink-2); line-height: 1.7; max-width: 280px; margin-bottom: 16px; }
+.auth-entry-actions { display: flex; gap: 12px; margin-top: 12px; }
+.auth-entry-actions .btn { min-width: 96px; }
+
+/* 「尚未登录/注册」弹窗 */
+.require-auth { text-align: center; padding: 8px 4px 4px; }
+.require-auth .ra-emoji { font-size: 40px; line-height: 1; margin-bottom: 12px; }
+.require-auth .ra-text { font-size: 14px; color: var(--ink-2); line-height: 1.7; }
+.hall-form-tip { font-size: 11px; color: var(--ink-2); line-height: 1.7; margin-top: 4px; }
+
+/* ===== zoowy v2：提议卡片 / 草案 / 本轮状态（追加，不覆盖已有规则） ===== */
+.zc-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--ink-2); }
+.zc-toolbar .btn { flex: none; min-height: 32px; padding-inline: 10px; }
+.zc-composer { display: flex; flex-direction: column; }
+.zc-error { color: var(--red-deep); font-size: 12px; padding: 6px 0; overflow-wrap: anywhere; }
+.zc-operation-status { color: var(--ink-2); font-size: 12px; padding: 6px 0; overflow-wrap: anywhere; }
+.zc-degraded, .zc-failed { margin-top: 6px; font-size: 10px; color: var(--orange-deep); border-top: 1px dashed var(--line-strong); padding-top: 4px; }
+.zc-card { white-space: normal; border-top: 2px dashed var(--line-strong); margin-top: 8px; padding-top: 8px; }
+.zc-card:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.zc-card p { margin: 4px 0; }
+.zc-card ol, .zc-card ul { padding-inline-start: 20px; margin: 8px 0; }
+.zc-card li + li { margin-top: 8px; }
+.zc-card .btn { margin-top: 8px; height: auto; min-height: 44px; padding: 8px 12px; white-space: normal; }
+.zc-detail { color: var(--ink-2); }
+.zc-next { display: inline-block; margin-inline-start: 4px; padding-inline: 4px; color: var(--green-deep); background: var(--green-soft); }
+
 /* ============================================================
    鼠标悬停浮动：全站按钮统一效果，仅精确指针设备生效
    调效果只改这 4 个变量（--hover-bob 设 0 可关掉持续漂浮）
@@ -2335,3 +2410,8 @@ body { line-height: 22px; }
   .cmp-chart .cmp-group { grid-template-columns: 74px minmax(0, 1fr); }
   .cmp-chart .cmp-val { min-width: 48px; }
 }
+
+/* ===== merge hzh: status row + chat button on one line ===== */
+.st-prow { flex: 0 0 100%; display: flex; align-items: center; gap: 8px; }
+.st-prow .st-pbox { flex: 1 1 auto; min-width: 0; }
+.st-prow #partner-chat { flex: none; }

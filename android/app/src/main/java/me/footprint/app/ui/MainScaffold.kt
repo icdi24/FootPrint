@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -22,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.footprint.app.ui.theme.PixelColors
 import me.footprint.app.ui.theme.PixelType
 
@@ -45,6 +47,7 @@ fun MainScaffold(
     onOpenUsageSettings: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableStateOf(MainTab.Home) }
+    val chatUnread by vm.chatUnread.collectAsStateWithLifecycle()
 
     Box(modifier = Modifier.fillMaxSize().background(PixelColors.Bg)) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -57,13 +60,13 @@ fun MainScaffold(
                     MainTab.Me -> MeScreen(vm = vm)
                 }
             }
-            BottomTabBar(current = tab, onSelect = { tab = it })
+            BottomTabBar(current = tab, onSelect = { tab = it }, chatUnread = chatUnread)
         }
     }
 }
 
 @Composable
-private fun BottomTabBar(current: MainTab, onSelect: (MainTab) -> Unit) {
+private fun BottomTabBar(current: MainTab, onSelect: (MainTab) -> Unit, chatUnread: Int) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -91,11 +94,30 @@ private fun BottomTabBar(current: MainTab, onSelect: (MainTab) -> Unit) {
                         .fillMaxWidth(0.4f)
                         .background(if (selected) PixelColors.Green else PixelColors.Card),
                 )
-                androidx.compose.material3.Text(
-                    text = t.icon,
-                    style = PixelType.Body,
-                    color = if (selected) PixelColors.GreenDeep else PixelColors.Ink2,
-                )
+                // 图标 + 未读红点角标（「我们」tab 的搭子私聊未读）
+                Box {
+                    androidx.compose.material3.Text(
+                        text = t.icon,
+                        style = PixelType.Body,
+                        color = if (selected) PixelColors.GreenDeep else PixelColors.Ink2,
+                    )
+                    if (t == MainTab.Partner && chatUnread > 0) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .offset(x = 8.dp, y = (-4).dp)
+                                .background(PixelColors.Red)
+                                .pixelBorder(2.dp, PixelColors.Outline)
+                                .padding(horizontal = 3.dp, vertical = 1.dp),
+                        ) {
+                            androidx.compose.material3.Text(
+                                text = if (chatUnread > 99) "99+" else chatUnread.toString(),
+                                style = PixelType.Small,
+                                color = PixelColors.White,
+                            )
+                        }
+                    }
+                }
                 androidx.compose.material3.Text(
                     text = t.label,
                     style = PixelType.Small,

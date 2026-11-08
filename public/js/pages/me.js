@@ -1,6 +1,10 @@
 // 我的页：资料、统计、流水、系数设置、数据与备份。
 const MePage = {
   async render(root) {
+    if (App.isGuest()) {
+      this.renderGuest(root);
+      return;
+    }
     root.innerHTML = '<div class="page-loading">加载中…</div>';
     let stats, myStatus;
     try {
@@ -85,7 +89,7 @@ const MePage = {
       <section class="sec">
         <div class="sec-head"><h2>设置</h2></div>
         <div class="menu-list">
-          <button class="menu-row" id="m-ai-settings">🐾<span>AI 设置</span><span class="menu-note">确认与汇报</span>${window.icon('right')}</button>
+          <button class="menu-row" id="m-ai-settings">🐾<span>AI 设置</span><span class="menu-note">汇报与日报</span>${window.icon('right')}</button>
           <button class="menu-row" id="m-points">${window.icon('gear')}<span>积分系数</span><span class="menu-note">规则可调</span>${window.icon('right')}</button>
           <button class="menu-row" id="m-data">${window.icon('doc')}<span>数据与备份</span><span class="menu-note">导出 · 快照</span>${window.icon('right')}</button>
         </div>
@@ -132,6 +136,69 @@ const MePage = {
     // 状态：数据已随页面并行取回，只需绑定点击（委托，重绘不丢）
     StatusUI.mountMine(root);
     StatusUI.syncAvatarBadge(myStatus);
+  },
+
+  // 游客视图：完整「我的」界面结构（资料卡、统计、菜单入口），数据为空，点任何入口跳登录。
+  renderGuest(root) {
+    const statItems = [
+      ['本月得分', '—', 'coin'],
+      ['当前余额', '—', 'coin'],
+      ['最长连续', '—', 'flame'],
+      ['本月完成率', '—', 'target'],
+      ['时间投入', '—', 'clock'],
+      ['被质疑次数', '—', 'alert'],
+    ];
+    root.innerHTML = `
+      <header class="page-head">
+        <div>
+          <div class="hello">我的</div>
+          <div class="date-line">登录后查看你的脚印</div>
+        </div>
+      </header>
+      <section class="profile-card">
+        <span class="ps-avatar big">🐾</span>
+        <div class="pc-main">
+          <div class="pc-name">游客</div>
+          <div class="pc-meta">登录后和对方互相监督</div>
+        </div>
+        <button class="ghost-btn">${window.icon('edit')} 改用户名</button>
+        <button class="ghost-btn">${window.icon('lock')} 改密码</button>
+      </section>
+      <section class="sec">
+        <div class="sec-head"><h2>这个月</h2></div>
+        <div class="stats-grid">
+          ${statItems.map(([k, v, ic]) => `
+            <div class="stat-cell">
+              <span class="sc-ico">${window.icon(ic)}</span>
+              <div class="sc-val">${v}</div>
+              <div class="sc-label">${k}</div>
+            </div>`).join('')}
+        </div>
+      </section>
+      <section class="sec">
+        <div class="sec-head"><h2>zoowy</h2></div>
+        <div class="menu-list">
+          <button class="menu-row">🐾<span>和 zoowy 聊聊</span><span class="menu-note">知道你的目标与打卡</span>${window.icon('right')}</button>
+          <button class="menu-row">${window.icon('me')}<span>我的画像</span><span class="menu-note">仅自己可见</span>${window.icon('right')}</button>
+        </div>
+      </section>
+      <section class="sec">
+        <div class="sec-head"><h2>设置</h2></div>
+        <div class="menu-list">
+          <button class="menu-row">🐾<span>AI 设置</span><span class="menu-note">汇报与日报</span>${window.icon('right')}</button>
+          <button class="menu-row">${window.icon('gear')}<span>积分系数</span><span class="menu-note">规则可调</span>${window.icon('right')}</button>
+          <button class="menu-row">${window.icon('doc')}<span>数据与备份</span><span class="menu-note">导出 · 快照</span>${window.icon('right')}</button>
+        </div>
+      </section>
+      <section class="sec">
+        <div class="sec-head"><h2>我的搭档</h2><span class="sec-count">邀请 · 绑定 · 解绑</span></div>
+        <div class="menu-list">
+          <button class="menu-row">🤝<span>配对 / 邀请码</span><span class="menu-note">登录后可见</span>${window.icon('right')}</button>
+        </div>
+      </section>
+      <p class="about-line">脚印 · 两个人互相看得见</p>
+    `;
+    UI.guestGate(root);
   },
 
   // ---- 我的搭档：邀请码 / 配对请求 / 解绑 / 组内动态 ----
@@ -539,7 +606,7 @@ const MePage = {
     UI.sheet({ title: '我的画像（仅自己可见）', body, actions: [{ label: '关闭', onClick: (close) => close() }] });
   },
 
-  // ---- AI 设置（P0-#5 消费端）：两个开关只调确认与汇报，不调工具白名单 ----
+  // ---- AI 设置：改完汇报 / AI 日报 两个开关 ----
   async aiSettingsSheet() {
     let cur;
     try {
@@ -556,7 +623,6 @@ const MePage = {
         <button class="at-switch ${on ? 'on' : ''}" data-key="${key}" role="switch" aria-checked="${on}"><i></i></button>
       </div>`;
     body.innerHTML = `
-      ${toggle('skipConfirm', '免确认', '开 = AI 改画像 / 改计划不再弹确认直接改（候选计划仍要你勾选，免的是弹窗不是决策）', cur.skipConfirm)}
       ${toggle('reportChanges', '改完汇报', '开 = AI 每次改完告诉你改了什么；关 = 静默改。不管开不开，改动都留痕，随时能翻', cur.reportChanges)}
       ${toggle('dailyEnabled', 'AI 日报', '开 = 每晚 23:30 给你生成一份日报（会调用 AI）；默认关，不开就不烧额度', cur.dailyEnabled)}
       <div class="gf-hint">每人一份，两边互不影响。白名单不受开关影响：AI 永远碰不到验收、积分和对方的数据。</div>
@@ -575,11 +641,10 @@ const MePage = {
         {
           label: '保存', kind: 'primary',
           async onClick(close) {
-            const skipConfirm = body.querySelector('[data-key="skipConfirm"]').classList.contains('on');
             const reportChanges = body.querySelector('[data-key="reportChanges"]').classList.contains('on');
             const dailyEnabled = body.querySelector('[data-key="dailyEnabled"]').classList.contains('on');
             try {
-              await api.put('/api/me/settings', { skipConfirm, reportChanges, dailyEnabled });
+              await api.put('/api/me/settings', { reportChanges, dailyEnabled });
               UI.toast('已保存', 'ok');
               close();
             } catch (e) { UI.toast(e.message, 'err'); }

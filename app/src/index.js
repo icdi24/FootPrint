@@ -1,4 +1,5 @@
 // 脚印 V0.1 · 单进程 Web 服务入口。一条命令启动：npm start
+const http = require('http');
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -62,6 +63,8 @@ async function main() {
   app.use('/api', diariesRoutes(db));
   app.use('/api', zoowyRoutes(db));
   app.use('/api', require('./routes/pair')(db));
+  app.use('/api', require('./routes/chat')(db));
+  app.use('/api', require('./routes/hall')(db));
   app.use('/api', require('./routes/admin')(db));
   app.use('/api', require('./routes/status')(db));
 
@@ -105,7 +108,9 @@ async function main() {
     if (!res.headersSent) res.status(500).json({ error: '服务器开小差了' });
   });
 
-  app.listen(PORT, () => {
+  const server = http.createServer(app);
+  require('./ws').initWs(server, db);
+  server.listen(PORT, process.env.HOST || undefined, () => {
     console.log('');
     console.log('  🐾 脚印 V0.1 已启动');
     console.log(`  ➜ 本机访问  http://localhost:${PORT}`);

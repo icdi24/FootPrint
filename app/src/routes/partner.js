@@ -87,7 +87,7 @@ module.exports = function partnerRoutes(db) {
       );
 
       res.json({
-        partner: { id: partner.id, username: partner.nickname, avatar: partner.avatar },
+        partner: { id: partner.id, username: partner.login_name, avatar: partner.avatar },
         partnerStats: await statsFor(db, partner.id),
         myStats: await statsFor(db, req.user.id),
         partnerBigGoals,

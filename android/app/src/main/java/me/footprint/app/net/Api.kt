@@ -21,6 +21,9 @@ import java.util.concurrent.TimeUnit
 data class LoginRequest(val username: String, val password: String)
 
 @Serializable
+data class RegisterRequest(val username: String, val password: String, val avatar: String)
+
+@Serializable
 data class LoginResponse(val user: UserDto? = null)
 
 @Serializable
@@ -57,12 +60,12 @@ data class PartnerResponse(
     val staleMinutes: Long? = null,
 )
 
-/** 后端统一用 { error: "..." } 返回错误信息 */
+/** 后端统一用 { error: "...", code: "..." } 返回错误信息 */
 @Serializable
-data class ApiErrorBody(val error: String? = null)
+data class ApiErrorBody(val error: String? = null, val code: String? = null)
 
 /** 把后端的 HTTP 错误变成可读异常，UI 直接展示 message */
-class ApiException(message: String, val code: Int = 0) : IOException(message)
+class ApiException(message: String, val code: Int = 0, val serverCode: String? = null) : IOException(message)
 
 // ---------------- 客户端 ----------------
 
@@ -113,6 +116,20 @@ object Api {
             .build()
     }
 
+    /** zoowy 私有/取消类请求：不跟随重定向 */
+    private val zoovyPrivateClient: OkHttpClient by lazy {
+        client.newBuilder().followRedirects(false).followSslRedirects(false).build()
+    }
+
+    /** zoowy 聊天/出草案要跑模型，给更长的读超时，且断线不自动重试（重试靠 requestId 幂等） */
+    private val zoovyChatClient: OkHttpClient by lazy {
+        zoovyPrivateClient.newBuilder()
+            .readTimeout(75, TimeUnit.SECONDS)
+            .callTimeout(80, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(false)
+            .build()
+    }
+
     fun baseUrl(): String = Session.baseUrl()
 
     /** 拼完整地址；BASE_URL 必须带结尾 "/"，这里再兜一层 */
@@ -128,6 +145,7 @@ object Api {
         path: String,
         body: String? = null,
         token: String? = null,
+        requestClient: OkHttpClient = client,
         onSetCookie: ((Map<String, String>) -> Unit)? = null,
     ): String = withContext(Dispatchers.IO) {
         val builder = Request.Builder().url(url(path))
@@ -140,7 +158,7 @@ object Api {
         builder.header("Accept", "application/json")
 
         val response = try {
-            client.newCall(builder.build()).execute()
+            requestClient.newCall(builder.build()).execute()
         } catch (e: IOException) {
             // 网络不通（没连 Wi-Fi / 地址填错 / 后端没起）统一成一句话
             Log.w(TAG, "$method $path 网络失败", e)
@@ -160,14 +178,52 @@ object Api {
             }
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {
-                val msg = runCatching {
-                    json.decodeFromString(ApiErrorBody.serializer(), text).error
+                val err = runCatching {
+                    json.decodeFromString(ApiErrorBody.serializer(), text)
                 }.getOrNull()
-                throw ApiException(msg?.takeIf { it.isNotBlank() } ?: "HTTP ${resp.code}", resp.code)
+                throw ApiException(
+                    err?.error?.takeIf { it.isNotBlank() } ?: "HTTP ${resp.code}",
+                    resp.code,
+                    err?.code,
+                )
             }
             text
         }
     }
+
+    // ---------------- zoowy 常驻问答（第一批：chat / messages / cancel / acceptOffer / confirmDraft） ----------------
+
+    /** GET /api/zoowy/messages —— 历史消息（含卡片 / 工具 / 画像改动 / 失败标记） */
+    suspend fun zoovyMessages(token: String): ZoovyHistory =
+        json.decodeFromString(ZoovyHistory.serializer(), send("GET", "api/zoowy/messages", null, token))
+
+    /** POST /api/zoowy/chat —— requestId 由客户端生成，服务端据此做幂等与「停止本轮」 */
+    suspend fun zoovyChat(token: String, message: ZoovyRequest): ZoovyReply =
+        json.decodeFromString(ZoovyReply.serializer(), send(
+            "POST", "api/zoowy/chat", json.encodeToString(ZoovyRequest.serializer(), message), token,
+            requestClient = zoovyChatClient,
+        ))
+
+    /** POST /api/zoowy/turns/{requestId}/cancel —— 停止本轮 */
+    suspend fun cancelZoovyTurn(token: String, requestId: String): Boolean =
+        json.decodeFromString(ZoovyCancellation.serializer(), send(
+            "POST", "api/zoowy/turns/$requestId/cancel", "{}", token, requestClient = zoovyPrivateClient,
+        )).cancelled
+
+    /** POST /api/zoowy/offers/{id}/accept —— 同意提议；返回 plan_draft 或 profile_applied 卡片 */
+    suspend fun acceptZoovyOffer(token: String, id: Long, requestId: String): ZoovyCard =
+        json.decodeFromString(ZoovyCardResponse.serializer(), send(
+            "POST", "api/zoowy/offers/$id/accept",
+            json.encodeToString(ZoovyOperationRequest.serializer(), ZoovyOperationRequest(requestId)), token,
+            requestClient = zoovyChatClient,
+        )).card
+
+    /** POST /api/zoowy/drafts/{id}/confirm —— 应用指定版本的草案 */
+    suspend fun confirmZoovyDraft(token: String, id: Long, revision: Int): ZoovyCard =
+        json.decodeFromString(ZoovyCardResponse.serializer(), send(
+            "POST", "api/zoowy/drafts/$id/confirm",
+            json.encodeToString(ZoovyConfirm.serializer(), ZoovyConfirm(revision)), token,
+        )).card
 
     // ---------------- 登录 ----------------
 
@@ -194,6 +250,33 @@ object Api {
         // 优先用响应头里的；兜底再用 CookieJar 接到的
         val token = (fromHeader ?: cookieJar.session)?.takeIf { it.isNotBlank() }
             ?: throw ApiException("登录成功但没拿到会话 Cookie，检查是否连到了正确的后端")
+        onToken(token)
+        return resp ?: LoginResponse()
+    }
+
+    /**
+     * 注册：POST /api/register（免邀请码，只建账号、不建组）。
+     * 成功后同样拿到会话 Cookie，走 onToken 存起来。
+     */
+    suspend fun register(
+        username: String,
+        password: String,
+        avatar: String,
+        onToken: (String) -> Unit,
+    ): LoginResponse {
+        val body = json.encodeToString(
+            RegisterRequest.serializer(),
+            RegisterRequest(username.trim(), password, avatar),
+        )
+        var fromHeader: String? = null
+        val text = send("POST", "api/register", body) { cookies ->
+            fromHeader = cookies[COOKIE_NAME]
+        }
+        val resp = runCatching {
+            json.decodeFromString(LoginResponse.serializer(), text)
+        }.getOrNull()
+        val token = (fromHeader ?: cookieJar.session)?.takeIf { it.isNotBlank() }
+            ?: throw ApiException("注册成功但没拿到会话 Cookie，检查是否连到了正确的后端")
         onToken(token)
         return resp ?: LoginResponse()
     }
@@ -378,7 +461,7 @@ object Api {
         return json.decodeFromString(UserSettings.serializer(), text)
     }
 
-    /** PUT /api/me/settings —— 改 AI 设置（reportChanges / skipConfirm / dailyEnabled） */
+    /** PUT /api/me/settings —— 改 AI 设置（reportChanges / dailyEnabled） */
     suspend fun updateAiSettings(token: String, body: AiSettingsPayload): UserSettings {
         val text = send("PUT", "api/me/settings", json.encodeToString(AiSettingsPayload.serializer(), body), token)
         return json.decodeFromString(UserSettings.serializer(), text)
@@ -507,6 +590,77 @@ object Api {
     /** POST /api/backups —— 手动备份 */
     suspend fun createBackup(token: String) {
         send("POST", "api/backups", "{}", token)
+    }
+
+    // ---------------- 搭子私聊 ----------------
+
+    /** GET /api/chat —— 搭档 + 未读数 + 最近 40 条消息（升序） */
+    suspend fun getChat(token: String): ChatResponse {
+        val text = send("GET", "api/chat", null, token)
+        return json.decodeFromString(ChatResponse.serializer(), text)
+    }
+
+    /** GET /api/chat/messages?before=<id>&limit=40 —— 更早历史（升序） */
+    suspend fun getChatMessages(token: String, before: Long, limit: Int = 40): List<ChatMessage> {
+        val text = send("GET", "api/chat/messages?before=$before&limit=$limit", null, token)
+        return json.decodeFromString(ChatMessagesResponse.serializer(), text).messages
+    }
+
+    /** POST /api/chat/messages {content} —— 发消息，返回写入的那条 */
+    suspend fun sendChatMessage(token: String, content: String): ChatMessage {
+        val body = json.encodeToString(SendChatRequest.serializer(), SendChatRequest(content))
+        val text = send("POST", "api/chat/messages", body, token)
+        return json.decodeFromString(SendChatResponse.serializer(), text).message
+    }
+
+    /** POST /api/chat/read {upToId?} —— 标记搭档发来的消息已读 */
+    suspend fun markChatRead(token: String, upToId: Long?) {
+        val body = json.encodeToString(MarkChatReadRequest.serializer(), MarkChatReadRequest(upToId))
+        send("POST", "api/chat/read", body, token)
+    }
+
+    /** 复用同一 OkHttp 配置建 WebSocket（供 ChatWebSocket 用） */
+    fun newWebSocket(request: Request, listener: okhttp3.WebSocketListener) =
+        client.newWebSocket(request, listener)
+
+    // ---------------- 匹配大厅 ----------------
+
+    /** GET /api/hall —— 我的发布 + 收/发邀请 + 大厅列表 */
+    suspend fun getHall(token: String): HallState {
+        val text = send("GET", "api/hall", null, token)
+        return json.decodeFromString(HallState.serializer(), text)
+    }
+
+    /** POST /api/hall {note} —— 发布/更新我的找搭子信息 */
+    suspend fun publishHall(token: String, note: String) {
+        val body = json.encodeToString(PublishHallRequest.serializer(), PublishHallRequest(note))
+        send("POST", "api/hall", body, token)
+    }
+
+    /** DELETE /api/hall —— 撤回我的发布 */
+    suspend fun withdrawHall(token: String) {
+        send("DELETE", "api/hall", null, token)
+    }
+
+    /** POST /api/hall/invite {toUserId} —— 邀请对方 */
+    suspend fun inviteHall(token: String, toUserId: Long) {
+        val body = json.encodeToString(HallInviteRequest.serializer(), HallInviteRequest(toUserId))
+        send("POST", "api/hall/invite", body, token)
+    }
+
+    /** POST /api/hall/invite/{id}/accept —— 接受邀请（事务化成组） */
+    suspend fun acceptHallInvite(token: String, id: Long) {
+        send("POST", "api/hall/invite/$id/accept", "{}", token)
+    }
+
+    /** POST /api/hall/invite/{id}/decline —— 拒绝收到的邀请 */
+    suspend fun declineHallInvite(token: String, id: Long) {
+        send("POST", "api/hall/invite/$id/decline", "{}", token)
+    }
+
+    /** POST /api/hall/invite/{id}/cancel —— 取消我发出的邀请 */
+    suspend fun cancelHallInvite(token: String, id: Long) {
+        send("POST", "api/hall/invite/$id/cancel", "{}", token)
     }
 }
 
@@ -936,6 +1090,36 @@ data class BackupsResponse(val backups: List<BackupEntry> = emptyList())
 @Serializable
 data class SubmitRequest(val self_statement: String)
 
+// ---------------- 搭子私聊 ----------------
+
+@Serializable
+data class ChatMessage(
+    val id: Long = 0,
+    val senderId: Long = 0,
+    val content: String = "",
+    val createdAt: String = "",
+    val readAt: String? = null,
+)
+
+@Serializable
+data class ChatResponse(
+    val partner: UserDto? = null,
+    val unread: Int = 0,
+    val messages: List<ChatMessage> = emptyList(),
+)
+
+@Serializable
+data class ChatMessagesResponse(val messages: List<ChatMessage> = emptyList())
+
+@Serializable
+data class SendChatRequest(val content: String)
+
+@Serializable
+data class SendChatResponse(val message: ChatMessage)
+
+@Serializable
+data class MarkChatReadRequest(val upToId: Long? = null)
+
 // ---------------- 大目标与计划链（P1-#8） ----------------
 
 @Serializable
@@ -1011,14 +1195,12 @@ data class DiaryTodayResponse(val today: String = "", val diary: DiaryDto? = nul
 
 @Serializable
 data class UserSettings(
-    val skipConfirm: Boolean = false,
     val reportChanges: Boolean = true,
     val dailyEnabled: Boolean = false,
 )
 
 @Serializable
 data class AiSettingsPayload(
-    val skipConfirm: Boolean = false,
     val reportChanges: Boolean = true,
     val dailyEnabled: Boolean = false,
 )
@@ -1081,3 +1263,53 @@ data class PlanGoalDto(
     val big_goal_id: Long = 0,
     val big_goal_title: String = "",
 )
+
+// ---------------- 匹配大厅 ----------------
+
+@Serializable
+data class HallUser(
+    val id: Long = 0,
+    val username: String = "",
+    val avatar: String? = null,
+)
+
+@Serializable
+data class HallListing(
+    val userId: Long = 0,
+    val username: String = "",
+    val avatar: String? = null,
+    val note: String = "",
+    val goalSummary: String = "",
+    val createdAt: String = "",
+    val relation: String = "none", // none / invitedByMe / invitedMe
+)
+
+/** 我的发布（后端只回 note/goalSummary/createdAt，不含 userId 等） */
+@Serializable
+data class HallMyListing(
+    val note: String = "",
+    val goalSummary: String = "",
+    val createdAt: String = "",
+)
+
+@Serializable
+data class HallInvite(
+    val id: Long = 0,
+    val fromUser: HallUser? = null,
+    val toUser: HallUser? = null,
+    val createdAt: String = "",
+)
+
+@Serializable
+data class HallState(
+    val myListing: HallMyListing? = null,
+    val incoming: List<HallInvite> = emptyList(),
+    val outgoing: List<HallInvite> = emptyList(),
+    val listings: List<HallListing> = emptyList(),
+)
+
+@Serializable
+data class PublishHallRequest(val note: String)
+
+@Serializable
+data class HallInviteRequest(val toUserId: Long)
