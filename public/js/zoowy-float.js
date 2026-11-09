@@ -154,8 +154,9 @@ const ZoowyFloat = (() => {
     if (Date.now() - lastDragEnd < 350) return; // 刚拖完，别把 pointerup 的 click 当打开
     if (panel && !panel.hidden) { close(); return; }
     // App.boot() 异步：刚开页 state.me 可能还没回来，先探测一次，别把已登录用户误判成访客
-    let logged = !!(window.App && App.state && App.state.me);
-    if (!logged && window.api) {
+    // ⚠ App / api 是 const 全局（不是 window 上的属性），判断必须用 typeof，否则 window.App 恒为 undefined → 登录态误判成访客
+    let logged = !!(typeof App !== 'undefined' && App.state && App.state.me);
+    if (!logged && typeof api !== 'undefined') {
       try { const r = await api.get('/api/me'); logged = !!(r && r.user); } catch (e) { logged = false; }
     }
     if (!logged) { UI.requireAuth(); return; }
