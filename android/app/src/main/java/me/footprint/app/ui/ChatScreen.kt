@@ -1,5 +1,6 @@
 package me.footprint.app.ui
 
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,9 +29,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.footprint.app.net.ChatMessage
 import me.footprint.app.ui.theme.PixelColors
@@ -48,6 +53,16 @@ fun ChatScreen(vm: AppViewModel, onClose: () -> Unit) {
 
     var input by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
+
+    // Dialog 是独立 window，不继承 Activity 的 adjustResize；这里手动设置，
+    // 否则软键盘弹出时 imePadding 拿不到 insets，输入框会被键盘盖住
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val dialogWindow = (view.parent as? DialogWindowProvider)?.window
+            dialogWindow?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
+    }
 
     // 打开即标记「聊天页开着」（推送直达不亮红点）并刷新历史
     LaunchedEffect(Unit) {
@@ -82,6 +97,7 @@ fun ChatScreen(vm: AppViewModel, onClose: () -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .background(PixelColors.Bg)
+                .imePadding()
                 .padding(horizontal = 16.dp, vertical = 24.dp),
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
