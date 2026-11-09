@@ -8,12 +8,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -97,8 +100,9 @@ fun ChatScreen(vm: AppViewModel, onClose: () -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .background(PixelColors.Bg)
+                .windowInsetsPadding(WindowInsets.navigationBars)
                 .imePadding()
-                .padding(horizontal = 16.dp, vertical = 24.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 56.dp),
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 // 顶栏：返回 + 标题
@@ -109,7 +113,7 @@ fun ChatScreen(vm: AppViewModel, onClose: () -> Unit) {
                 ) {
                     PixelSmallButton(text = "‹ 返回", filled = false, onClick = onClose)
                     Text(
-                        text = partner?.username?.let { "和 $it 私聊" } ?: "私聊",
+                        text = partner?.nickname?.let { "和 $it 私聊" } ?: "私聊",
                         style = PixelType.Title,
                         color = PixelColors.Ink,
                     )
