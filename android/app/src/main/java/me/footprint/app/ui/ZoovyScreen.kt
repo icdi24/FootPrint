@@ -173,13 +173,14 @@ fun ZoovyScreen(onBack: () -> Unit, bigGoalId: Long? = null, floating: Boolean =
     val latestDrafts = remember(cards) { cards.mapNotNull { it.draft }.associateBy { it.id } }
 
     // 聊天主体：floating（悬浮小窗）/ 全屏两种外壳共用
-    val chatBody: @Composable () -> Unit = {
+    // titleDragModifier：floating 时给标题行加拖动手势（✕ 仍可点）
+    val chatBody: @Composable (Modifier) -> Unit = { titleDragModifier ->
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            // 头部（对齐 Web .zf-head）：标题 + ✕
+            // 头部（对齐 Web .zf-head）：标题（可拖动）+ ✕
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "🐭 zoowy · 随时聊聊",
-                    modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                    modifier = Modifier.weight(1f).padding(horizontal = 12.dp).then(titleDragModifier),
                     style = PixelType.Title,
                     color = PixelColors.Ink,
                 )
@@ -251,28 +252,68 @@ fun ZoovyScreen(onBack: () -> Unit, bigGoalId: Long? = null, floating: Boolean =
     }
 
     if (floating) {
-        // 悬浮小窗：右下角面板，无全屏遮罩（对齐 Web .zf-panel）
+        // 悬浮小窗：右下角面板，无全屏遮罩（对齐 Web .zf-panel）；标题行可拖动
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val density = LocalDensity.current
-            val panelHeight = with(density) {
+            val cw = constraints.maxWidth.toFloat()
+            val ch = constraints.maxHeight.toFloat()
+            val margin = with(density) { 16.dp.toPx() }
+            val panelW = cw * 0.88f
+            val panelH = with(density) {
                 (constraints.maxHeight * 0.58f).coerceIn(320.dp.toPx(), 560.dp.toPx())
             }
+            // null = 未拖动，默认右下角
+            var panelX by remember { mutableStateOf<Float?>(null) }
+            var panelY by remember { mutableStateOf<Float?>(null) }
+            val snapX = cw - panelW - margin
+            val snapY = ch - panelH - margin
+            val dragThreshold = with(density) { 5.dp.toPx() }
+
+            val titleDragModifier = Modifier.pointerInput(cw, ch) {
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    val sx = panelX ?: snapX
+                    val sy = panelY ?: snapY
+                    panelX = sx
+                    panelY = sy
+                    var total = 0f
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (change.changedToUp()) { change.consume(); break }
+                        val d = change.positionChange()
+                        if (d.x != 0f || d.y != 0f) {
+                            change.consume()
+                            total += abs(d.x) + abs(d.y)
+                            val nx = (panelX ?: snapX) + d.x
+                            val ny = (panelY ?: snapY) + d.y
+                            panelX = nx.coerceIn(0f, (cw - panelW).coerceAtLeast(0f))
+                            panelY = ny.coerceIn(0f, (ch - panelH).coerceAtLeast(0f))
+                        }
+                    }
+                }
+            }
+
             PixelPanel(
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = 16.dp)
-                    .fillMaxWidth(0.88f)
-                    .height(with(density) { panelHeight.toDp() })
+                    .offset {
+                        IntOffset(
+                            (panelX ?: snapX).roundToInt(),
+                            (panelY ?: snapY).roundToInt(),
+                        )
+                    }
+                    .width(with(density) { panelW.toDp() })
+                    .height(with(density) { panelH.toDp() })
                     .imePadding(),
             ) {
                 Column(Modifier.padding(12.dp)) {
-                    chatBody()
+                    chatBody(titleDragModifier)
                 }
             }
         }
     } else {
         Screen(Modifier.imePadding()) {
-            chatBody()
+            chatBody(Modifier)
         }
     }
 }

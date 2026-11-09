@@ -2541,6 +2541,13 @@ button.zf-fab:not(:disabled):hover:not(:active):not(.longpressing) { z-index: 60
 .zf-dock.is-dragging .zf-fab { cursor: grabbing; }
 .zf-fab { touch-action: none; }             /* 触屏拖动时不带着页面一起滚 */
 .zf-panel.is-left { left: 14px; right: auto; } /* 浮标拖到左半屏时，对话窗也靠左 */
+/* ===== zoowy 聊天窗也可拖动：拖头部移动面板，脱离右下角锚点后改用 left/top ===== */
+.zf-head { cursor: grab; touch-action: none; }
+.zf-head:active { cursor: grabbing; }
+.zf-panel.is-pdragged { right: auto; bottom: auto; left: auto; }
+.zf-panel.is-pdragged .zf-head { cursor: grab; }
+.zf-panel.is-pdragging { transition: none; }
+.zf-panel.is-pdragging .zf-head { cursor: grabbing; }
 @media (max-width: 600px) {
   .zf-panel.is-left { left: 0; right: 0; }   /* 窄屏仍是全宽贴底 */
 }

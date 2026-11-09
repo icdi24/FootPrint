@@ -4,6 +4,7 @@
 const ZoowyFloat = (() => {
   const HIDE_KEY = 'footprint.zoowy.dock.hidden';
   const POS_KEY = 'footprint.zoowy.dock.pos';
+  const PANEL_POS_KEY = 'footprint.zoowy.panel.pos';
   const DRAG_MIN = 5;   // 位移超过 5px 才算拖动，避免误伤点击
   const EDGE_SNAP = 40; // 松手时离右边缘 < 40px 就吸附回默认贴边
   let dock = null;
@@ -11,6 +12,7 @@ const ZoowyFloat = (() => {
   let panel = null;
   let host = null;
   let drag = null;
+  let panelDrag = null;
   let lastDragEnd = 0;
 
   function mouseIcon() {
@@ -59,8 +61,82 @@ const ZoowyFloat = (() => {
   }
   function syncPanelSide() {
     if (!panel) return;
+    // 面板已被手动拖动后，位置由 is-pdragged 的 left/top 接管，不再跟随浮标左右
+    if (panel.classList.contains('is-pdragged')) return;
     const r = dock.getBoundingClientRect();
     panel.classList.toggle('is-left', r.left + r.width / 2 < innerWidth / 2);
+  }
+
+  // ---- 聊天窗面板拖动：拖头部 .zf-head 移动面板，位置按视口比例持久化 ----
+  function readPanelPos() {
+    try {
+      const p = JSON.parse(localStorage.getItem(PANEL_POS_KEY));
+      return p && Number.isFinite(p.x) && Number.isFinite(p.y) ? p : null;
+    } catch (e) { return null; }
+  }
+  function writePanelPos(x, y) {
+    try { localStorage.setItem(PANEL_POS_KEY, JSON.stringify({ x: x / innerWidth, y: y / innerHeight })); }
+    catch (e) { /* 隐私模式忽略 */ }
+  }
+  function applyPanelPos() {
+    const p = readPanelPos();
+    if (!p) return;
+    const w = panel.offsetWidth, h = panel.offsetHeight;
+    panel.style.left = clamp(p.x * innerWidth, 0, Math.max(0, innerWidth - w)) + 'px';
+    panel.style.top = clamp(p.y * innerHeight, 0, Math.max(0, innerHeight - h)) + 'px';
+    panel.style.right = 'auto';
+    panel.style.bottom = 'auto';
+    panel.classList.add('is-pdragged');
+  }
+  function resetPanelPos() {
+    try { localStorage.removeItem(PANEL_POS_KEY); } catch (e) { /* 忽略 */ }
+    panel.classList.remove('is-pdragged');
+    panel.style.left = '';
+    panel.style.top = '';
+    panel.style.right = '';
+    panel.style.bottom = '';
+  }
+
+  function bindPanelDrag() {
+    const head = panel.querySelector('.zf-head');
+    head.addEventListener('pointerdown', (e) => {
+      // 点 ✕ 关闭按钮不触发拖动
+      if (e.target.closest('.zf-close')) return;
+      if (e.button != null && e.button !== 0) return;
+      const r = panel.getBoundingClientRect();
+      panelDrag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ox: r.left, oy: r.top, moved: false };
+      try { head.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ }
+    });
+    head.addEventListener('pointermove', (e) => {
+      if (!panelDrag || e.pointerId !== panelDrag.id) return;
+      const dx = e.clientX - panelDrag.sx, dy = e.clientY - panelDrag.sy;
+      if (!panelDrag.moved && Math.abs(dx) + Math.abs(dy) < DRAG_MIN) return;
+      if (!panelDrag.moved) {
+        panelDrag.moved = true;
+        panel.style.left = panelDrag.ox + 'px';
+        panel.style.top = panelDrag.oy + 'px';
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+        panel.classList.add('is-pdragged', 'is-pdragging');
+      }
+      const w = panel.offsetWidth, h = panel.offsetHeight;
+      panelDrag.x = clamp(panelDrag.ox + dx, 0, Math.max(0, innerWidth - w));
+      panelDrag.y = clamp(panelDrag.oy + dy, 0, Math.max(0, innerHeight - h));
+      panel.style.left = panelDrag.x + 'px';
+      panel.style.top = panelDrag.y + 'px';
+      e.preventDefault();
+    });
+    const end = (e) => {
+      if (!panelDrag || e.pointerId !== panelDrag.id) return;
+      const d = panelDrag;
+      panelDrag = null;
+      panel.classList.remove('is-pdragging');
+      try { head.releasePointerCapture(e.pointerId); } catch (err) { /* 忽略 */ }
+      if (!d.moved) return;
+      writePanelPos(d.x, d.y);
+    };
+    head.addEventListener('pointerup', end);
+    head.addEventListener('pointercancel', end);
   }
 
   // 鼠标 / 触屏统一用 pointer 事件；拖过之后抑制紧随的 click，避免「拖完弹出对话窗」
@@ -145,8 +221,10 @@ const ZoowyFloat = (() => {
     host = panel.querySelector('.zf-host');
     panel.querySelector('.zf-close').addEventListener('click', close);
     document.body.appendChild(panel);
+    bindPanelDrag();
 
     applyPos();
+    applyPanelPos();
     syncPanelSide();
   }
 
@@ -195,6 +273,7 @@ const ZoowyFloat = (() => {
     window.addEventListener('resize', () => {
       if (!dock) return;
       if (dock.classList.contains('is-dragged')) applyPos();
+      if (panel && panel.classList.contains('is-pdragged')) applyPanelPos();
       syncPanelSide();
     });
   }
