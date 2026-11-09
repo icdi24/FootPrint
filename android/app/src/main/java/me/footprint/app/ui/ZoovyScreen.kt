@@ -3,8 +3,12 @@ package me.footprint.app.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,10 +31,17 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.changedToUp
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import me.footprint.app.net.Api
 import me.footprint.app.net.ApiException
 import me.footprint.app.net.Session
@@ -268,11 +279,11 @@ private fun ZoovyBubble(
     }
 }
 
-// ==================== zoowy 常驻浮标（对齐 Web zoowy-float） ====================
+// ==================== zoowy 常驻浮标（对齐 Web zoowy-float：可拖动 + 贴边 + 点开聊天） ====================
 
 /**
- * 右下角常驻浮标：登录后显示，点开弹 zoowy 悬浮聊天窗。
- * 只在登录后出现；访客不显示（对齐 Web 浮标仍展示、但点击弹登录的体验，这里简化为登录后才有）。
+ * 右下角常驻浮标：登录后显示，可拖动；拖回右边缘自动复位贴边；点开弹 zoowy 聊天窗。
+ * 对齐 Web 版 zoowy-float.js：位移超过阈值才算拖动，否则视为点击打开聊天。
  */
 @Composable
 fun ZoowyFloatButton(vm: AppViewModel) {
@@ -286,20 +297,73 @@ fun ZoowyFloatButton(vm: AppViewModel) {
         return
     }
 
-    // 右下角浮标：像素小老鼠
-    Box(
-        modifier = Modifier
-            .fillMaxSize(),
-    ) {
+    val density = LocalDensity.current
+    val margin = with(density) { 20.dp.toPx() }        // 贴边留白
+    val edgeSnap = with(density) { 40.dp.toPx() }      // 松手离右边缘 < 40dp 就吸附回贴边
+    val dragThreshold = with(density) { 5.dp.toPx() }  // 位移超过 5dp 才算拖动
+    val fabW = with(density) { 84.dp.toPx() }          // 浮标估算宽度（用于定位/clamp）
+    val fabH = with(density) { 40.dp.toPx() }          // 浮标估算高度
+    val bottomGap = with(density) { 90.dp.toPx() }     // 避开底部导航栏
+
+    // null = 未拖动，默认贴右下角
+    var offsetX by remember { mutableStateOf<Float?>(null) }
+    var offsetY by remember { mutableStateOf<Float?>(null) }
+
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val cw = constraints.maxWidth.toFloat()
+        val ch = constraints.maxHeight.toFloat()
+        val snapX = cw - fabW - margin
+        val snapY = ch - fabH - bottomGap
+
         Box(
             modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(20.dp)
-                .offset(y = (-8).dp)
+                .offset {
+                    IntOffset(
+                        (offsetX ?: snapX).roundToInt(),
+                        (offsetY ?: snapY).roundToInt(),
+                    )
+                }
                 .pixelHardShadow(3.dp, PixelColors.Outline)
                 .background(PixelColors.Green)
                 .pixelBorder(2.dp, PixelColors.Outline)
-                .clickable { open = true }
+                .pointerInput(cw, ch) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        val startX = offsetX ?: snapX
+                        val startY = offsetY ?: snapY
+                        offsetX = startX
+                        offsetY = startY
+                        var total = 0f
+                        // 拖动循环：move 累积位移，up 结束
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                            if (change == null) break
+                            if (change.changedToUp()) {
+                                change.consume()
+                                break
+                            }
+                            val d = change.positionChange()
+                            if (d.x != 0f || d.y != 0f) {
+                                change.consume()
+                                total += abs(d.x) + abs(d.y)
+                                val nx = (offsetX ?: snapX) + d.x
+                                val ny = (offsetY ?: snapY) + d.y
+                                offsetX = nx.coerceIn(0f, (cw - fabW).coerceAtLeast(0f))
+                                offsetY = ny.coerceIn(0f, (ch - fabH).coerceAtLeast(0f))
+                            }
+                        }
+                        // 手势结束：拖回右边缘则复位贴边；位移极小则视为点击打开聊天
+                        val cx = offsetX ?: snapX
+                        if (cx + fabW >= cw - edgeSnap) {
+                            offsetX = null
+                            offsetY = null
+                        }
+                        if (total < dragThreshold) {
+                            open = true
+                        }
+                    }
+                }
                 .padding(horizontal = 12.dp, vertical = 10.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
