@@ -623,6 +623,20 @@ object Api {
     fun newWebSocket(request: Request, listener: okhttp3.WebSocketListener) =
         client.newWebSocket(request, listener)
 
+    // ---------------- 状态（微信式） ----------------
+    /** GET /api/status —— 我的 + 搭档的状态 */
+    suspend fun getStatus(token: String): StatusResponse =
+        json.decodeFromString(StatusResponse.serializer(), send("GET", "api/status", null, token))
+
+    /** PUT /api/status —— 设置我的状态；返回 { status }（结构不同于 GET 的 { mine, partner }） */
+    suspend fun setStatus(token: String, body: StatusPayload): UserStatus =
+        json.decodeFromString(StatusSetResponse.serializer(), send("PUT", "api/status", json.encodeToString(StatusPayload.serializer(), body), token)).status
+
+    /** DELETE /api/status —— 清除我的状态 */
+    suspend fun clearStatus(token: String) {
+        send("DELETE", "api/status", null, token)
+    }
+
     // ---------------- 匹配大厅 ----------------
 
     /** GET /api/hall —— 我的发布 + 收/发邀请 + 大厅列表 */
@@ -899,6 +913,7 @@ data class WeekGoal(
     val freq_n: Int = 1,
     val weekdays: String = "",
     val perCheckinPoints: Int = 0,
+    val custom_points: Int? = null,
     val streak: Int = 0,
     val cells: List<WeekCell> = emptyList(),
 )
@@ -915,9 +930,9 @@ data class WeekView(
 )
 
 @Serializable
-data class MonthDay(
+data class MonthCell(
     val date: String = "",
-    val done: Boolean = false,
+    val state: String = "future", // done / future / off / blank / missed / todo
     val points: Int = 0,
 )
 
@@ -926,7 +941,14 @@ data class MonthGoal(
     val id: Long = 0,
     val title: String = "",
     val emoji: String = "🎯",
-    val days: List<MonthDay> = emptyList(),
+    val status: String = "",
+    val type: String = "daily",
+    val perCheckinPoints: Int = 0,
+    val custom_points: Int? = null,
+    val streak: Int = 0,
+    val monthCount: Int = 0,
+    val monthPoints: Int = 0,
+    val cells: List<MonthCell> = emptyList(),
 )
 
 @Serializable
@@ -1313,3 +1335,42 @@ data class PublishHallRequest(val note: String)
 
 @Serializable
 data class HallInviteRequest(val toUserId: Long)
+
+// ---------------- 状态（微信式） ----------------
+
+@Serializable
+data class UserStatus(
+    val key: String = "",
+    val emoji: String = "🐾",
+    val label: String = "",
+    val text: String = "",
+    val group: String = "mood",
+    val at: String? = null,
+)
+
+@Serializable
+data class StatusPartner(
+    val username: String = "",
+    val avatar: String = "",
+    val status: UserStatus? = null,
+)
+
+@Serializable
+data class StatusResponse(
+    val mine: UserStatus? = null,
+    val partner: StatusPartner? = null,
+)
+
+@Serializable
+data class StatusSetResponse(
+    val status: UserStatus,
+)
+
+@Serializable
+data class StatusPayload(
+    val key: String,
+    val emoji: String,
+    val label: String,
+    val text: String = "",
+    val group: String = "mood",
+)

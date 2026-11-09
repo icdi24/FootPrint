@@ -50,6 +50,7 @@ import me.footprint.app.net.TodaySummary
 import me.footprint.app.net.UsageListResponse
 import me.footprint.app.net.UserDto
 import me.footprint.app.net.UserStats
+import me.footprint.app.net.UserStatus
 import me.footprint.app.net.Session
 import me.footprint.app.usage.UsageAccess
 import me.footprint.app.ui.theme.PixelColors
@@ -75,6 +76,8 @@ private class PartnerState {
   var busyCheckin by mutableStateOf<Long?>(null)
   // 驳回弹层：区分「验收」与「打卡」两种
   var dialog by mutableStateOf<RejectTarget?>(null)
+  // 对方状态（微信式）
+  var partnerStatus by mutableStateOf<UserStatus?>(null)
   // 一次性提示
   var toast by mutableStateOf<String?>(null)
 }
@@ -126,6 +129,12 @@ fun PartnerScreen(vm: AppViewModel, onOpenUsageSettings: () -> Unit) {
         }
       } finally {
         state.loading = false
+      }
+      // 对方状态单独拉，失败不阻塞页面
+      try {
+        state.partnerStatus = Api.getStatus(token).partner?.status
+      } catch (e: Exception) {
+        state.partnerStatus = null
       }
     }
   }
@@ -187,7 +196,7 @@ fun PartnerScreen(vm: AppViewModel, onOpenUsageSettings: () -> Unit) {
       }
 
       // 1. 顶部对方卡片
-      PartnerHeaderCard(page, onOpenChat = { chatOpen = true })
+      PartnerHeaderCard(page, state.partnerStatus, onOpenChat = { chatOpen = true })
       Spacer(Modifier.height(16.dp))
 
       // 2. 并排对比
@@ -309,9 +318,9 @@ fun PartnerScreen(vm: AppViewModel, onOpenUsageSettings: () -> Unit) {
 
 // ---------------- 子卡片 ----------------
 
-/** 顶部对方卡片：用户名 + 头像 + 连续天数 + 本月得分 + 今日打卡进度 + 发消息入口 */
+/** 顶部对方卡片：用户名 + 头像 + 连续天数 + 本月得分 + 今日打卡进度 + 状态 + 发消息入口 */
 @Composable
-private fun PartnerHeaderCard(page: PartnerPageResponse, onOpenChat: () -> Unit) {
+private fun PartnerHeaderCard(page: PartnerPageResponse, partnerStatus: UserStatus?, onOpenChat: () -> Unit) {
   val p = page.partner
   val stats = page.partnerStats
   val today = page.today
@@ -366,6 +375,34 @@ private fun PartnerHeaderCard(page: PartnerPageResponse, onOpenChat: () -> Unit)
         )
         Spacer(Modifier.height(12.dp))
       }
+
+      // 对方状态（微信式，对齐 Web status.js partnerRow）
+      val st = partnerStatus
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .background(PixelColors.Card)
+          .pixelBorder(2.dp, PixelColors.LineStrong)
+          .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(st?.emoji ?: "💭", style = PixelType.Title)
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+          Text(
+            text = if (st != null) "$name 现在 ${st.label}" else "$name 还没设状态",
+            style = PixelType.Small,
+            color = PixelColors.Ink,
+          )
+          Text(
+            text = st?.text?.takeIf { it.isNotBlank() } ?: "等 ta 冒个泡",
+            style = PixelType.Small,
+            color = PixelColors.Ink3,
+          )
+        }
+      }
+
+      Spacer(Modifier.height(12.dp))
 
       // 发消息入口（只有有搭档时这个卡片才会渲染，天然只在有搭档时出现）
       Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {

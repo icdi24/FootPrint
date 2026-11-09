@@ -1,6 +1,7 @@
 package me.footprint.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.launch
 import me.footprint.app.net.Api
 import me.footprint.app.net.ApiException
@@ -41,7 +44,9 @@ import me.footprint.app.net.ProfileVersionDto
 import me.footprint.app.net.ProfileVersionsResponse
 import me.footprint.app.net.Session
 import me.footprint.app.net.StatsInner
+import me.footprint.app.net.StatusPayload
 import me.footprint.app.net.UserSettings
+import me.footprint.app.net.UserStatus
 import me.footprint.app.net.Window
 import me.footprint.app.ui.theme.PixelColors
 import me.footprint.app.ui.theme.PixelType
@@ -108,6 +113,7 @@ fun MeScreen(vm: AppViewModel) {
   var profileChanges by remember { mutableStateOf<ProfileChangesResponse?>(null) }
   var profileVersions by remember { mutableStateOf<ProfileVersionsResponse?>(null) }
   var aiSettings by remember { mutableStateOf<UserSettings?>(null) }
+  var myStatus by remember { mutableStateOf<UserStatus?>(null) }
 
   var loading by remember { mutableStateOf(true) }
   var error by remember { mutableStateOf<String?>(null) }
@@ -122,6 +128,7 @@ fun MeScreen(vm: AppViewModel) {
   var showPoints by remember { mutableStateOf(false) }
   var showProfileChanges by remember { mutableStateOf(false) }
   var showAiSettings by remember { mutableStateOf(false) }
+  var showStatusPicker by remember { mutableStateOf(false) }
 
   // 我的用户名（优先 vm.myName，兜底 Session.username）
   val myName by vm.myName.collectAsState()
@@ -174,6 +181,11 @@ fun MeScreen(vm: AppViewModel) {
     } catch (e: Exception) {
       // AI 设置失败不阻塞其它模块
     }
+    try {
+      myStatus = Api.getStatus(token).mine
+    } catch (e: Exception) {
+      // 状态失败不阻塞其它模块
+    }
     loading = false
   }
 
@@ -190,6 +202,14 @@ fun MeScreen(vm: AppViewModel) {
         username = username.ifBlank { "我" },
         partnerName = partnerName,
         avatar = myAvatar,
+      )
+
+      Spacer(Modifier.height(12.dp))
+
+      // ===== 我的状态（微信式，对齐 Web status.js）=====
+      StatusCard(
+        mine = myStatus,
+        onOpen = { showStatusPicker = true },
       )
 
       Spacer(Modifier.height(16.dp))
@@ -345,6 +365,39 @@ fun MeScreen(vm: AppViewModel) {
     }
   }
 
+  if (showStatusPicker) {
+    StatusPickerDialog(
+      current = myStatus,
+      onDismiss = { showStatusPicker = false },
+      onClear = {
+        scope.launch {
+          val token = Session.token(context) ?: return@launch
+          try {
+            Api.clearStatus(token)
+            myStatus = null
+            showStatusPicker = false
+            toast = "状态已清除"
+          } catch (e: Exception) {
+            toast = e.message ?: "操作失败"
+          }
+        }
+      },
+      onSave = { payload ->
+        scope.launch {
+          val token = Session.token(context) ?: return@launch
+          try {
+            val r = Api.setStatus(token, payload)
+            myStatus = r
+            showStatusPicker = false
+            toast = "状态已更新"
+          } catch (e: Exception) {
+            toast = e.message ?: "保存失败"
+          }
+        }
+      },
+    )
+  }
+
   // ---- 提示 ----
   toast?.let { msg ->
     ToastBar(msg) { toast = null }
@@ -390,6 +443,185 @@ private fun ProfileHeader(username: String, partnerName: String?, avatar: String
     }
   }
 }
+
+/** 我的状态卡（对齐 Web status.js mineChip） */
+@Composable
+private fun StatusCard(mine: UserStatus?, onOpen: () -> Unit) {
+  PixelPanel(Modifier.fillMaxWidth()) {
+    Row(
+      modifier = Modifier
+        .padding(12.dp)
+        .clickable(onClick = onOpen),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        text = mine?.emoji ?: "💭",
+        style = PixelType.Title,
+        color = PixelColors.Ink,
+      )
+      Spacer(Modifier.width(10.dp))
+      Column(Modifier.weight(1f)) {
+        Text(
+          text = mine?.label ?: "＋ 设个状态",
+          style = PixelType.Body,
+          color = PixelColors.Ink,
+        )
+        Text(
+          text = mine?.text?.takeIf { it.isNotBlank() } ?: if (mine == null) "对方在「我们」页能看到" else "点一下换个状态",
+          style = PixelType.Small,
+          color = PixelColors.Ink3,
+        )
+      }
+      Spacer(Modifier.width(8.dp))
+      Text("›", style = PixelType.Title, color = PixelColors.Ink2)
+    }
+  }
+}
+
+/** 状态选择弹层（对齐 Web status.js open()：4 组图标 + 一句话） */
+@Composable
+private fun StatusPickerDialog(
+  current: UserStatus?,
+  onDismiss: () -> Unit,
+  onClear: () -> Unit,
+  onSave: (StatusPayload) -> Unit,
+) {
+  val groups = listOf(
+    StatusGroup("心情想法", listOf(
+      StatusItem("美滋滋", "😊"), StatusItem("裂开", "😵"), StatusItem("求安慰", "🥺"),
+      StatusItem("等天晴", "🌤️"), StatusItem("疲惫", "😮‍💨"), StatusItem("发呆", "🫥"),
+      StatusItem("冲", "💪"), StatusItem("emo", "😢"), StatusItem("胡思乱想", "💭"),
+      StatusItem("元气满满", "✨"), StatusItem("bot", "🤖"),
+    )),
+    StatusGroup("工作学习", listOf(
+      StatusItem("搬砖", "🧱"), StatusItem("沉迷学习", "📚"), StatusItem("忙", "🏃"),
+      StatusItem("摸鱼", "🐟"), StatusItem("出差", "✈️"), StatusItem("飞奔回家", "🏠"),
+      StatusItem("勿扰模式", "🌙"),
+    )),
+    StatusGroup("活动", listOf(
+      StatusItem("浪", "🌊"), StatusItem("打卡", "✅"), StatusItem("运动", "🏃‍♀️"),
+      StatusItem("喝咖啡", "☕"), StatusItem("喝奶茶", "🧋"), StatusItem("干饭", "🍚"),
+      StatusItem("带娃", "🧸"), StatusItem("拯救世界", "🦸"), StatusItem("自拍", "🤳"),
+    )),
+    StatusGroup("休息", listOf(
+      StatusItem("闭关", "🚪"), StatusItem("宅", "🛋️"), StatusItem("睡觉", "😴"),
+      StatusItem("吸猫", "🐱"), StatusItem("遛狗", "🐶"), StatusItem("玩游戏", "🎮"),
+      StatusItem("听歌", "🎧"), StatusItem("未知", "❓"),
+    )),
+  )
+  var sel by remember { mutableStateOf<StatusItem?>(current?.let { c -> StatusItem(c.label, c.emoji) }) }
+  var text by remember { mutableStateOf(current?.text ?: "") }
+
+  Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Box(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(16.dp),
+      contentAlignment = Alignment.Center,
+    ) {
+      PixelPanel(Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+          Text("设个状态", style = PixelType.Title, color = PixelColors.Ink)
+          Spacer(Modifier.height(12.dp))
+
+          // 可滚动区：预览 + 输入 + 分组图标
+          Column(
+            modifier = Modifier
+              .weight(1f, fill = false)
+              .verticalScroll(rememberScrollState()),
+          ) {
+            // 预览
+            PixelPanel(background = PixelColors.Bg2, borderColor = PixelColors.LineStrong) {
+              Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(sel?.emoji ?: "💭", style = PixelType.Huge)
+                Spacer(Modifier.width(10.dp))
+                Column {
+                  Text(sel?.label ?: "还没选状态", style = PixelType.Body, color = PixelColors.Ink)
+                  Text(
+                    text = text.ifBlank { "从下面挑一个，或写点什么" },
+                    style = PixelType.Small,
+                    color = PixelColors.Ink3,
+                  )
+                }
+              }
+            }
+            Spacer(Modifier.height(12.dp))
+
+            // 一句话
+            FieldLabel("说点什么（可不填，最多 40 字）")
+            PixelTextField(
+              value = text,
+              onValueChange = { if (it.length <= 40) text = it },
+              placeholder = "比如：今天也在努力搬砖",
+              modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(12.dp))
+
+            // 分组图标
+            groups.forEach { g ->
+              Text(g.name, style = PixelType.Small, color = PixelColors.Ink2)
+              Spacer(Modifier.height(6.dp))
+              g.items.chunked(5).forEach { rowItems ->
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                  rowItems.forEach { item ->
+                    val on = sel?.label == item.label
+                    Column(
+                      modifier = Modifier
+                        .weight(1f)
+                        .clickable { sel = item }
+                        .padding(vertical = 6.dp),
+                      horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                      Box(
+                        modifier = Modifier
+                          .background(if (on) PixelColors.GreenSoft else PixelColors.Card)
+                          .pixelBorder(2.dp, if (on) PixelColors.GreenDeep else PixelColors.Outline)
+                          .padding(4.dp),
+                      ) {
+                        Text(item.emoji, style = PixelType.Body)
+                      }
+                      Spacer(Modifier.height(2.dp))
+                      Text(
+                        item.label,
+                        style = PixelType.Small,
+                        color = if (on) PixelColors.GreenDeep else PixelColors.Ink2,
+                      )
+                    }
+                  }
+                  repeat(5 - rowItems.size) { Spacer(Modifier.weight(1f)) }
+                }
+              }
+              Spacer(Modifier.height(10.dp))
+            }
+          }
+
+          Spacer(Modifier.height(8.dp))
+          // 底部固定按钮
+          Row(Modifier.fillMaxWidth()) {
+            PixelButton(text = "清除状态", onClick = onClear, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
+            PixelButton(
+              text = "就这样",
+              onClick = {
+                val s = sel
+                if (s != null) {
+                  onSave(StatusPayload(key = s.label, emoji = s.emoji, label = s.label, text = text.trim()))
+                }
+              },
+              modifier = Modifier.weight(1f),
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+private data class StatusGroup(val name: String, val items: List<StatusItem>)
+private data class StatusItem(val label: String, val emoji: String)
 
 /** 统计卡片：2 列网格 */
 @Composable

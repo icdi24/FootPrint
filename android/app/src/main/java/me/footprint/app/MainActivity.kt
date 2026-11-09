@@ -28,6 +28,7 @@ import me.footprint.app.ui.AppViewModel
 import me.footprint.app.ui.AuthScreen
 import me.footprint.app.ui.HomeScreen
 import me.footprint.app.ui.MainScaffold
+import me.footprint.app.ui.ZoowyFloatButton
 import me.footprint.app.ui.theme.FootprintTheme
 import me.footprint.app.ui.theme.PixelColors
 import me.footprint.app.usage.UsageAccess
@@ -129,5 +130,7 @@ private fun RootScreen(vm: AppViewModel = viewModel()) {
         if (authMode != null) {
             AuthScreen(vm = vm)
         }
+        // zoowy 常驻浮标（登录后显示，对齐 Web 版贴边小老鼠）
+        ZoowyFloatButton(vm = vm)
     }
 }

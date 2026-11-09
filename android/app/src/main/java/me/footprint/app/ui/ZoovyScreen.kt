@@ -1,12 +1,17 @@
 package me.footprint.app.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,6 +19,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -257,6 +263,49 @@ private fun ZoovyBubble(
                 }
                 "profile_applied" -> Text("画像已更新 · ${card.summary.orEmpty()}", style = PixelType.Small, color = PixelColors.GreenDeep)
                 else -> Unit
+            }
+        }
+    }
+}
+
+// ==================== zoowy 常驻浮标（对齐 Web zoowy-float） ====================
+
+/**
+ * 右下角常驻浮标：登录后显示，点开弹 zoowy 悬浮聊天窗。
+ * 只在登录后出现；访客不显示（对齐 Web 浮标仍展示、但点击弹登录的体验，这里简化为登录后才有）。
+ */
+@Composable
+fun ZoowyFloatButton(vm: AppViewModel) {
+    val loggedIn by vm.loggedIn.collectAsState()
+    var open by remember { mutableStateOf(false) }
+
+    if (!loggedIn) return
+
+    if (open) {
+        ZoovyScreen(onBack = { open = false })
+        return
+    }
+
+    // 右下角浮标：像素小老鼠
+    Box(
+        modifier = Modifier
+            .fillMaxSize(),
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(20.dp)
+                .offset(y = (-8).dp)
+                .pixelHardShadow(3.dp, PixelColors.Outline)
+                .background(PixelColors.Green)
+                .pixelBorder(2.dp, PixelColors.Outline)
+                .clickable { open = true }
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("🐭", style = PixelType.Body)
+                Spacer(Modifier.padding(horizontal = 4.dp))
+                Text("zoowy", style = PixelType.Small, color = PixelColors.White)
             }
         }
     }
