@@ -403,7 +403,7 @@ fun ZoowyFloatButton(vm: AppViewModel) {
 
     val density = LocalDensity.current
     val margin = with(density) { 20.dp.toPx() }        // 贴边留白
-    val edgeSnap = with(density) { 40.dp.toPx() }      // 松手离右边缘 < 40dp 就吸附回贴边
+    val edgeSnap = with(density) { 8.dp.toPx() }       // 松手离右边缘 < 8dp 才吸附复位（必须小于 margin，否则默认位置会被误判复位）
     val dragThreshold = with(density) { 5.dp.toPx() }  // 位移超过 5dp 才算拖动
     val fabW = with(density) { 84.dp.toPx() }          // 浮标估算宽度（用于定位/clamp）
     val fabH = with(density) { 40.dp.toPx() }          // 浮标估算高度
