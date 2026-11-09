@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -58,7 +59,7 @@ private class RunningZoovyTurn(val requestId: String) {
 }
 
 @Composable
-fun ZoovyScreen(onBack: () -> Unit, bigGoalId: Long? = null) {
+fun ZoovyScreen(onBack: () -> Unit, bigGoalId: Long? = null, floating: Boolean = false) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -169,16 +170,17 @@ fun ZoovyScreen(onBack: () -> Unit, bigGoalId: Long? = null) {
     val accepted = remember(cards) { cards.mapNotNull { it.offerId }.toSet() }
     val latestDrafts = remember(cards) { cards.mapNotNull { it.draft }.associateBy { it.id } }
 
-    Screen(Modifier.imePadding()) {
+    // 聊天主体：floating（悬浮小窗）/ 全屏两种外壳共用
+    val chatBody: @Composable () -> Unit = {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                PixelSmallButton("返回", onClick = onBack, filled = false)
                 Text(
-                    "zoowy",
+                    "🐭 zoowy",
                     modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
                     style = PixelType.Title,
                     color = PixelColors.Ink,
                 )
+                PixelSmallButton("✕", onClick = onBack, filled = false)
             }
             error?.let { Text(it, style = PixelType.Small, color = PixelColors.RedDeep) }
             operationStatus?.let { Text(it, style = PixelType.Small, color = PixelColors.Ink2) }
@@ -219,6 +221,32 @@ fun ZoovyScreen(onBack: () -> Unit, bigGoalId: Long? = null) {
                     PixelSmallButton("停止本轮", onClick = ::stopRunning, filled = false)
                 }
             }
+        }
+    }
+
+    if (floating) {
+        // 悬浮小窗：右下角面板，无全屏遮罩（对齐 Web .zf-panel）
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val density = LocalDensity.current
+            val panelHeight = with(density) {
+                (constraints.maxHeight * 0.58f).coerceIn(320.dp.toPx(), 560.dp.toPx())
+            }
+            PixelPanel(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 16.dp)
+                    .fillMaxWidth(0.88f)
+                    .height(with(density) { panelHeight.toDp() })
+                    .imePadding(),
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    chatBody()
+                }
+            }
+        }
+    } else {
+        Screen(Modifier.imePadding()) {
+            chatBody()
         }
     }
 }
@@ -293,7 +321,7 @@ fun ZoowyFloatButton(vm: AppViewModel) {
     if (!loggedIn) return
 
     if (open) {
-        ZoovyScreen(onBack = { open = false })
+        ZoovyScreen(onBack = { open = false }, floating = true)
         return
     }
 
