@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -37,6 +38,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
@@ -173,14 +175,33 @@ fun ZoovyScreen(onBack: () -> Unit, bigGoalId: Long? = null, floating: Boolean =
     // 聊天主体：floating（悬浮小窗）/ 全屏两种外壳共用
     val chatBody: @Composable () -> Unit = {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // 头部（对齐 Web .zf-head）：标题 + ✕
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "🐭 zoowy",
+                    "🐭 zoowy · 随时聊聊",
                     modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
                     style = PixelType.Title,
                     color = PixelColors.Ink,
                 )
                 PixelSmallButton("✕", onClick = onBack, filled = false)
+            }
+            // 工具行（对齐 Web .zc-toolbar）：说明 + 停止本轮（常驻）
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (bigGoalId != null) "正在围绕这个大目标聊" else "目标、进展与计划都可以聊",
+                    style = PixelType.Small,
+                    color = PixelColors.Ink3,
+                    modifier = Modifier.weight(1f),
+                )
+                PixelSmallButton(
+                    text = "停止本轮",
+                    filled = false,
+                    onClick = ::stopRunning,
+                )
             }
             error?.let { Text(it, style = PixelType.Small, color = PixelColors.RedDeep) }
             operationStatus?.let { Text(it, style = PixelType.Small, color = PixelColors.Ink2) }
@@ -217,10 +238,15 @@ fun ZoovyScreen(onBack: () -> Unit, bigGoalId: Long? = null, floating: Boolean =
                     modifier = Modifier.weight(1f),
                     enabled = !busy && text.isNotBlank(),
                 )
-                if (runningTurn?.let { !it.cancelled && stoppingRequestId != it.requestId } == true) {
-                    PixelSmallButton("停止本轮", onClick = ::stopRunning, filled = false)
-                }
             }
+            // 底部提示（对齐 Web .zf-foot）
+            Text(
+                "目标 / 进展 / 计划都能聊 · Enter 发送，Shift+Enter 换行",
+                style = PixelType.Small,
+                color = PixelColors.Ink3,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
+            )
         }
     }
 
@@ -266,7 +292,16 @@ private fun ZoovyBubble(
         background = if (mine) PixelColors.GreenSoft else PixelColors.Card,
     ) {
         Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(if (mine) "我" else "zoowy", style = PixelType.Small, color = PixelColors.Ink2)
+            // 头部：user 显示「我」，assistant 显示 🐾 头像 + zoowy（对齐 Web chatBubble 的 zc-avatar）
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (mine) {
+                    Text("我", style = PixelType.Small, color = PixelColors.Ink2)
+                } else {
+                    Text("🐾", style = PixelType.Body)
+                    Spacer(Modifier.width(6.dp))
+                    Text("zoowy", style = PixelType.Small, color = PixelColors.Ink2)
+                }
+            }
             if (message.content.isNotBlank()) Text(message.content, style = PixelType.Body, color = PixelColors.Ink)
             message.profileChanges?.takeIf { it.isNotEmpty() }?.let {
                 Text("画像改动：${it.joinToString("、")}", style = PixelType.Small, color = PixelColors.Ink2)
