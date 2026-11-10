@@ -1,4 +1,4 @@
-/* ═══════════════════════════════════════════════════════════════
+﻿/* ═══════════════════════════════════════════════════════════════
    motion.css · 手写像素动效组件（无依赖）
    原则：steps() 步进、硬边、无模糊、无圆角；与 styles.css 同一套变量。
    所有动效在 prefers-reduced-motion 下自动关闭（见文件末尾）。
@@ -129,7 +129,7 @@
 /* ── 9. 游戏对话框展开（Motion·Cabinet）
       原文："the frame draws out sideways, then down, in hard steps"
       改写成两步 scaleX → scaleY，全部 steps() 硬跳变，无缓动。 */
-.sheet.fp-dialog {
+.fp-dialog {
   animation: fp-dialog-in .34s steps(1, end) both;
   transition: none;
 }
@@ -211,7 +211,7 @@
 
 /* ── 追加的无障碍兜底 ─────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
-  .sheet.fp-dialog,
+  .fp-dialog,
   .fp-cloud,
   .fp-ripple i,
   .fp-typing::after,
@@ -220,5 +220,103 @@
   }
   .fp-sky { display: none; }
   .fp-ripple { display: none; }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   motion.css 追加 · 两个可见组件
+   A. 本周坚持条（今日页常驻）  B. 界面动效设置卡（我的→设置）
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── A. 本周坚持条 ─────────────────────────────────────────── */
+.fp-week-strip {
+  margin-top: 14px; padding: 12px 14px 10px;
+  background: var(--paper);
+  border: 2px solid var(--line-strong);
+  box-shadow: inset 0 0 0 2px rgba(255, 248, 231, .7), 0 3px 0 rgba(107, 69, 44, .18);
+}
+.fws-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  margin-bottom: 10px;
+}
+.fws-title { font: 14px var(--font-px); color: var(--wood-deep); }
+.fws-note { font-size: 12px; color: var(--ink-3); }
+.fws-note b { font-family: var(--font-num); color: var(--wood-dark); }
+
+.fws-cells { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.fws-cell {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+}
+.fws-cell i {
+  display: block; width: 100%; height: 16px;
+  border: 2px solid var(--line-strong);
+  background: var(--bg-2);
+  /* 逐格点亮，steps 硬跳变 */
+  animation: fws-light .3s steps(2, end) both;
+  animation-delay: calc(var(--i, 0) * 70ms);
+}
+.fws-cell small { font: 11px var(--font-px); color: var(--ink-3); }
+.fws-cell.is-done i { background: var(--btn); border-color: var(--btn-dark); }
+.fws-cell.is-today i { border-color: var(--wood-deep); box-shadow: inset 0 0 0 2px var(--gold); }
+.fws-cell.is-miss i { background: #F3DCDC; border-color: #D8A5A5; }
+.fws-cell.is-future i { border-style: dashed; opacity: .6; }
+.fws-cell.is-today small { color: var(--wood-deep); font-weight: 700; }
+@keyframes fws-light {
+  from { opacity: .15; transform: translateY(-3px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ── B. 界面动效设置卡 ─────────────────────────────────────── */
+.fp-motion-panel .fp-demo-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 6px; margin: 12px 0;
+}
+.fp-demo-btn {
+  padding: 6px 4px;
+  font: 11px var(--font-px);
+  color: var(--wood-deep);
+  background: var(--paper);
+  border: 2px solid var(--line-strong);
+  cursor: pointer;
+  transition: background .1s steps(2, end), color .1s steps(2, end);
+}
+.fp-demo-btn:hover { background: var(--wood-light); }
+.fp-demo-btn.is-active { background: var(--wood-dark); color: var(--paper); border-color: var(--wood-deep); }
+.fp-motion-panel .fp-demo-tip {
+  min-height: 18px; margin: 0 0 10px;
+  font-size: 12px; color: var(--ink-3);
+}
+.fp-motion-panel .ng-actions { display: flex; align-items: center; justify-content: flex-start; gap: 12px; padding-right: 72px; }
+@media (max-width: 1100px) {
+  .fp-motion-panel .fp-demo-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* ── 运行时总开关：动效关闭时全部停 ───────────────────────── */
+.fp-motion-off .fp-cloud,
+.fp-motion-off .fp-sky,
+.fp-motion-off .fp-ripple { display: none !important; }
+.fp-motion-off .fp-burst,
+.fp-motion-off .fp-count-bump,
+.fp-motion-off .fp-stagger,
+.fp-motion-off .fp-reveal,
+.fp-motion-off .toast.is-on,
+.fp-motion-off .toast.is-on::after,
+.fp-motion-off .fp-hover,
+.fp-motion-off .fp-press,
+.fp-motion-off .fp-today-pulse,
+.fp-motion-off .fp-badge-pop,
+.fp-motion-off .fp-dialog,
+.fp-motion-off .fp-ripple i,
+.fp-motion-off .fp-typing::after,
+.fp-motion-off .pending-tag.fp-morph,
+.fp-motion-off .fws-cell i {
+  animation: none !important;
+  transition: none !important;
+}
+.fp-motion-off .fp-reveal { opacity: 1 !important; transform: none !important; }
+.fp-motion-off .fws-cell i { opacity: 1 !important; transform: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fws-cell i { animation: none !important; }
 }
 
