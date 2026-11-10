@@ -15,7 +15,7 @@ param(
   [string]$Server = $env:FP_SERVER,
   [string]$User = $(if ($env:FP_USER) { $env:FP_USER } else { 'ubuntu' }),
   [int]$Port = 22,
-  [string]$KeyPath = "$env:USERPROFILE\.ssh\id_ed25519",
+  [string]$KeyPath = $(if ($env:FP_KEY) { $env:FP_KEY } else { "$env:USERPROFILE\.ssh\footprint_deploy" }),
   [string]$AppDir = '/opt/footprint',
   [switch]$DryRun,
   [switch]$SkipDirtyCheck
