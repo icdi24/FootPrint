@@ -15,7 +15,7 @@
   <!-- ── 顶部木质条：品牌 / 五个标签 / 日期 ─────────────── -->
   <header class="masthead">
     <div class="mast-brand">
-      <span class="brand-mark" data-icon="paw" aria-hidden="true"></span>
+      <span class="brand-mark" data-icon="paw" data-icon-kind="badge" aria-hidden="true"></span>
       <span class="brand-word"><b>脚印</b></span>
     </div>
 
@@ -60,8 +60,8 @@
           </div>
           <div class="duo-meta">
             <span class="duo-pair" aria-hidden="true">
-              <span class="pair-avatar me" data-icon="avatar"></span>
-              <span class="pair-avatar partner" data-icon="avatar"></span>
+              <span class="pair-avatar me" data-icon="avatar" data-icon-kind="badge"></span>
+              <span class="pair-avatar partner" data-icon="avatar" data-icon-kind="badge"></span>
             </span>
             <span class="duo-text"><b id="duoTitle">栗子 &amp; 阿白</b><small id="duoSub">一起坚持的第 128 天</small></span>
           </div>
@@ -79,7 +79,7 @@
           <div class="duo-grid">
             <section class="person-col" aria-label="栗子的今日待办">
               <div class="person-head">
-                <span class="person-avatar me" data-icon="avatar" aria-hidden="true"></span>
+                <span class="person-avatar me" data-icon="avatar" data-icon-kind="badge" aria-hidden="true"></span>
                 <div class="person-name"><b id="meName">栗子</b><small id="meDetail">29 / 41 次 · 连续 6 天</small></div>
                 <span class="person-rate"><small>完成率</small><b id="meRate">71</b><em>%</em></span>
                 <div class="rate-bar"><span class="rate-fill me" id="meBar" style="width:71%"></span></div>
@@ -89,7 +89,7 @@
 
             <section class="person-col" aria-label="阿白的今日待办">
               <div class="person-head">
-                <span class="person-avatar partner" data-icon="avatar" aria-hidden="true"></span>
+                <span class="person-avatar partner" data-icon="avatar" data-icon-kind="badge" aria-hidden="true"></span>
                 <div class="person-name"><b id="partnerName">阿白</b><small id="partnerDetail">15 / 22 次 · 连续 4 天</small></div>
                 <span class="person-rate partner"><small>完成率</small><b id="partnerRate">68</b><em>%</em></span>
                 <div class="rate-bar"><span class="rate-fill partner" id="partnerBar" style="width:68%"></span></div>
@@ -141,6 +141,7 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <div class="sheet-layer" id="sheetLayer" aria-live="polite"></div>
   <div class="auth-layer" id="authLayer" hidden></div>
+  <script src="/js/icons.js"></script>
   <script src="/web/icons.js"></script>
   <script src="/web/api.js"></script>
   <script src="/web/adapter.js"></script>

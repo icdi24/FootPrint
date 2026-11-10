@@ -42,7 +42,7 @@ Operate（移动端优先的打卡工具；手机 390×844 为主，桌面 1280 
 ## Materials & Components
 
 - **像素描边 + 硬投影**：卡片 2px 边框 + `0 3px 0` 硬投影；按钮 2px 深棕描边 + `0 4px 0` 下沉投影，按压整体下沉 4px（无圆角，直角世界）
-- **像素图标**：自绘 16×16 网格 SVG（`js/icons.js`，`shape-rendering: crispEdges`），整倍数缩放（16/32px），22 枚全覆 UI 图标
+- **像素图标**：自绘 16×16 网格 SVG（`js/icons.js`，`shape-rendering: crispEdges`），整倍数缩放（16/24/32/48px）；统一图标库共 120 枚，手机端与桌面工作台共用唯一来源，规范、清单与 emoji 映射见根目录 `ICONS.md`
 - **像素爪印**：CSS box-shadow 4px 网格绘制（登录 logo 88px 绿砖 + 白爪），favicon 同款 16×16 SVG
 - **点阵纹理**：页面地面 9px 圆点阵；桌面深绿底 10px 点阵
 - **虚线分隔**：列表/表格用 2px dashed 暖棕分隔（代替细实线）

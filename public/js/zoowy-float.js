@@ -16,6 +16,10 @@ const ZoowyFloat = (() => {
   let lastDragEnd = 0;
 
   function mouseIcon() {
+    // zoowy 的小老鼠统一走全站图标库（16×16 单色像素），不再用多色徽章
+    if (window.FP_ICONS && window.FP_ICONS.iconSvg) {
+      return `<span class="zf-mouse">${window.FP_ICONS.iconSvg('mouse')}</span>`;
+    }
     return window.pixelIcon ? window.pixelIcon('mouse', 'zf-mouse') : '🐭';
   }
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
