@@ -24,3 +24,7 @@ public/app-debug.apk
 
 # 过程工作区：数据导出 / 备份 / 演练产物（含口令哈希，不进 Git）
 migration/
+
+# 含真实服务器 IP / 密钥的交接文件（只私下传递，永不进 git）
+部署交接清单-给协作者.md
+deploy/部署操作手册.md
