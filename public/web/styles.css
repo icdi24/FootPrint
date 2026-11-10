@@ -40,24 +40,24 @@
   --ink-3: #6E5A43;
   --ink-on-wood: #F3DFBC;
   --leaf-ink: #41603A;
-  --berry-ink: #8E4A3F;
-  --gold-ink: #7A6033;
-  --sky-ink: #4A6E85;
+  --berry-ink: #93342B;
+  --gold-ink: #8A4E0F;
+  --sky-ink: #35608F;
 
-  --leaf: #7CA05B;
-  --leaf-deep: #5C8A4C;        /* 主动作与完成态底色（白字 4.6:1） */
-  --leaf-hi: #8FB06C;          /* 进度条高光 */
-  --leaf-lo: #6C9150;          /* 进度条暗部 */
-  --berry: #C0695B;
-  --berry-deep: #AC5A4D;
-  --berry-hi: #CE7F71;
-  --berry-lo: #9B4E42;
-  --gold: #E9C063;
-  --gold-hi: #F2D07A;
-  --gold-lo: #D9AE4E;
-  --sky: #7E9EAE;
-  --sky-hi: #8FAEBE;
-  --sky-lo: #6E8E9E;
+  --leaf: #5C9E47;             /* 装饰：进度条 / 圆点 / 图表（同步手机端 --sv-leaf） */
+  --leaf-deep: #568047;        /* 主动作与完成态底色（白字 4.59:1，达标） */
+  --leaf-hi: #6FAF5A;          /* 进度条高光（随 --leaf 提饱和） */
+  --leaf-lo: #4B8539;          /* 进度条暗部 */
+  --berry: #D4675C;            /* 装饰：圆点 / 边框（同步手机端 --sv-berry） */
+  --berry-deep: #AC5A4D;       /* 白字底色（对比度 4.86，保留） */
+  --berry-hi: #E07F73;
+  --berry-lo: #B85449;
+  --gold: #F5C451;             /* 装饰：角标 / 进度（同步手机端 --sv-gold） */
+  --gold-hi: #FFD672;
+  --gold-lo: #DDAE3C;
+  --sky: #5B87B5;              /* 装饰：对方色（同步手机端 --blue 的明度） */
+  --sky-hi: #7BA3CB;
+  --sky-lo: #4A7199;
   --btn: #4A7539;              /* 主按钮底（白字 5.09:1） */
   --btn-dark: #3E6330;         /* 按下 / 按住时 */
   --track: #E7D9B8;            /* 进度槽底 */
@@ -78,7 +78,15 @@ body {
   color: var(--ink);
   font: 14px/1.65 var(--font-body);
   background-color: var(--bg);
-  background-image: var(--paper-grain);
+  /* 同步手机端 #app-shell 的三层底纹：木色小点 + 叶绿大点 + 横线。
+     大面积米白靠这三层打碎，否则会显得平、显得白。 */
+  background-image:
+    radial-gradient(rgba(107, 69, 44, .07) 1.2px, transparent 1.3px),
+    radial-gradient(rgba(92, 158, 71, .10) 2px, transparent 2.2px),
+    repeating-linear-gradient(0deg, transparent 0 38px,
+                              rgba(107, 69, 44, .035) 38px 39px);
+  background-size: 9px 9px, 68px 68px, auto;
+  background-position: 0 0, 20px 28px, 0 0;
   -webkit-font-smoothing: antialiased;
 }
 button { font: inherit; cursor: pointer; }
