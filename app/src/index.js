@@ -118,6 +118,11 @@ async function main() {
   // SPA 兜底
   app.use((req, res, next) => {
     if (req.method !== 'GET' || req.path.startsWith('/api/')) return next();
+    // 静态资源缺失时不能返回 HTML：否则 <script src> 会把 HTML 当 JS 解析，
+    // 报 Unexpected token '<'，还让依赖该脚本的模块悄悄降级。
+    if (/\.(js|mjs|css|json|map|woff2?|ttf|otf|eot|png|jpe?g|gif|svg|ico|webp)$/i.test(req.path)) {
+      return res.status(404).type('text/plain').send('Not found: ' + req.path);
+    }
     const target = pickIndex(req);
     if (target === 'desktop') {
       const desktop = path.join(PUBLIC_DIR, 'web', 'index.html');
