@@ -1,0 +1,224 @@
+/* ═══════════════════════════════════════════════════════════════
+   motion.css · 手写像素动效组件（无依赖）
+   原则：steps() 步进、硬边、无模糊、无圆角；与 styles.css 同一套变量。
+   所有动效在 prefers-reduced-motion 下自动关闭（见文件末尾）。
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── 1. 像素迸裂：打卡/兑换/保存成功时的小方块 ─────────────── */
+.fp-burst {
+  position: fixed;
+  z-index: 90;
+  pointer-events: none;
+  width: 4px; height: 4px;
+  background: var(--gold);
+  border: 1px solid var(--wood-deep);
+  /* JS 会写入 --dx / --dy / --spin */
+  animation: fp-burst-fly var(--dur, 620ms) steps(8, end) forwards;
+}
+@keyframes fp-burst-fly {
+  0%   { transform: translate(0, 0) scale(1); opacity: 1; }
+  60%  { opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(.5); opacity: 0; }
+}
+
+/* ── 2. 数字变化：像素抖动（不是平滑缩放） ─────────────────── */
+.fp-count-bump { animation: fp-count-bump .34s steps(4, end); }
+@keyframes fp-count-bump {
+  0%   { transform: translateY(0); }
+  25%  { transform: translateY(-3px); }
+  50%  { transform: translateY(2px); }
+  75%  { transform: translateY(-1px); }
+  100% { transform: translateY(0); }
+}
+
+/* ── 3. 交错入场：视图切换时卡片依次弹入 ───────────────────── */
+.fp-stagger {
+  animation: fp-stagger-in .32s steps(5, end) both;
+  animation-delay: calc(var(--stagger-i, 0) * 55ms);
+}
+@keyframes fp-stagger-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ── 4. 滚动显现：长列表进入视口才出现 ─────────────────────── */
+.fp-reveal {
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity .26s steps(4, end), transform .26s steps(4, end);
+}
+.fp-reveal.is-revealed { opacity: 1; transform: none; }
+
+/* ── 5. Toast：像素弹入 + 底部计时条 ────────────────────────── */
+.toast.is-on { animation: fp-toast-in .24s steps(4, end); }
+@keyframes fp-toast-in {
+  0%   { transform: translate(-50%, 14px); opacity: 0; }
+  60%  { transform: translate(-50%, -3px); opacity: 1; }
+  100% { transform: translate(-50%, 0); opacity: 1; }
+}
+.toast.is-on::after {
+  content: "";
+  position: absolute; left: 3px; right: 3px; bottom: 3px;
+  height: 3px;
+  background: var(--gold);
+  transform-origin: left center;
+  animation: fp-toast-timer 3s steps(30, end) forwards;
+}
+@keyframes fp-toast-timer {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+
+/* ── 6. 像素 hover：边框跳变（不用渐变） ────────────────────── */
+.fp-hover { position: relative; }
+.fp-hover::after {
+  content: "";
+  position: absolute; inset: 0;
+  pointer-events: none;
+  border: 2px solid transparent;
+  transition: border-color .1s steps(2, end);
+}
+.fp-hover:hover::after { border-color: var(--wood-mid); }
+
+/* 按钮按下时的一帧高亮 */
+.fp-press { animation: fp-press .18s steps(2, end); }
+@keyframes fp-press {
+  0%   { filter: brightness(1.25); }
+  100% { filter: brightness(1); }
+}
+
+/* ── 7. 「今天」脉冲：周视图/日历的今日格 ───────────────────── */
+.fp-today-pulse { animation: fp-today-pulse 2.4s steps(2, end) infinite; }
+@keyframes fp-today-pulse {
+  0%, 100% { box-shadow: inset 0 0 0 2px var(--wood-light); }
+  50%      { box-shadow: inset 0 0 0 2px var(--gold); }
+}
+
+/* ── 8. 徽章出现 ────────────────────────────────────────────── */
+.fp-badge-pop { animation: fp-badge-pop .3s steps(4, end); }
+@keyframes fp-badge-pop {
+  0%   { transform: scale(.4); opacity: 0; }
+  70%  { transform: scale(1.2); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* ── 无障碍：尊重系统减弱动效 ───────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .fp-burst,
+  .fp-count-bump,
+  .fp-stagger,
+  .fp-reveal,
+  .toast.is-on,
+  .toast.is-on::after,
+  .fp-hover,
+  .fp-press,
+  .fp-today-pulse,
+  .fp-badge-pop {
+    animation: none !important;
+    transition: none !important;
+  }
+  .fp-reveal { opacity: 1 !important; transform: none !important; }
+  .fp-burst { display: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   motion.css 追加 · 从 React Bits / Motion 改写来的 4 个像素动效
+   对应来源见 REPORT-motion.md
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── 9. 游戏对话框展开（Motion·Cabinet）
+      原文："the frame draws out sideways, then down, in hard steps"
+      改写成两步 scaleX → scaleY，全部 steps() 硬跳变，无缓动。 */
+.sheet.fp-dialog {
+  animation: fp-dialog-in .34s steps(1, end) both;
+  transition: none;
+}
+@keyframes fp-dialog-in {
+  0%   { transform: scaleX(.02) scaleY(.06); opacity: 1; }
+  34%  { transform: scaleX(1)   scaleY(.06); opacity: 1; }  /* 先横向拉开 */
+  67%  { transform: scaleX(1)   scaleY(1);   opacity: 1; }  /* 再纵向拉开 */
+  100% { transform: none;                     opacity: 1; }
+}
+
+/* ── 10. 像素云漂移（Motion·Cabinet）
+      "pixel clouds drifting across it in whole-pixel steps"
+      用 box-shadow 画硬边像素云，steps(30) 整格横移，极淡不扰阅读。 */
+.fp-sky {
+  position: fixed; inset: 0; z-index: 0;
+  pointer-events: none; overflow: hidden;
+}
+.fp-cloud {
+  position: absolute;
+  width: 4px; height: 4px;
+  background: transparent;
+  opacity: .085;
+  /* 一朵云的像素轮廓：全靠 4px 整数倍偏移，无模糊 */
+  box-shadow:
+    8px 0 0 var(--wood-mid), 12px 0 0 var(--wood-mid), 16px 0 0 var(--wood-mid),
+    4px 4px 0 var(--wood-mid), 8px 4px 0 var(--wood-mid), 12px 4px 0 var(--wood-mid),
+    16px 4px 0 var(--wood-mid), 20px 4px 0 var(--wood-mid), 24px 4px 0 var(--wood-mid),
+    0 8px 0 var(--wood-mid), 4px 8px 0 var(--wood-mid), 8px 8px 0 var(--wood-mid),
+    12px 8px 0 var(--wood-mid), 16px 8px 0 var(--wood-mid), 20px 8px 0 var(--wood-mid),
+    24px 8px 0 var(--wood-mid), 28px 8px 0 var(--wood-mid);
+  animation: fp-cloud-drift var(--dur, 52s) steps(30, end) infinite;
+  animation-delay: var(--delay, 0s);
+}
+@keyframes fp-cloud-drift {
+  from { transform: translateX(-120px); }
+  to   { transform: translateX(calc(100vw + 120px)); }
+}
+@media (max-width: 1100px) { .fp-sky { display: none; } }
+
+/* ── 11. 像素涟漪 hover（Motion·Pixels / React Bits·Pixel Card）
+      原文："hover the icon and the pixels float away from the cursor"
+      改写成 6×6 硬边点阵，按到光标的格距依次闪一下。 */
+.fp-ripple {
+  position: absolute; inset: 0; z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  grid-template-rows: repeat(6, 1fr);
+  pointer-events: none;
+  overflow: hidden;
+}
+.fp-ripple i { background: var(--gold); opacity: 0; }
+.fp-ripple.is-on i {
+  animation: fp-ripple-flash .4s steps(2, end) both;
+  animation-delay: calc(var(--d, 0) * 16ms);
+}
+@keyframes fp-ripple-flash {
+  0%   { opacity: .42; }
+  100% { opacity: 0; }
+}
+
+/* ── 12. 打字机 / 解密文字（React Bits·Text Type/Decrypted Text）
+      zoowy 回复逐字打出 + 一个闪烁光标，steps() 推进。 */
+.fp-typing::after {
+  content: '▌';
+  display: inline-block;
+  margin-left: 2px;
+  animation: fp-caret .5s steps(1, end) infinite;
+  color: var(--wood-mid);
+}
+@keyframes fp-caret { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+
+/* 状态 chip 的 morph：待审核 → 通过（React Bits·Status Mark） */
+.pending-tag.fp-morph { animation: fp-status-morph .5s steps(3, end); }
+@keyframes fp-status-morph {
+  0%   { background: transparent; letter-spacing: .3em; }
+  50%  { background: var(--gold-soft, #FBEECF); letter-spacing: .1em; }
+  100% { background: transparent; letter-spacing: normal; }
+}
+
+/* ── 追加的无障碍兜底 ─────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .sheet.fp-dialog,
+  .fp-cloud,
+  .fp-ripple i,
+  .fp-typing::after,
+  .pending-tag.fp-morph {
+    animation: none !important;
+  }
+  .fp-sky { display: none; }
+  .fp-ripple { display: none; }
+}
+
