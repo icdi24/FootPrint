@@ -76,8 +76,35 @@ async function main() {
     res.json({ ok: true });
   });
 
-  // 静态前端：HTML/JS/CSS 用 no-cache（每次带 ETag 重新验证）。
-  // 不能给 1h 强缓存——否则部署后浏览器仍拿着旧 JS，出现「后端修好了前端没更新」的假故障。
+  /* ── 同一个地址，按设备分流（必须放在 express.static 之前） ──────
+     桌面浏览器 → public/web/（桌面工作台）
+     手机/平板 → public/index.html（手机端）
+     可用 ?site=mobile / ?site=desktop 强制指定，方便调试
+     ──────────────────────────────────────────────────────────── */
+  function isMobileUA(ua) {
+    const s = String(ua || '');
+    return /Android|iPhone|iPod|iPad|Windows Phone|Mobile|harmonyos|OpenHarmony/i.test(s);
+  }
+
+  function pickIndex(req) {
+    const force = String(req.query.site || '').toLowerCase();
+    if (force === 'mobile' || force === 'desktop') return force;
+    if (req.path === '/web' || req.path.startsWith('/web/')) return 'desktop';
+    return isMobileUA(req.headers['user-agent']) ? 'mobile' : 'desktop';
+  }
+
+  // 根路径：按设备决定返回哪一版
+  app.get('/', (req, res, next) => {
+    const target = pickIndex(req);
+    const file = target === 'desktop'
+      ? path.join(PUBLIC_DIR, 'web', 'index.html')
+      : path.join(PUBLIC_DIR, 'index.html');
+    res.setHeader('Cache-Control', 'public, no-cache');
+    if (fs.existsSync(file)) return res.sendFile(file);
+    next();
+  });
+
+  // 静态前端：HTML/JS/CSS 用 no-cache（每次带 ETag 重新验证），避免部署后拿到旧文件
   app.use(express.static(PUBLIC_DIR, {
     setHeaders(res, filePath) {
       if (/\.(html|js|css)$/i.test(filePath)) {
@@ -91,6 +118,11 @@ async function main() {
   // SPA 兜底
   app.use((req, res, next) => {
     if (req.method !== 'GET' || req.path.startsWith('/api/')) return next();
+    const target = pickIndex(req);
+    if (target === 'desktop') {
+      const desktop = path.join(PUBLIC_DIR, 'web', 'index.html');
+      if (fs.existsSync(desktop)) return res.sendFile(desktop);
+    }
     const indexHtml = path.join(PUBLIC_DIR, 'index.html');
     if (fs.existsSync(indexHtml)) return res.sendFile(indexHtml);
     res.status(404).send('前端文件缺失，请检查 public/ 目录');
