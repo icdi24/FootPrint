@@ -1168,19 +1168,25 @@
       if (step) { minutes = Math.max(1, Math.min(1440, minutes + Number(step.dataset.step))); refresh(); }
     });
     $('[data-cancel]', s.el).addEventListener('click', () => s.close());
-    $('[data-ok]', s.el).addEventListener('click', () => {
+    $('[data-ok]', s.el).addEventListener('click', async () => {
+      const btn = $('[data-ok]', s.el);
+      if (btn) { btn.disabled = true; btn.textContent = '提交中…'; }
       note = $('#ckNote', s.el).value.trim();
-      const res = doCheckin(goal, minutes, note, inWin, evidence);
-      if (!res.ok) { toast(res.msg); return; }
+      const res = await doCheckin(goal, minutes, note, inWin, evidence);
+      if (!res || !res.ok) {
+        if (btn) { btn.disabled = false; btn.textContent = '提交打卡'; }
+        toast((res && res.msg) || '打卡失败');
+        return;
+      }
       s.close();
-      toast(`「${goal.title}」已提交，等对方审核后 +${res.points} 分`, res.undo);
+      toast(`「${goal.title}」已提交，等对方审核后 +${res.points} 分`);
     });
 
     if (instant) {
       // 长按秒打卡：用预填时长直接提交
-      const res = doCheckin(goal, goal.durationMin, '', inWin);
-      s.close();
-      if (res.ok) toast(`「${goal.title}」已提交，等对方审核后 +${res.points} 分`, res.undo);
+      doCheckin(goal, goal.durationMin, '', inWin).then((res) => {
+        if (res && res.ok) toast(`「${goal.title}」已提交，等对方审核后 +${res.points} 分`);
+      });
     }
   }
 
