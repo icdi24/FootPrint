@@ -97,12 +97,23 @@ fi
 
 # ---------- 3. 覆盖代码（保留 .env / runtime） ----------
 echo "[3/5] 覆盖代码（.env 与 runtime/ 原样保留）"
+# 注意：tar 已 --exclude 掉 .env / runtime / node_modules，解包只会覆盖代码文件；
+# 严禁对 $APP_DIR 整目录递归 chown —— runtime/pgdata 必须保持容器内 postgres 的属主（uid 70），
+# 否则 db 容器重启后 PostgreSQL 因数据目录权限直接起不来。
 tar -C "$SRC_DIR" -cf - \
   --exclude='.git' --exclude='.env' --exclude='runtime' --exclude='node_modules' \
   . | sudo tar -C "$APP_DIR" -xf -
-sudo chown -R ubuntu:ubuntu "$APP_DIR"
-# runtime/ 是数据卷，单独确保属主正确，但不动内容
-[[ -d "$APP_DIR/runtime" ]] && sudo chown -R ubuntu:ubuntu "$APP_DIR/runtime" || true
+# 只修代码文件/目录的属主：跳过 runtime（pgdata 属主 70:70 是 PostgreSQL 的命根子）
+sudo find "$APP_DIR" -mindepth 1 -maxdepth 1 ! -name runtime -exec chown -R ubuntu:ubuntu {} +
+# runtime/data（应用数据卷）归 ubuntu 没问题；pgdata（uid 70）绝不动
+[[ -d "$APP_DIR/runtime/data" ]] && sudo chown -R ubuntu:ubuntu "$APP_DIR/runtime/data" || true
+if [[ -d "$APP_DIR/runtime/pgdata" ]]; then
+  PG_UID="$(stat -c '%u' "$APP_DIR/runtime/pgdata")"
+  if [[ "$PG_UID" != "70" ]]; then
+    echo "  ⚠ 检测到 runtime/pgdata 属主异常（uid=$PG_UID），修正回 70:70"
+    sudo chown -R 70:70 "$APP_DIR/runtime/pgdata"
+  fi
+fi
 
 # ---------- 4. 端口绑定 + 重建 ----------
 echo "[4/5] 修正端口绑定并重建容器"
