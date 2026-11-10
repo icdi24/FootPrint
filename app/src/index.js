@@ -75,9 +75,48 @@ async function main() {
   // 静态前端（本地演示关闭缓存，避免改了页面还看到旧文件）
   app.use(express.static(PUBLIC_DIR, { maxAge: String(process.env.LOCAL_NO_LOGIN || '') === '1' ? 0 : '1h' }));
 
+  /* ── 同一个地址，按设备分流 ────────────────────────────────
+     桌面浏览器 → public/web/（桌面工作台）
+     手机/平板 → public/index.html（手机端）
+     可用 ?site=mobile / ?site=desktop 强制指定，方便调试
+     ──────────────────────────────────────────────────────── */
+  function isMobileUA(ua) {
+    const s = String(ua || '');
+    // 手机和平板：常见的移动端关键字；iPad 用 Macintosh + 触屏判断交给前端，这里按 UA 兜底
+    return /Android|iPhone|iPod|iPad|Windows Phone|Mobile|harmonyos|OpenHarmony/i.test(s);
+  }
+
+  function pickIndex(req) {
+    // 允许用查询参数强制覆盖，调试方便
+    const force = String(req.query.site || '').toLowerCase();
+    if (force === 'mobile' || force === 'desktop') return force;
+
+    // URL 路径显式带了 /web/ 的，走桌面版
+    if (req.path === '/web' || req.path.startsWith('/web/')) return 'desktop';
+
+    return isMobileUA(req.headers['user-agent']) ? 'mobile' : 'desktop';
+  }
+
+  // 根路径分流：只有访问站点根时才判断，其他静态资源照常走
+  app.get('/', (req, res, next) => {
+    const target = pickIndex(req);
+    if (target === 'desktop') {
+      const desktop = path.join(PUBLIC_DIR, 'web', 'index.html');
+      if (fs.existsSync(desktop)) return res.sendFile(desktop);
+      // 桌面版还没部署时，退回手机端，避免白屏
+      return next();
+    }
+    next();  // mobile：交给下面的静态与 SPA 兜底
+  });
+
   // SPA 兜底
   app.use((req, res, next) => {
     if (req.method !== 'GET' || req.path.startsWith('/api/')) return next();
+    const target = pickIndex(req);
+    if (target === 'desktop') {
+      const desktop = path.join(PUBLIC_DIR, 'web', 'index.html');
+      if (fs.existsSync(desktop)) return res.sendFile(desktop);
+    }
     const indexHtml = path.join(PUBLIC_DIR, 'index.html');
     if (fs.existsSync(indexHtml)) return res.sendFile(indexHtml);
     res.status(404).send('前端文件缺失，请检查 public/ 目录');
