@@ -2564,22 +2564,25 @@ textarea:focus-visible { outline: none; }
   display: flex; align-items: center; gap: 14px;
   width: 100%; padding: 14px 18px;
   text-align: left; cursor: pointer;
-  background: linear-gradient(180deg, #B98A5A 0%, #A2703F 100%);
+  /* 不用棕色块：浅米纸面 + 底部分隔线，保持层次又干净 */
+  background: var(--bg-2);
   border: 0;
-  transition: filter .14s var(--ease);
+  border-bottom: 2px solid var(--line-strong);
+  transition: background .14s var(--ease);
 }
-.us-drawer-head:hover { filter: brightness(1.06); }
+.us-drawer-head:hover { background: var(--wood-light); }
+.us-drawer.is-open .us-drawer-head { border-bottom-color: var(--wood-mid); }
 
 .usd-ico {
   display: grid; place-items: center; flex: none;
   width: 38px; height: 38px; font-size: 19px;
   background: var(--paper);
   border: 2px solid var(--wood-deep);
-  box-shadow: 0 2px 0 rgba(0, 0, 0, .2);
+  box-shadow: 0 2px 0 rgba(107, 69, 44, .22);
 }
 .usd-main { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.usd-main b { font: 16px var(--font-px); color: var(--paper); letter-spacing: .03em; }
-.usd-main small { font-size: 12px; color: rgba(255, 248, 231, .82); }
+.usd-main b { font: 16px var(--font-px); color: var(--wood-deep); letter-spacing: .03em; }
+.usd-main small { font-size: 12px; color: var(--ink-3); }
 .usd-badge {
   flex: none; padding: 2px 8px;
   font: 11px var(--font-num); color: var(--wood-deep);
@@ -2590,7 +2593,7 @@ textarea:focus-visible { outline: none; }
   flex: none; width: 0; height: 0;
   border-left: 5px solid transparent;
   border-right: 5px solid transparent;
-  border-top: 6px solid rgba(255, 248, 231, .9);
+  border-top: 6px solid var(--wood-deep);
   transition: transform .2s var(--ease);
 }
 .us-drawer.is-open .usd-arrow { transform: rotate(180deg); }
@@ -2764,3 +2767,50 @@ textarea:focus-visible { outline: none; }
 /* ── 提醒卡整体：卡片内留白调整 ─────────────────────── */
 .rail-card { padding: 16px 16px 14px; }
 .rail-card-head { margin-bottom: 12px; }
+
+
+/* ── 「我们」页顶部聊天主操作条（绿色，与积分卡同色系） ─── */
+.us-chat-bar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 18px; margin-bottom: 16px;
+  color: var(--paper);
+  background: linear-gradient(180deg, #4A7539 0%, #3E6330 100%);
+  border: 3px solid var(--wood-deep);
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 248, 231, .22),
+    inset 0 3px 0 rgba(255, 255, 255, .18),
+    0 5px 0 rgba(107, 69, 44, .26);
+}
+.ucb-ico {
+  display: grid; place-items: center; flex: none;
+  width: 38px; height: 38px;
+  background: var(--paper);
+  border: 2px solid var(--wood-deep);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, .2);
+}
+.ucb-ico svg { width: 22px; height: 22px; color: var(--wood-dark); }
+.ucb-copy { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ucb-copy b { font: 15px var(--font-px); color: var(--paper); letter-spacing: .03em; }
+.ucb-copy small { font-size: 12px; color: rgba(255, 248, 231, .82); }
+.ucb-unread {
+  flex: none; padding: 3px 9px;
+  font: 11px var(--font-px); color: var(--wood-deep);
+  background: var(--gold-soft, #FBEECF);
+  border: 2px solid var(--wood-deep);
+}
+.ucb-btn {
+  flex: none; padding: 8px 18px;
+  font: 14px var(--font-px); color: var(--wood-deep);
+  background: var(--paper);
+  border: 2px solid var(--wood-deep);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, .28);
+  cursor: pointer;
+  transition: transform .1s linear, box-shadow .1s linear;
+}
+.ucb-btn:hover { background: var(--wood-light); }
+.ucb-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(0, 0, 0, .28); }
+
+@media (max-width: 620px) {
+  .us-chat-bar { flex-wrap: wrap; }
+  .ucb-copy { min-width: 60%; }
+}

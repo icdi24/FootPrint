@@ -3543,21 +3543,23 @@
       </ul>
       ${renderHallEntry()}`;
 
+    // 聊天入口放到最上面，做成绿色主操作条（不用棕色）
+    const chatBar = `
+      <div class="us-chat-bar">
+        <span class="ucb-ico" data-icon="us" aria-hidden="true"></span>
+        <div class="ucb-copy"><b>和 ${esc(pU.name)} 说两句</b><small>可以打字，也有常用语</small></div>
+        ${unread ? `<span class="ucb-unread">${unread} 条未读</span>` : ''}
+        <button class="ucb-btn" type="button" data-chat-open>打开 →</button>
+      </div>`;
+
     return `${head('我们', `第 ${Math.max(1, Math.round((Date.now() - new Date(pairOf(uid).since.replace(/-/g, '/')).getTime()) / 86400000) + 1)} 天`, `一起打卡 ${Math.min(a.streak, b.streak)} 天`)}
+      ${chatBar}
       <div class="us-drawers">
         ${drawer('review', '📌', '今天要处理', `待审核 · ta 今天的打卡${unread ? ' · 未读消息' : ''}`, reviewTotal ? `${reviewTotal} 件` : '', reviewBody)}
         ${drawer('compare', '📊', '数据对比', '并排看看 · 手机时长 · 7 天趋势', '3 个板块', compareBody)}
         ${drawer('plan', '📖', 'ta 的计划', '大目标 · 日常目标 · 当前状态', `${partnerGoals.length} 个`, planBody)}
         ${drawer('shared', '🎁', '共同记录', '最近的打卡 · 兑换 · 大厅', '', sharedBody)}
-      </div>
-      <section class="wood-panel sub-panel chat-entry-panel" style="margin-top:18px">
-        <div class="hall-entry-row">
-          <span class="hall-entry-ico" data-icon="us"></span>
-          <div class="hall-entry-copy"><b>和 ${esc(pU.name)} 说两句</b><small>可以打字，也有常用语</small></div>
-          ${unread ? `<span class="chat-unread">${unread}</span>` : ''}
-          <button class="text-btn" type="button" data-chat-open>打开 →</button>
-        </div>
-      </section>`;
+      </div>`;
   }
 
 
