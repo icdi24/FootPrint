@@ -1522,7 +1522,7 @@
       s.close(); renderAll(); toast('目标已放弃，记录保留');
     });
 
-    $('[data-ok]', s.el).addEventListener('click', () => {
+    $('[data-ok]', s.el).addEventListener('click', async () => {
       const title = $('#fgTitle', s.el).value.trim();
       if (!title) { $('#fgTitle', s.el).focus(); toast('先给目标起个名字'); return; }
       if (st.type === 'weekdays' && !st.weekdays.length) { toast('至少选一天'); return; }
@@ -1538,13 +1538,32 @@
         estTotalMin: st.estTotalMin,
         criteria: ($('#fgCriteria', s.el) || {}).value || '',
       };
-      if (editing) Object.assign(editing, payload);
-      else {
-        store.goals.push({
-          id: nid('G'), ownerId: store.currentUser, customPoints: 0,
-          status: payload.type === 'stage' ? 'active' : 'active',
-          createdAt: Date.now(), ...payload,
-        });
+      const apiPayload = {
+        type: payload.type,
+        title: payload.title,
+        emoji: payload.emoji,
+        description: payload.desc || '',
+        duration_min: payload.durationMin,
+        difficulty: payload.difficulty,
+        freq_mode: payload.freqMode,
+        freq_n: payload.freqN,
+        weekdays: payload.weekdays,
+        window_start: payload.windowStart || '',
+        window_end: payload.windowEnd || '',
+        ...(payload.customPoints > 0 ? { custom_points: payload.customPoints } : {}),
+        est_total_min: payload.estTotalMin,
+        accept_criteria: payload.criteria || '',
+        start_date: payload.startDate,
+        end_date: payload.endDate || '',
+      };
+      try {
+        if (editing) await API.updateGoal(editing.id, apiPayload);
+        else await API.createGoal(apiPayload);
+        s.close();
+        await loadAll();
+        toast(editing ? '已保存' : `「${payload.title}」已加进来`);
+      } catch (e) {
+        toast(e.message || '保存失败');
       }
       s.close();
       renderAll();
@@ -1713,7 +1732,7 @@
       if (v > 0) $('#wfPoints', s.el).value = v * 10;
     });
     $('[data-cancel]', s.el).addEventListener('click', () => s.close());
-    $('[data-ok]', s.el).addEventListener('click', () => {
+    $('[data-ok]', s.el).addEventListener('click', async () => {
       const title = $('#wfTitle', s.el).value.trim();
       if (!title) { toast('先给愿望起个名字'); return; }
       const em = $('.fg-emoji.is-on', s.el);
@@ -1726,9 +1745,26 @@
         cooldown: base.cooldown || 0, status: 'active',
         ownerId: store.currentUser,
       };
-      if (w) Object.assign(w, payload);
-      else store.wishes.push({ id: nid('W'), desc: '', ...payload });
-      s.close(); renderAll(); toast(w ? '已保存' : `「${title}」已加入愿望单`);
+      const apiPayload = {
+        category: payload.kind === 'goods' ? 'goods' : 'event',
+        title: payload.title,
+        description: payload.desc || '',
+        emoji: payload.emoji,
+        price_cny: payload.priceCny || 0,
+        points_cost: payload.pointsCost,
+        cooldown_days: payload.cooldown || 0,
+        valid_days: payload.validDays || 0,
+        need_confirm: payload.needConfirm ? 1 : 0,
+      };
+      try {
+        if (w) await API.updateWish(w.id, apiPayload);
+        else await API.createWish(apiPayload);
+        s.close();
+        await loadAll();
+        toast(w ? '已保存' : `「${title}」已加入愿望单`);
+      } catch (e) {
+        toast(e.message || '保存失败');
+      }
     });
   }
   /* ═══════════════════════════════════════════════════════
@@ -2090,13 +2126,15 @@
         <button class="wood-btn" type="button" data-ok>确认补卡</button>`,
     });
     $('[data-cancel]', s.el).addEventListener('click', () => s.close());
-    $('[data-ok]', s.el).addEventListener('click', () => {
-      store.checks.push({
-        id: nid('C'), goalId, userId: uid, date, minutes: goal.durationMin, points: pts,
-        inWindow: false, note: '补卡', evidence: '', status: 'pending', isMakeup: true, at: Date.now(),
-      });
-      s.close(); renderAll();
-      toast(`已补 ${date.slice(5)} 的卡，等对方审核后 +${pts} 分`);
+    $('[data-ok]', s.el).addEventListener('click', async () => {
+      try {
+        await API.checkin(goalId, { duration_min: goal.durationMin, evidence_text: '补卡', is_makeup: true });
+        s.close();
+        await loadAll();
+        toast(`已补 ${date.slice(5)} 的卡`);
+      } catch (e) {
+        toast(e.message || '补卡失败');
+      }
     });
   }
 
@@ -2469,22 +2507,26 @@
         reply.innerHTML = '';
         $('#zoowyText', s.el).focus();
       });
-      reply.querySelector('[data-zoowy-accept]').addEventListener('click', () => {
-        // 提议落地：写进小目标（pending 归入目标页），大目标存在则挂到链上
-        tpl.steps.forEach((step, i) => {
-          store.goals.push({
-            id: nid('G'), ownerId: store.currentUser, type: 'stage', title: step,
-            emoji: '🏁', desc: `由 zoowy 拆分 · 第 ${i + 1} 步`, status: 'active',
-            estTotalMin: 120, difficulty: 2, customPoints: 0, startDate: todayKey(),
-            endDate: shiftDay(30 + i * 15), createdAt: Date.now(),
-          });
-          if (b) {
-            b.chain = b.chain || [];
-            b.chain.push({ title: step, emoji: '📌', plannedDate: shiftDay(7 + i * 14), status: 'planned' });
+      reply.querySelector('[data-zoowy-accept]').addEventListener('click', async () => {
+        try {
+          for (let i = 0; i < tpl.steps.length; i++) {
+            await API.createGoal({
+              type: 'stage',
+              title: tpl.steps[i],
+              emoji: '🏁',
+              description: `由 zoowy 拆分 · 第 ${i + 1} 步`,
+              est_total_min: 120,
+              difficulty: 2,
+              start_date: todayKey(),
+              end_date: shiftDay(30 + i * 15),
+            });
           }
-        });
-        s.close(); renderAll();
-        toast(`已加入 ${tpl.steps.length} 个小目标`);
+          s.close();
+          await loadAll();
+          toast(`已加入 ${tpl.steps.length} 个小目标`);
+        } catch (e) {
+          toast(e.message || '加入失败');
+        }
       });
     };
     $('[data-zoowy-send]', s.el).addEventListener('click', send);
@@ -2546,13 +2588,24 @@
     const listEl = $('#chatList', s.el);
     listEl.scrollTop = listEl.scrollHeight;
 
-    const pushMsg = (text) => {
+    const pushMsg = async (text) => {
       const t = String(text || '').trim();
       if (!t) { toast('说点什么再发'); return; }
-      store.chat.push({ id: nid('M'), from: uid, text: t, at: Date.now() });
-      listEl.innerHTML = renderMsgs();
-      listEl.scrollTop = listEl.scrollHeight;
-      renderAll();
+      try {
+        await API.sendChat(t);
+        const res = await API.chatMessages();
+        const msgs = (res && res.messages) || [];
+        store.chat = msgs.map((m) => ({
+          id: m.id,
+          from: m.senderId ?? m.sender_id ?? m.from,
+          text: m.content || m.text || '',
+          at: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+        }));
+        listEl.innerHTML = renderMsgs();
+        listEl.scrollTop = listEl.scrollHeight;
+      } catch (e) {
+        toast(e.message || '发送失败');
+      }
     };
 
     s.el.addEventListener('click', (e) => {
@@ -2663,10 +2716,17 @@
       $$('.st-item', s.el).forEach((x) => x.classList.toggle('is-on', x === b));
     });
     $('[data-cancel]', s.el).addEventListener('click', () => s.close());
-    $('[data-ok]', s.el).addEventListener('click', () => {
+    $('[data-ok]', s.el).addEventListener('click', async () => {
       if (!sel) { toast('先选一个状态'); return; }
-      store.status[uid] = { ...sel, text: $('#stText', s.el).value.trim(), at: Date.now() };
-      s.close(); renderAll(); toast('状态已更新');
+      const text = $('#stText', s.el).value.trim();
+      try {
+        await API.setStatus({ emoji: sel.emoji, label: sel.label, group: sel.group, text });
+        s.close();
+        await loadAll();
+        toast('状态已更新');
+      } catch (e) {
+        toast(e.message || '设置失败');
+      }
     });
   }
 
@@ -3187,8 +3247,9 @@
     // ── 状态 ──
     if (t.closest('[data-status-open]')) { openStatusPicker(); return; }
     if (t.closest('[data-status-clear]')) {
-      delete store.status[store.currentUser];
-      renderView('data'); toast('状态已清除'); return;
+      API.clearStatus().then(() => loadAll()).then(() => toast('状态已清除'))
+        .catch((e) => toast(e.message || '清除失败'));
+      return;
     }
     if (t.closest('[data-status-view]')) {
       const pid = t.closest('[data-status-view]').dataset.statusView;
