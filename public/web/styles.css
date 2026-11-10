@@ -2107,3 +2107,16 @@ textarea:focus-visible { outline: none; }
 .bd-step-main { display: flex; flex-direction: column; }
 .bd-step-main b { font: 14px var(--font-px); font-weight: 400; }
 .bd-step-main small { font-size: 12px; color: var(--ink-3); }
+
+/* 大目标表单：图标选择 */
+.bg-emoji-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.bg-emoji {
+  width: 44px; height: 44px; font-size: 22px;
+  background: var(--paper); border: 2px solid var(--line-strong);
+  transition: transform .12s var(--snap), border-color .14s var(--ease), background .14s var(--ease);
+}
+.bg-emoji:hover { transform: translateY(-2px); border-color: var(--wood-mid); }
+.bg-emoji.is-on {
+  background: var(--wood-light); border-color: var(--wood-deep);
+  box-shadow: 0 3px 0 var(--wood-dark);
+}

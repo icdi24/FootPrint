@@ -508,6 +508,20 @@
   const API = window.FP_API;
   const AD = window.FP_ADAPT;
 
+
+  /* 状态字段统一：后端 at 是 ISO 字符串，前端用毫秒时间戳 */
+  function normalizeStatus(s) {
+    if (!s) return null;
+    const at = s.at ? (typeof s.at === 'number' ? s.at : new Date(s.at).getTime()) : Date.now();
+    return {
+      emoji: s.emoji || '🐾',
+      label: s.label || '',
+      group: s.group || 'mood',
+      text: s.text || '',
+      at: Number.isFinite(at) ? at : Date.now(),
+    };
+  }
+
   /* 一次性拉齐首屏需要的所有数据 */
   async function loadAll() {
     if (isGuest() || !store.loggedIn) return;
@@ -551,12 +565,13 @@
         store.wishBalance = AD.num(wishRes.balance, store.balance);
       }
 
-      // 状态
+      // 状态：后端返回 { mine: 状态|null, partner: { username, avatar, status: 状态|null } }
       if (statusRes) {
         store.status = {};
-        if (statusRes.mine) store.status[uid] = statusRes.mine;
+        if (statusRes.mine) store.status[uid] = normalizeStatus(statusRes.mine);
         const pid = partnerId();
-        if (pid && statusRes.partner) store.status[pid] = statusRes.partner;
+        const pStatus = statusRes.partner && statusRes.partner.status;
+        if (pid && pStatus) store.status[pid] = normalizeStatus(pStatus);
       }
 
       // 打卡记录（用于今日清单的状态判断）
@@ -1891,6 +1906,63 @@
   }
 
 
+
+  /* 大目标：新建 / 编辑（走 POST / PATCH /api/biggoals） */
+  function openBigGoalForm(bid) {
+    const editing = bid ? store.biggoals.find((b) => String(b.id) === String(bid)) : null;
+    const s = openSheet({
+      title: editing ? '编辑大目标' : '新建大目标',
+      width: 480,
+      body: `
+        <label class="fg-field">想做成什么
+          <input id="bgTitle" type="text" maxlength="40" placeholder="比如：今年读完 24 本书" value="${esc(editing ? editing.title : '')}"/>
+        </label>
+        <label class="fg-field">一句话说明（可选）
+          <input id="bgNote" type="text" maxlength="80" placeholder="比如：当前在读《人类简史》第 3 章" value="${esc(editing ? editing.note : '')}"/>
+        </label>
+        <label class="fg-field">挑个图标
+          <div class="bg-emoji-row" id="bgEmojiRow">
+            ${['🎯', '📚', '🏃', '💰', '🎸', '🌏', '🧠', '🏔️'].map((e, i) => `
+              <button class="bg-emoji${(!editing && i === 0) || (editing && editing.emoji === e) ? ' is-on' : ''}"
+                type="button" data-bg-emoji="${e}">${e}</button>`).join('')}
+          </div>
+        </label>
+        <p class="fg-note">建好后可以往里加小目标，一步一步走。</p>`,
+      actions: `<button class="text-btn" type="button" data-cancel>取消</button>
+        <button class="wood-btn" type="button" data-ok>${editing ? '保存' : '建好了'}</button>`,
+    });
+
+    let emoji = editing ? editing.emoji : '🎯';
+    s.el.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-bg-emoji]');
+      if (!b) return;
+      emoji = b.dataset.bgEmoji;
+      $$('.bg-emoji', s.el).forEach((x) => x.classList.toggle('is-on', x === b));
+    });
+
+    $('[data-cancel]', s.el).addEventListener('click', () => s.close());
+    $('[data-ok]', s.el).addEventListener('click', async () => {
+      const title = ($('#bgTitle', s.el).value || '').trim();
+      const note = ($('#bgNote', s.el).value || '').trim();
+      if (!title) { toast('先写个目标'); return; }
+      const btn = $('[data-ok]', s.el);
+      if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
+      try {
+        if (editing) {
+          await API.updateBigGoal(editing.id, { title, description: note, emoji });
+        } else {
+          await API.createBigGoal({ title, description: note, emoji });
+        }
+        s.close();
+        await loadAll();
+        toast(editing ? '已保存' : '大目标建好了');
+      } catch (e) {
+        if (btn) { btn.disabled = false; btn.textContent = editing ? '保存' : '建好了'; }
+        toast(e.message || '保存失败');
+      }
+    });
+  }
+
   /* 大目标详情：完整路线 + 进度 + 操作 */
   function openBigDetail(bid) {
     const b = store.biggoals.find((x) => String(x.id) === String(bid));
@@ -3202,9 +3274,8 @@
     if (zoowyBtn) { openZoowy(zoowyBtn.dataset.zoowy); return; }
     const shiftBtn = t.closest('[data-big-shift]');
     if (shiftBtn) { openBigShift(shiftBtn.dataset.bigShift); return; }
-    if (t.closest('[data-new-biggoal]') || t.closest('[data-edit-biggoal]')) {
-      toast('大目标编辑还没做'); return;
-    }
+    if (t.closest('[data-new-biggoal]')) { openBigGoalForm(null); return; }
+    if (t.closest('[data-edit-biggoal]')) { openBigGoalForm(t.closest('[data-edit-biggoal]').dataset.editBiggoal); return; }
 
     const mkBtn = t.closest('[data-makeup]');
     if (mkBtn) {
@@ -3494,30 +3565,22 @@
   });
 
   /* 兑换执行（原弹层逻辑抽出来，供长按调用） */
-  function doRedeem(wid) {
-    const w = store.wishes.find((x) => x.id === wid);
-    if (!w) return;
-    const uid = store.currentUser;
+  /* 兑换：调接口（后端 /api/wish/:id/redeem） */
+  async function doRedeem(wid) {
+    const w = store.wishes.find((x) => String(x.id) === String(wid));
+    if (!w) { toast('没找到这个愿望'); return; }
     const st = wishState(w);
     if (!st.ok) { toast(st.label); renderAll(); return; }
-    const needsConfirm = w.kind === 'event' && w.needConfirm;
-    const r = {
-      id: nid('R'), wishId: w.id, userId: uid, title: w.title, points: w.pointsCost,
-      status: needsConfirm ? 'applied' : 'confirmed',
-      appliedAt: Date.now(), note: '', kind: w.kind,
-    };
-    store.redemptions.push(r);
-    if (!needsConfirm) ledgerAdd(uid, -w.pointsCost, 'redeem_charge', `兑换 · ${w.title}`, w.id);
-    renderAll();
-    toast(needsConfirm ? '已提交申请，等对方确认' : `兑换成功，-${fmt(w.pointsCost)} 分`,
-      needsConfirm ? null : {
-        undo: () => {
-          if (Date.now() - r.appliedAt > 2 * 3600000) { toast('超过 2 小时，不能撤回了'); return; }
-          r.status = 'cancelled';
-          ledgerAdd(uid, w.pointsCost, 'redeem_refund', `撤回兑换 · ${w.title}`, w.id);
-          renderAll(); toast('已撤回，积分退回');
-        },
-      });
+
+    try {
+      const res = await API.redeem(wid);
+      await loadAll();
+      const needConfirm = (res && res.status === 'applied') || (w.kind === 'event' && w.needConfirm);
+      toast(needConfirm ? '已提交申请，等对方确认' : `兑换成功，-${fmt(w.pointsCost)} 分`);
+    } catch (e) {
+      toast(e.message || '兑换失败');
+      await loadAll();
+    }
   }
 
   /* ═══════════════════════════════════════════════════════
