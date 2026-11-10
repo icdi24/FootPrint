@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="theme-color" content="#4E3220"/>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'><rect width='16' height='16' fill='%234E3220'/><path fill='%23FFF8E7' d='M2 4h2v1h-2zM5 4h2v1h-2zM8 4h2v1h-2zM11 4h2v1h-2zM2 5h2v1h-2zM5 5h2v1h-2zM8 5h2v1h-2zM11 5h2v1h-2zM2 6h2v1h-2zM5 6h2v1h-2zM8 6h2v1h-2zM11 6h2v1h-2zM2 7h12v1H2zM2 8h12v1H2zM2 9h12v1H2zM3 10h10v1H3zM4 11h8v1H4z'/></svg>"/>
+  <title>脚印 · 两个人的桌面工作台</title>
+  <link rel="stylesheet" href="styles.css"/>
+</head>
+<body data-view="today" data-auth="pair" data-chart="today">
+  <div class="bunting" aria-hidden="true"></div>
+
+  <!-- ── 顶部木质条：品牌 / 五个标签 / 日期 ─────────────── -->
+  <header class="masthead">
+    <div class="mast-brand">
+      <span class="brand-mark" data-icon="paw" aria-hidden="true"></span>
+      <span class="brand-word"><b>脚印</b></span>
+    </div>
+
+    <nav class="tabs" id="tabs" aria-label="主导航">
+      <span class="tab-ink" id="tabInk" aria-hidden="true"></span>
+      <button class="tab is-active" data-view="today" type="button" aria-current="page">
+        <span class="tab-ico" data-icon="home" data-icon-kind="mono" aria-hidden="true"></span>
+        <span>今日</span><span class="tab-badge" id="navBadge">3</span>
+      </button>
+      <button class="tab" data-view="goals" type="button">
+        <span class="tab-ico" data-icon="target" data-icon-kind="mono" aria-hidden="true"></span><span>目标</span>
+      </button>
+      <button class="tab" data-view="wish" type="button">
+        <span class="tab-ico" data-icon="gift" data-icon-kind="mono" aria-hidden="true"></span><span>愿望单</span>
+      </button>
+      <button class="tab" data-view="us" type="button">
+        <span class="tab-ico" data-icon="us" data-icon-kind="mono" aria-hidden="true"></span><span>我们</span>
+      </button>
+      <button class="tab" data-view="data" type="button">
+        <span class="tab-ico" data-icon="doc" data-icon-kind="mono" aria-hidden="true"></span><span>我的</span>
+      </button>
+    </nav>
+
+    <div class="mast-side">
+      <span class="season">立冬 · 第 45 周</span>
+      <span class="today-date" id="todayDate">11 月 8 日 · 周日</span>
+      <button class="bell" type="button" id="bellBtn" aria-label="通知">
+        <span data-icon="alert" data-icon-kind="mono" aria-hidden="true"></span><i></i>
+      </button>
+    </div>
+  </header>
+
+  <div class="shell">
+    <!-- ── 主工作区 ─────────────────────────────────────── -->
+    <main class="main">
+      <div class="today-wrap" id="todayWrap">
+        <div class="page-head">
+          <div class="ph-copy">
+            <h1 id="greeting">下午好，栗子</h1>
+            <p id="todoLine">你还有 <b>3</b> 件事没划掉。</p>
+            <p class="duo-summary" id="duoSummary">栗子 3 件 · 阿白 1 件</p>
+          </div>
+          <div class="duo-meta">
+            <span class="duo-pair" aria-hidden="true">
+              <span class="pair-avatar me" data-icon="avatar"></span>
+              <span class="pair-avatar partner" data-icon="avatar"></span>
+            </span>
+            <span class="duo-text"><b id="duoTitle">栗子 &amp; 阿白</b><small id="duoSub">一起坚持的第 128 天</small></span>
+          </div>
+        </div>
+
+        <!-- 首屏唯一主角：两个人的今日清单 -->
+        <section class="board wood-panel" aria-label="今日双人打卡">
+          <div class="panel-head board-head">
+            <h2><span class="wood-tag">今日待办</span></h2>
+            <div class="panel-actions">
+              <button class="text-btn" type="button" data-goto="goals">全部目标 →</button>
+            </div>
+          </div>
+
+          <div class="duo-grid">
+            <section class="person-col" aria-label="栗子的今日待办">
+              <div class="person-head">
+                <span class="person-avatar me" data-icon="avatar" aria-hidden="true"></span>
+                <div class="person-name"><b id="meName">栗子</b><small id="meDetail">29 / 41 次 · 连续 6 天</small></div>
+                <span class="person-rate"><small>完成率</small><b id="meRate">71</b><em>%</em></span>
+                <div class="rate-bar"><span class="rate-fill me" id="meBar" style="width:71%"></span></div>
+              </div>
+              <ul class="task-list" id="myTasks"></ul>
+            </section>
+
+            <section class="person-col" aria-label="阿白的今日待办">
+              <div class="person-head">
+                <span class="person-avatar partner" data-icon="avatar" aria-hidden="true"></span>
+                <div class="person-name"><b id="partnerName">阿白</b><small id="partnerDetail">15 / 22 次 · 连续 4 天</small></div>
+                <span class="person-rate partner"><small>完成率</small><b id="partnerRate">68</b><em>%</em></span>
+                <div class="rate-bar"><span class="rate-fill partner" id="partnerBar" style="width:68%"></span></div>
+              </div>
+              <p class="person-hint" id="partnerHint">阿白今天还差 1 件事。</p>
+              <ul class="task-list" id="partnerTasks"></ul>
+            </section>
+          </div>
+
+          <div class="board-foot">
+            <span class="foot-count">我今天已完成 <b id="doneCount">1</b> / <span id="totalCount">4</span> 件</span>
+            <div class="ruler" id="doneRuler" role="img" aria-label="今日完成进度"><span id="doneBar" style="width:25%"></span></div>
+            <span class="goals-hint" id="goalsHint"></span>
+          </div>
+        </section>
+      </div>
+
+      <!-- 其余视图由 app.js 渲染 -->
+      <div id="viewMount" class="view-mount" aria-live="polite"></div>
+    </main>
+
+    <!-- ── 右侧窄状态栏：今日结果 + 待办提醒 ────────────── -->
+    <aside class="rail" aria-label="今日结果">
+      <section class="wallet">
+        <span class="wallet-label">共同积分</span>
+        <div class="wallet-num" id="walletNum">1,896</div>
+        <div class="wallet-sub" id="walletSub">≈ ¥189.6</div>
+      </section>
+
+      <section class="rail-card" id="verifyCard" hidden>
+        <div class="rail-card-head"><span class="wood-tag wood-tag-berry">待我验收</span><b id="verifyCount">0</b></div>
+        <p id="verifyLine"></p>
+        <button class="text-btn" type="button" id="verifyGo">去验收 →</button>
+      </section>
+
+      <section class="rail-card" id="noticeCard">
+        <div class="rail-card-head"><span class="wood-tag">提醒</span></div>
+        <ul class="notice-list" id="noticeList"></ul>
+      </section>
+    </aside>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="sheet-layer" id="sheetLayer" aria-live="polite"></div>
+  <div class="auth-layer" id="authLayer" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>
