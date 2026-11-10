@@ -322,6 +322,9 @@
     chat: [],     // { id, from, text, at } 搭子之间的短消息
     chatReadAt: 0, // 我上次看到的时间点（用于红点）
     usTab: 'more', // 「我们」页子 tab：more 待处理（默认）/ compare 数据对比
+    goalsTab: 'daily', // 「目标」页右栏子 tab：daily 日常 / stage 小目标 / big 大目标
+    zoowyOpen: false,  // zoowy 聊天窗是否展开
+    zoowyMsgs: [],     // zoowy 对话记录 { role, content }
     usage: {
       // 手机端每天上报的 App 使用时长；这里给一份演示快照
       u1: {
@@ -1101,7 +1104,9 @@
     renderToday();
     renderRail();
     if (document.body.dataset.view !== 'today') renderView(document.body.dataset.view);
+    mountZoowyDock();
   }
+
   /* ═══════════════════════════════════════════════════════
      打卡弹层
      ═══════════════════════════════════════════════════════ */
@@ -1579,51 +1584,56 @@
     if (!guard('提交审核要先登录。')) return;
     const goal = goalOf(goalId);
     if (!goal) return;
-    const count = store.verifications.filter((v) => v.goalId === goalId).length + 1;
     const s = openSheet({
       title: '提交审核',
       width: 520,
       body: `
         <div class="ck-goal">
           <span class="ck-emoji">${goal.emoji || '🏁'}</span>
-          <div><b>${esc(goal.title)}</b><small>第 ${count} 次提交 · 完成后 +${stagePoints(goal)} 分</small></div>
+          <div><b>${esc(goal.title)}</b><small>完成后 +${stagePoints(goal)} 分</small></div>
         </div>
         <p class="fg-label">自述（必填，对方靠这个判断）</p>
         <textarea id="vfStatement" class="fg-input" rows="3" maxlength="300" placeholder="做到哪一步了，怎么证明"></textarea>
-        <p class="fg-label">证据（文字描述，最多 3 条）</p>
+        <p class="fg-label">证据（文字描述）</p>
         <input id="vfEvidence" class="fg-input" type="text" maxlength="120" placeholder="比如：照片 2 张、导出 PDF 一份"/>`,
       actions: `<button class="text-btn" type="button" data-cancel>取消</button>
         <button class="wood-btn" type="button" data-ok>提交给对方</button>`,
     });
     $('[data-cancel]', s.el).addEventListener('click', () => s.close());
-    $('[data-ok]', s.el).addEventListener('click', () => {
+    $('[data-ok]', s.el).addEventListener('click', async () => {
       const stmt = $('#vfStatement', s.el).value.trim();
       if (stmt.length < 8) { toast('自述再写具体一点，至少 8 个字'); return; }
-      store.verifications.push({
-        id: nid('V'), goalId, userId: store.currentUser, submitCount: count,
-        selfStatement: stmt, evidence: $('#vfEvidence', s.el).value.trim(),
-        status: 'pending', at: Date.now(), decidedAt: 0, reason: '',
-      });
-      if (goal) goal.status = 'reviewing';
-      s.close(); renderAll();
-      toast('已提交，等对方确认');
+      const btn = $('[data-ok]', s.el);
+      if (btn) { btn.disabled = true; btn.textContent = '提交中…'; }
+      try {
+        await API.submitVerify(goalId, {
+          self_statement: stmt,
+          evidence_text: $('#vfEvidence', s.el).value.trim(),
+        });
+        s.close();
+        await loadAll();
+        toast('已提交，等对方确认');
+      } catch (e) {
+        if (btn) { btn.disabled = false; btn.textContent = '提交给对方'; }
+        toast(e.message || '提交失败');
+      }
     });
   }
 
   function openVerifyDecision(vid) {
-    const v = store.verifications.find((x) => x.id === vid);
-    if (!v) return;
+    const v = (store.verifications || []).find((x) => String(x.id) === String(vid));
+    if (!v) { toast('这条验收记录不存在'); return; }
     const goal = goalOf(v.goalId);
-    const submitter = userById(v.userId);
+    const submitter = userById(v.userId) || { name: '对方' };
     const s = openSheet({
       title: '审核详情',
       width: 520,
       body: `
         <div class="ck-goal">
-          <span class="ck-emoji">${goal ? goal.emoji : '🏁'}</span>
-          <div><b>${esc(goal ? goal.title : '目标')}</b><small>${esc(submitter.name)} · 第 ${v.submitCount} 次提交</small></div>
+          <span class="ck-emoji">${goal ? (goal.emoji || '🏁') : '🏁'}</span>
+          <div><b>${esc(goal ? goal.title : '目标')}</b><small>${esc(submitter.name)} · 第 ${v.submitCount || 1} 次提交</small></div>
         </div>
-        <div class="vf-block"><p class="fg-label">自述</p><p class="vf-text">${esc(v.selfStatement)}</p></div>
+        ${v.selfStatement ? `<div class="vf-block"><p class="fg-label">自述</p><p class="vf-text">${esc(v.selfStatement)}</p></div>` : ''}
         ${v.evidence ? `<div class="vf-block"><p class="fg-label">证据</p><p class="vf-text">${esc(v.evidence)}</p></div>` : ''}
         ${goal && goal.criteria ? `<div class="vf-block"><p class="fg-label">完成标准</p><p class="vf-text">${esc(goal.criteria)}</p></div>` : ''}
         ${v.status === 'pending' ? `<label class="fg-field">驳回理由（只在驳回时填）
@@ -1635,25 +1645,37 @@
         : `<button class="text-btn" type="button" data-cancel>关闭</button>`,
     });
     $('[data-cancel]', s.el).addEventListener('click', () => s.close());
+
     const ap = $('[data-approve]', s.el);
-    if (ap) ap.addEventListener('click', () => {
-      v.status = 'approved'; v.decidedAt = Date.now();
-      if (goal) { goal.status = 'achieved'; goal.achievedAt = Date.now(); }
-      const pts = stagePoints(goal);
-      const overdue = goal && goal.endDate && todayKey() > goal.endDate;
-      const final = overdue ? Math.round(pts * 0.9) : pts;
-      ledgerAdd(v.userId, final, 'stage_credit', `小目标达成 · ${goal ? goal.title : ''}`, v.goalId);
-      s.close(); renderAll();
-      toast(`已通过，${userById(v.userId).name} +${final} 分${overdue ? '（逾期按 90% 发放）' : ''}`);
+    if (ap) ap.addEventListener('click', async () => {
+      if (ap.disabled) return;
+      ap.disabled = true; ap.textContent = '处理中…';
+      try {
+        await API.approveVerification(vid);
+        s.close();
+        await loadAll();
+        toast('已通过');
+      } catch (e) {
+        ap.disabled = false; ap.textContent = '通过，入账';
+        toast(e.message || '操作失败');
+      }
     });
+
     const rj = $('[data-reject]', s.el);
-    if (rj) rj.addEventListener('click', () => {
+    if (rj) rj.addEventListener('click', async () => {
       const reason = ($('#vfReason', s.el).value || '').trim();
-      if (!reason) { toast('驳回要写理由'); return; }
-      v.status = 'rejected'; v.reason = reason; v.decidedAt = Date.now();
-      if (goal) goal.status = 'active';
-      s.close(); renderAll();
-      toast('已驳回，对方可以改了再提交');
+      if (!reason) { toast('驳回要写个理由，1–200 字'); return; }
+      if (rj.disabled) return;
+      rj.disabled = true; rj.textContent = '处理中…';
+      try {
+        await API.rejectVerification(vid, reason);
+        s.close();
+        await loadAll();
+        toast('已驳回');
+      } catch (e) {
+        rj.disabled = false; rj.textContent = '驳回';
+        toast(e.message || '操作失败');
+      }
     });
   }
 
@@ -2156,12 +2178,38 @@
         <button class="wood-btn" type="button" data-ok>加进路线</button>`,
     });
     $('[data-cancel]', s.el).addEventListener('click', () => s.close());
-    $('[data-ok]', s.el).addEventListener('click', () => {
+    $('[data-ok]', s.el).addEventListener('click', async () => {
       const title = $('#chainTitle', s.el).value.trim();
       if (!title) { toast('先写这一步做什么'); return; }
-      b.chain = b.chain || [];
-      b.chain.push({ title, emoji: '📌', plannedDate: $('#chainDate', s.el).value, status: 'planned' });
-      s.close(); renderView('goals'); toast(`「${title}」已加进路线`);
+      const btn = $('[data-ok]', s.el);
+      if (btn) { btn.disabled = true; btn.textContent = '添加中…'; }
+      try {
+        // 后端要求：先建小目标，再把它挂到大目标上
+        const created = await API.createGoal({
+          type: 'stage',
+          title,
+          emoji: '📌',
+          description: `大目标「${b.title}」的一步`,
+          est_total_min: 120,
+          difficulty: 2,
+          start_date: todayKey(),
+          // 后端硬性要求：小目标必须写验收标准
+          accept_criteria: `做完「${title}」，并且自己确认结果符合预期`,
+        });
+        const gid = created && created.goal && created.goal.id;
+        if (gid) {
+          await API.addChainGoal(bid, {
+            goal_id: gid,
+            planned_date: $('#chainDate', s.el).value,
+          });
+        }
+        s.close();
+        await loadAll();
+        toast(`「${title}」已加进路线`);
+      } catch (e) {
+        if (btn) { btn.disabled = false; btn.textContent = '加进路线'; }
+        toast(e.message || '添加失败');
+      }
     });
   }
 
@@ -2181,18 +2229,241 @@
       actions: `<button class="text-btn" type="button" data-cancel>取消</button>`,
     });
     $('[data-cancel]', s.el).addEventListener('click', () => s.close());
-    s.el.addEventListener('click', (e) => {
+    s.el.addEventListener('click', async (e) => {
       const btn = e.target.closest('[data-days]');
       if (!btn) return;
       const n = Number(btn.dataset.days);
-      b.chain.forEach((c) => {
-        if (c.status !== 'planned' || !c.plannedDate) return;
-        const d = new Date(c.plannedDate.replace(/-/g, '/'));
-        d.setDate(d.getDate() + n);
-        c.plannedDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      });
-      s.close(); renderView('goals'); toast(`未启动的 ${pending} 个顺延 ${n} 天`);
+      btn.disabled = true;
+      try {
+        await API.shiftBigGoal(bid, { days: n });
+        s.close();
+        await loadAll();
+        toast(`未启动的 ${pending} 个顺延 ${n} 天`);
+      } catch (err) {
+        btn.disabled = false;
+        toast(err.message || '顺延失败');
+      }
     });
+  }
+
+
+  /* ═══════════════════════════════════════════════════════
+     zoowy 常驻助手：右下角悬浮球，所有页面都能点开
+     ═══════════════════════════════════════════════════════ */
+  function renderZoowyDock() {
+    const open = !!store.zoowyOpen;
+    const msgs = store.zoowyMsgs || [];
+    return `
+      <div class="zoowy-dock${open ? ' is-open' : ''}" id="zoowyDock">
+        ${open ? `
+        <div class="zoowy-panel">
+          <div class="zoowy-panel-head">
+            <span class="zoowy-dot"></span>
+            <b>zoowy</b>
+            <small>问它什么都行</small>
+            <button class="zoowy-close" type="button" data-zoowy-close aria-label="收起">×</button>
+          </div>
+          <div class="zoowy-msgs" id="zoowyMsgs">
+            ${msgs.length ? msgs.map((m) => `
+              <div class="zoowy-msg is-${m.role}">
+                ${m.role === 'assistant' ? '<span class="zoowy-av">🐭</span>' : ''}
+                <div class="zoowy-bubble">${esc(m.content)}</div>
+              </div>`).join('')
+              : `<div class="zoowy-msg is-assistant">
+                   <span class="zoowy-av">🐭</span>
+                   <div class="zoowy-bubble">我是 zoowy。可以帮你拆目标、看进度、想下一步做什么。<br/>想聊点什么？</div>
+                 </div>`}
+          </div>
+          <div class="zoowy-input">
+            <input id="zoowyDockInput" type="text" maxlength="500" placeholder="说点什么…"/>
+            <button class="zoowy-send" type="button" data-zoowy-send aria-label="发送">↵</button>
+          </div>
+          <p class="zoowy-tip" id="zoowyTip"></p>
+        </div>` : ''}
+        <button class="zoowy-fab" type="button" data-zoowy-toggle aria-label="zoowy 助手">
+          <span class="zoowy-fab-ico">🐭</span>
+        </button>
+      </div>`;
+  }
+
+  /* 把悬浮球挂到 body（所有页面常驻） */
+  function mountZoowyDock() {
+    let host = document.getElementById('zoowyHost');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'zoowyHost';
+      document.body.appendChild(host);
+    }
+    host.innerHTML = renderZoowyDock();
+    const msgsEl = document.getElementById('zoowyMsgs');
+    if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
+
+    // 直接绑定（悬浮球挂在 body，不在 viewMount 里，用不了那边的委托）
+    const fab = host.querySelector('[data-zoowy-toggle]');
+    if (fab) bindFabDrag(host, fab);
+    const closeBtn = host.querySelector('[data-zoowy-close]');
+    if (closeBtn) closeBtn.addEventListener('click', () => { store.zoowyOpen = false; mountZoowyDock(); });
+    const sendBtn = host.querySelector('[data-zoowy-send]');
+    if (sendBtn) sendBtn.addEventListener('click', () => {
+      const inp = document.getElementById('zoowyDockInput');
+      sendZoowy(inp ? inp.value : '');
+    });
+    const input = document.getElementById('zoowyDockInput');
+    if (input && store.zoowyOpen) {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); sendZoowy(input.value); }
+      });
+    }
+  }
+
+
+  /* 悬浮球拖动：拖过 5px 才算拖动，否则当点击；位置存 localStorage */
+  const ZOOWY_POS_KEY = 'footprint.web.zoowy.pos';
+
+  function readZoowyPos() {
+    try {
+      const p = JSON.parse(localStorage.getItem(ZOOWY_POS_KEY));
+      if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) return p;
+    } catch (e) { /* 忽略 */ }
+    return null;
+  }
+
+  function applyZoowyPos(host) {
+    const p = readZoowyPos();
+    if (!p) return;
+    // 存的是视口比例，窗口大小变了也还在屏内
+    const x = Math.max(8, Math.min(window.innerWidth - 72, p.x * window.innerWidth));
+    const y = Math.max(8, Math.min(window.innerHeight - 72, p.y * window.innerHeight));
+    host.style.left = `${x}px`;
+    host.style.top = `${y}px`;
+    host.style.right = 'auto';
+    host.style.bottom = 'auto';
+  }
+
+  function bindFabDrag(host, fab) {
+    applyZoowyPos(host);
+
+    let dragging = false;
+    let moved = false;
+    let startX = 0, startY = 0;
+    let originX = 0, originY = 0;
+
+    const onDown = (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      const rect = host.getBoundingClientRect();
+      dragging = true;
+      moved = false;
+      startX = e.clientX;
+      startY = e.clientY;
+      originX = rect.left;
+      originY = rect.top;
+      fab.setPointerCapture && fab.setPointerCapture(e.pointerId);
+      host.classList.add('is-dragging');
+    };
+
+    const onMove = (e) => {
+      if (!dragging) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (!moved && Math.hypot(dx, dy) > 5) moved = true;
+      if (!moved) return;
+      const x = Math.max(4, Math.min(window.innerWidth - 68, originX + dx));
+      const y = Math.max(4, Math.min(window.innerHeight - 68, originY + dy));
+      host.style.left = `${x}px`;
+      host.style.top = `${y}px`;
+      host.style.right = 'auto';
+      host.style.bottom = 'auto';
+      // 拖动时把面板收起，避免跟着乱飞
+      const panel = host.querySelector('.zoowy-panel');
+      if (panel) panel.style.visibility = 'hidden';
+    };
+
+    const onUp = (e) => {
+      if (!dragging) return;
+      dragging = false;
+      host.classList.remove('is-dragging');
+      const panel = host.querySelector('.zoowy-panel');
+      if (panel) panel.style.visibility = '';
+
+      if (moved) {
+        // 记住位置（视口比例）
+        const rect = host.getBoundingClientRect();
+        try {
+          localStorage.setItem(ZOOWY_POS_KEY, JSON.stringify({
+            x: rect.left / window.innerWidth,
+            y: rect.top / window.innerHeight,
+          }));
+        } catch (err) { /* 忽略 */ }
+      } else {
+        // 没拖动 → 当作点击
+        toggleZoowy();
+      }
+    };
+
+    fab.addEventListener('pointerdown', onDown);
+    fab.addEventListener('pointermove', onMove);
+    fab.addEventListener('pointerup', onUp);
+    fab.addEventListener('pointercancel', () => {
+      dragging = false;
+      host.classList.remove('is-dragging');
+      const panel = host.querySelector('.zoowy-panel');
+      if (panel) panel.style.visibility = '';
+    });
+    // 防止拖动时选中文字
+    fab.addEventListener('dragstart', (e) => e.preventDefault());
+  }
+
+  function toggleZoowy() {
+    if (!guard('和 zoowy 聊天需要先登录。')) return;
+    store.zoowyOpen = !store.zoowyOpen;
+    mountZoowyDock();
+    if (store.zoowyOpen) {
+      const input = document.getElementById('zoowyDockInput');
+      if (input) input.focus();
+      loadZoowyHistory();
+    }
+  }
+
+  /* 拉历史 */
+  async function loadZoowyHistory() {
+    try {
+      const res = await API.get('/zoowy/messages?limit=40');
+      const list = (res && res.messages) || [];
+      if (!list.length) return;
+      store.zoowyMsgs = list.map((m) => ({ role: m.role || 'assistant', content: m.content || '' }));
+      mountZoowyDock();
+    } catch (e) { /* 没历史就算了 */ }
+  }
+
+  /* 发消息 */
+  async function sendZoowy(raw) {
+    const text = String(raw || '').trim();
+    if (!text) return;
+    const tip = document.getElementById('zoowyTip');
+    const input = document.getElementById('zoowyDockInput');
+
+    store.zoowyMsgs.push({ role: 'user', content: text });
+    if (input) input.value = '';
+    mountZoowyDock();
+
+    if (tip) { tip.textContent = 'zoowy 在想…'; tip.classList.remove('is-err'); }
+
+    const requestId = 'r' + Date.now() + Math.random().toString(36).slice(2, 8);
+    try {
+      const res = await API.post('/zoowy/chat', { message: text, requestId });
+      const reply = (res && (res.reply || res.content || (res.message && res.message.content))) || '（它没说话）';
+      store.zoowyMsgs.push({ role: 'assistant', content: reply });
+      if (tip) tip.textContent = '';
+      mountZoowyDock();
+      if (res && (res.bigGoal || res.draft)) await loadAll();
+    } catch (e) {
+      const msg = e && e.status === 503
+        ? 'AI 还没配置密钥，暂时聊不了。可以先用「让 zoowy 拆」的本地建议。'
+        : (e.message || '发送失败');
+      if (tip) { tip.textContent = msg; tip.classList.add('is-err'); }
+      store.zoowyMsgs.push({ role: 'assistant', content: msg });
+      mountZoowyDock();
+    }
   }
 
   function renderGoalsView() {
@@ -2203,15 +2474,37 @@
     const cursor = store.calCursor || todayKey().slice(0, 7);
     const selDay = store.selDay || todayKey();
 
+    // 右栏三个 tab：日常 / 小目标 / 大目标，一次只显示一块，避免互相挤走
+    const tab = store.goalsTab || 'daily';
+    const dailyCount = store.goals.filter((g) => g.ownerId === uid && g.type === 'daily' && g.status === 'active').length;
+    const stageCount = store.goals.filter((g) => g.ownerId === uid && g.type === 'stage' && g.status !== 'abandoned').length;
+    const bigCount = (store.biggoals || []).length;
+
+    const subtabs = `
+      <div class="goals-subtabs">
+        <button class="goals-subtab${tab === 'daily' ? ' is-on' : ''}" type="button" data-goals-tab="daily">
+          日常${dailyCount ? `<i class="gs-badge">${dailyCount}</i>` : ''}
+        </button>
+        <button class="goals-subtab${tab === 'stage' ? ' is-on' : ''}" type="button" data-goals-tab="stage">
+          小目标${stageCount ? `<i class="gs-badge">${stageCount}</i>` : ''}
+        </button>
+        <button class="goals-subtab${tab === 'big' ? ' is-on' : ''}" type="button" data-goals-tab="big">
+          大目标${bigCount ? `<i class="gs-badge">${bigCount}</i>` : ''}
+        </button>
+      </div>`;
+
+    const pane = tab === 'daily' ? renderDailyPanel(uid, selDay)
+      : tab === 'stage' ? renderStagePanel(uid)
+      : renderBigGoals(uid);
+
     return `${head('目标', '', `进行中 ${mine.filter((g) => g.status === 'active').length} 个 · 本月完成 ${monthChecks(uid)} 次`)}
       <div class="goals-layout">
         <div class="goals-left">
           ${renderCalendar(uid, cursor)}
         </div>
         <div class="goals-right">
-          ${renderDailyPanel(uid, selDay)}
-          ${renderStagePanel(uid)}
-          ${renderBigGoals(uid)}
+          ${subtabs}
+          <div class="goals-pane">${pane}</div>
         </div>
       </div>`;
   }
@@ -2519,6 +2812,7 @@
               difficulty: 2,
               start_date: todayKey(),
               end_date: shiftDay(30 + i * 15),
+              accept_criteria: `做完「${tpl.steps[i]}」`,
             });
           }
           s.close();
@@ -3240,6 +3534,8 @@
   /* 视图内事件委托 */
   mount.addEventListener('click', (e) => {
     const t = e.target;
+    const goalsTabBtn = t.closest('[data-goals-tab]');
+    if (goalsTabBtn) { store.goalsTab = goalsTabBtn.dataset.goalsTab; renderView('goals'); return; }
     const usTabBtn = t.closest('[data-us-tab]');
     if (usTabBtn) { store.usTab = usTabBtn.dataset.usTab; renderView('us'); return; }
     if (t.closest('[data-chat-open]')) { openChat(); return; }
@@ -3284,18 +3580,19 @@
     }
     const ha = t.closest('[data-hall-accept]');
     if (ha) {
-      const inv = store.hall.invites.find((x) => x.id === ha.dataset.hallAccept);
-      if (inv) {
-        store.pairs = [{ id: nid('P'), a: inv.from, b: inv.to, since: todayKey(), code: '' }];
-        store.hall.invites = store.hall.invites.filter((x) => x.id !== inv.id);
-        renderAll(); toast('配对成功');
-      }
+      API.acceptHallInvite(ha.dataset.hallAccept)
+        .then(() => loadAll())
+        .then(() => toast('已接受邀请'))
+        .catch((e) => toast(e.message || '操作失败'));
       return;
     }
     const hd = t.closest('[data-hall-decline]');
     if (hd) {
-      store.hall.invites = store.hall.invites.filter((x) => x.id !== hd.dataset.hallDecline);
-      renderView('us'); toast('已拒绝'); return;
+      API.declineHallInvite(hd.dataset.hallDecline)
+        .then(() => loadAll())
+        .then(() => toast('已拒绝邀请'))
+        .catch((e) => toast(e.message || '操作失败'));
+      return;
     }
     const hc = t.closest('[data-hall-cancel]');
     if (hc) {
@@ -3394,31 +3691,28 @@
     if (t.closest('[data-logout]')) { logout(); return; }
     const acc = t.closest('[data-req-accept]');
     if (acc) {
-      const q = store.pairRequests.find((x) => x.id === acc.dataset.reqAccept);
-      if (q) {
-        const meId = store.currentUser;
-        if (pairOf(meId)) { toast('你已经配对过了，先解除'); return; }
-        store.pairs = [{ id: nid('P'), a: q.from, b: meId, since: todayKey(), code: inviteOf(q.from) }];
-        store.pairRequests = store.pairRequests.filter((x) => x.id !== q.id);
-        renderAll();
-        toast(`已和 ${userById(q.from).name} 配对成功`);
-      }
+      API.pairApprove(acc.dataset.reqAccept)
+        .then(() => loadAll())
+        .then(() => toast('配对成功'))
+        .catch((e) => toast(e.message || '同意失败'));
       return;
     }
     const rej = t.closest('[data-req-reject]');
     if (rej) {
-      store.pairRequests = store.pairRequests.filter((x) => x.id !== rej.dataset.reqReject);
-      renderAll();
-      toast('已拒绝这次申请');
+      API.pairReject(rej.dataset.reqReject)
+        .then(() => loadAll())
+        .then(() => toast('已拒绝'))
+        .catch((e) => toast(e.message || '拒绝失败'));
       return;
     }
     const up = t.closest('[data-unpair]');
     if (up) {
-      confirmSheet({ title: '解除配对', danger: true, confirmText: '解除', text: '解除后双方互相看不见，历史记录保留。' })
-        .then((yes) => { if (yes) { store.pairs = []; renderAll(); toast('已解除配对'); } });
+      API.pairUnbind()
+        .then(() => loadAll())
+        .then(() => toast('已解除配对'))
+        .catch((e) => toast(e.message || '解除失败'));
       return;
-    }
-    const pr = t.closest('[data-pair]');
+    }    const pr = t.closest('[data-pair]');
     if (pr) {
       const s = openSheet({
         title: '配对', width: 420,
