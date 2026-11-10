@@ -9,21 +9,8 @@
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   /* ── 像素图标：16×16 单色剪影 ───────────────────────── */
-  const PIX = {
-    home: '6-9/5-10/4-11/3-12/2-13/1-14/1-14/3-12/3-12/3-12/3-6,9-12/3-6,9-12/3-6,9-12/3-6,9-12/3-6,9-12/2-13',
-    target: '5-10/4-11/3-12/2-13/2-5,10-13/2-5,10-13/2-5,10-13/2-5,10-13/2-13/3-12/4-11/5-10',
-    gift: '5-10/4-6,9-11/4-7,8-11/3-12/3-12/3-12/3-6,9-12/3-6,9-12/3-6,9-12/3-12',
-    us: '3-4,11-12/3-4,11-12/3-4,11-12/2-5,10-13/2-5,10-13/2-5,10-13/3-4,11-12/3-4,11-12/2-3,12-13/2-3,12-13',
-    doc: '6-13/6-13/6-13/6-13/6-13/3-13/3-13/3-4,6-8/3-4,6-8/3-4,6-11/3-4,6-11/3-4,6-9/3-13',
-    check: '14-15/13-14/12-13/11-12/0-1,10-11/1-2,9-10/2-3,8-9/3-4,7-8/4-7/5-6',
-    plus: '7-8/7-8/2-13/2-13/7-8/7-8/7-8/7-8',
-    alert: '7-8/6-9/6-9/5-10/5-6,9-10/4-6,9-11/4-6,9-11/3-6,9-12/3-6,9-12/2-6,9-13/2-6,9-13/2-13/2-13',
-    close: '2-3,12-13/3-4,11-12/4-5,10-11/5-6,9-10/6-7,8-9/7-8/6-7,8-9/5-6,9-10/4-5,10-11/3-4,11-12/2-3,12-13',
-    coin: '5-10/4-11/3-12/3-12/3-5,8-12/3-5,8-12/3-12/3-12/3-12/3-12/4-11/5-10',
-    flame: '7-8/6-9/6-10/5-11/5-11/6-12/6-12/7-12/8-11/9-10',
-    clock: '5-10/4-11/3-4,11-12/2-3,7-8,12-13/2-3,7-8,12-13/2-3,7-8,12-13/2-3,7-11,12-13/2-3,7-11,12-13/2-3,12-13/2-3,12-13/3-4,11-12/4-11/5-10',
-    calendar: '3-4,11-12/3-4,11-12/3-12/3-12/2-3,12-13/2-3,12-13/2-3,12-13/2-3,5-6,9-10,12-13/2-3,12-13/2-3,12-13/2-3,5-6,9-10,12-13/2-3,12-13/2-3,12-13/2-3,12-13',
-  };
+  /* 图标数据来自 icons.js（与手机端同一套字形，共 22 个） */
+  const PIX = (window.FP_ICONS && window.FP_ICONS.PIX) || {};
 
   function monoIcon(name) {
     const rows = PIX[name];
@@ -244,9 +231,25 @@
     setTimeout(() => el.remove(), 220);
   }
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && sheetStack.length) {
+    if (e.key !== 'Escape') return;
+    // ① 先关最上层 sheet
+    if (sheetStack.length) {
       e.stopPropagation();
       closeSheet(sheetStack[sheetStack.length - 1].el);
+      return;
+    }
+    // ② 再关登录/注册弹层
+    const authLayer = document.getElementById('authLayer');
+    if (authLayer && authLayer.classList.contains('is-open')) {
+      e.stopPropagation();
+      closeAuth();
+      return;
+    }
+    // ③ 再收 zoowy 面板
+    if (store.zoowyOpen) {
+      e.stopPropagation();
+      store.zoowyOpen = false;
+      mountZoowyDock();
     }
   });
 
@@ -321,8 +324,12 @@
     status: {},   // uid -> { emoji, label, group, text, at }
     chat: [],     // { id, from, text, at } 搭子之间的短消息
     chatReadAt: 0, // 我上次看到的时间点（用于红点）
-    usTab: 'more', // 「我们」页子 tab：more 待处理（默认）/ compare 数据对比
+    usTab: 'more', // （旧）保留兼容
+    usDrawers: { review: true, compare: false, plan: false, shared: false }, // 「我们」页四个抽屉的展开态
     goalsTab: 'daily', // 「目标」页右栏子 tab：daily 日常 / stage 小目标 / big 大目标
+    meTab: 'account',  // 「我的」页子 tab：account 账号 / record 记录 / setting 设置
+    goalsRange: 'month', // 目标页左栏：week 周视图 / month 月视图
+    weekStart: '',       // 当前周视图的周一
     zoowyOpen: false,  // zoowy 聊天窗是否展开
     zoowyMsgs: [],     // zoowy 对话记录 { role, content }
     usage: {
@@ -525,13 +532,35 @@
     };
   }
 
+
+  /* 使用时长：把 today / range 两个接口拼成前端要的结构 */
+  function adaptUsageToday(todayRes, rangeRes, isMe) {
+    const apps = (todayRes && (todayRes.apps || todayRes.items)) || [];
+    const series = (rangeRes && rangeRes[isMe ? 'me' : 'partner'] && rangeRes[isMe ? 'me' : 'partner'].series) || [];
+    return {
+      today: {
+        total: AD.num(todayRes && (todayRes.totalSeconds ?? todayRes.total), 0),
+        apps: apps.map((a) => ({
+          name: a.appName || a.app_name || a.name || '其他',
+          sec: AD.num(a.seconds ?? a.sec, 0),
+        })),
+      },
+      week: Array.isArray(series) && series.length
+        ? series.map((p) => AD.num(p.totalSeconds ?? p, 0))
+        : [0, 0, 0, 0, 0, 0, 0],
+    };
+  }
+
   /* 一次性拉齐首屏需要的所有数据 */
   async function loadAll() {
     if (isGuest() || !store.loggedIn) return;
     const uid = store.currentUser;
 
     try {
-      const [home, goalsRes, bigRes, wishRes, statusRes, pairRes, statsRes, ledgerRes] = await Promise.all([
+      const [
+        home, goalsRes, bigRes, wishRes, statusRes, pairRes, statsRes, ledgerRes,
+        checkinsRes, verifRes, usageTodayRes, usagePartnerRes, usageRangeRes, chatRes, diaryRes,
+      ] = await Promise.all([
         API.home().catch(() => null),
         API.goals().catch(() => ({ goals: [] })),
         API.bigGoals().catch(() => ({ bigGoals: [] })),
@@ -540,6 +569,18 @@
         API.pairStatus().catch(() => null),
         API.stats().catch(() => null),
         API.ledger().catch(() => ({ ledger: [] })),
+        // 补：打卡记录（含各状态）
+        API.checkins().catch(() => ({ checkins: [] })),
+        // 补：待我审核的验收
+        API.pendingVerifications().catch(() => ({ verifications: [] })),
+        // 补：手机使用时长
+        API.usageToday().catch(() => null),
+        API.usagePartner().catch(() => null),
+        API.usageRange(7).catch(() => null),
+        // 补：聊天（/api/chat 一次拿到消息 + 未读数）
+        API.chat().catch(() => ({ messages: [], unread: 0 })),
+        // 补：日记
+        API.get('/diaries?limit=7').catch(() => ({ diaries: [] })),
       ]);
 
       // 账号与搭档
@@ -557,9 +598,40 @@
       const allGoals = (goalsRes && goalsRes.goals) || [];
       store.goals = allGoals.map(AD.adaptGoal);
 
-      // 大目标
+      // 大目标：列表接口不带 chain，需要逐个拉详情
       const bgs = (bigRes && (bigRes.bigGoals || bigRes.goals)) || [];
       store.biggoals = bgs.map(AD.adaptBigGoal);
+      // 搭档的目标（/api/goals 只返回自己的，需要单独拉）
+      try {
+        const pRes = await API.partner();
+        if (pRes) {
+          store.partnerGoals = (pRes.goals || pRes.todos || []).map((g) => (g.goal ? AD.adaptGoal(g.goal) : AD.adaptGoal(g)));
+          store.partnerStats = pRes.stats || null;
+        }
+      } catch (e) { store.partnerGoals = []; }
+
+      // 搭档的目标（/api/goals 只返回自己的，需要单独拉）
+      try {
+        const pRes = await API.partner();
+        if (pRes) {
+          store.partnerGoals = (pRes.partnerGoals || []).map((g) => AD.adaptGoal(g));
+          store.partnerStats = pRes.partnerStats || null;
+          store.partnerBigGoals = (pRes.partnerBigGoals || []).map((b) => AD.adaptBigGoal(b));
+          store.sharedProfile = pRes.sharedProfile || null;
+          store.sharedDiaries = pRes.sharedDiaries || [];
+        }
+      } catch (e) { store.partnerGoals = []; }
+
+      // 补 chain（列表接口只给计数，详情才有路线）
+      await Promise.all(store.biggoals.map(async (b) => {
+        try {
+          const detail = await API.bigGoal(b.id);
+          const chain = (detail && (detail.chain || detail.goals)) || [];
+          b.chain = chain.map(AD.adaptChainItem);
+          if (typeof detail.done === 'number') b.done = detail.done;
+          if (typeof detail.total === 'number') b.total = detail.total;
+        } catch (e) { b.chain = b.chain || []; }
+      }));
 
       // 愿望单
       if (wishRes) {
@@ -577,22 +649,123 @@
         if (pid && pStatus) store.status[pid] = normalizeStatus(pStatus);
       }
 
-      // 打卡记录（用于今日清单的状态判断）
-      const myChecks = (home && home.todos) || [];
-      store.checks = [];
-      myChecks.forEach((t) => {
-        if (t.checked) {
-          store.checks.push({
-            id: t.checked.id, goalId: t.goal.id, userId: uid,
-            date: home.today || todayKey(),
-            minutes: AD.num(t.checked.durationMin, 0),
-            points: AD.num(t.checked.points, 0),
-            status: t.checked.status || 'credited',
-            note: t.checked.evidenceText || '',
-            at: Date.now(),
-          });
+      // 打卡记录：优先用 /api/checkins（含 pending/rejected/revoked 全状态）
+      const rawChecks = (checkinsRes && (checkinsRes.checkins || checkinsRes.checks)) || [];
+      if (rawChecks.length) {
+        store.checks = rawChecks.map((c) => ({
+          id: c.id,
+          goalId: c.goal_id ?? c.goalId,
+          userId: c.user_id ?? c.userId,
+          date: c.check_date ?? c.date,
+          minutes: AD.num(c.duration_min ?? c.minutes, 0),
+          points: AD.num(c.points, 0),
+          inWindow: !!(c.in_window ?? c.inWindow),
+          note: c.evidence_text || c.note || '',
+          evidence: c.evidence_url || '',
+          status: c.status || 'credited',
+          rejectReason: c.reason || c.reject_reason || '',
+          at: c.created_at ? new Date(c.created_at).getTime() : Date.now(),
+          isMakeup: !!(c.is_makeup ?? c.isMakeup),
+        }));
+      } else {
+        // 兜底：从 home.todos 推导
+        const myChecks = (home && home.todos) || [];
+        store.checks = [];
+        myChecks.forEach((t) => {
+          if (t.checked) {
+            store.checks.push({
+              id: t.checked.id, goalId: t.goal.id, userId: uid,
+              date: home.today || todayKey(),
+              minutes: AD.num(t.checked.durationMin, 0),
+              points: AD.num(t.checked.points, 0),
+              status: t.checked.status || 'credited',
+              note: t.checked.evidenceText || '',
+              at: Date.now(),
+            });
+          }
+        });
+      }
+
+      // 待我审核的验收
+      const rawVerif = (verifRes && (verifRes.verifications || verifRes.items)) || [];
+      store.verifications = rawVerif.map((v) => ({
+        id: v.id,
+        goalId: v.goal_id ?? v.goalId,
+        userId: v.submitter_id ?? v.userId,
+        submitCount: AD.num(v.submit_count ?? v.submitCount, 1),
+        selfStatement: v.self_statement || v.selfStatement || '',
+        evidence: v.evidence_text || v.evidence || '',
+        status: v.status || 'pending',
+        reason: v.reason || '',
+        at: v.created_at ? new Date(v.created_at).getTime() : Date.now(),
+        goalTitle: v.goal_title || '',
+        goalEmoji: v.goal_emoji || '',
+      }));
+
+      // 手机使用时长（两人 + 7 天趋势）
+      store.usage = {};
+      const pUid = store.partnerUser ? store.partnerUser.id : null;
+      if (usageTodayRes) store.usage[uid] = adaptUsageToday(usageTodayRes, usageRangeRes, true);
+      if (pUid && usagePartnerRes) store.usage[pUid] = adaptUsageToday(usagePartnerRes, usageRangeRes, false);
+
+      // 聊天（/api/chat 结构：{ partner, unread, messages: [{ id, senderId, content, createdAt, readAt }] }）
+      const rawMsgs = (chatRes && (chatRes.messages || chatRes.items)) || [];
+      store.chat = rawMsgs.map((m) => ({
+        id: m.id,
+        from: m.senderId ?? m.sender_id ?? m.from,
+        text: m.content || m.text || '',
+        at: m.createdAt ? new Date(m.createdAt).getTime() : (m.created_at ? new Date(m.created_at).getTime() : Date.now()),
+        read: !!(m.readAt || m.read_at),
+      }));
+      // 未读数：后端 /api/chat 直接给
+      const pidForChat = store.partnerUser ? store.partnerUser.id : null;
+      store.chatUnread = (chatRes && typeof chatRes.unread === 'number')
+        ? chatRes.unread
+        : store.chat.filter((m) => pidForChat && String(m.from) === String(pidForChat) && !m.read).length;
+      // 调试：记录原始数据
+      if (window.__debugChat) {
+        console.log('[chat] 总消息', store.chat.length, '搭档ID', pidForChat,
+          '对方发的', store.chat.filter((m) => String(m.from) === String(pidForChat)).length,
+          '未读', store.chatUnread);
+        console.log('[chat] 原始', rawMsgs.slice(0, 3));
+      }
+      store.chatReadAt = Date.now();
+
+      // 日记
+      const rawDiary = (diaryRes && (diaryRes.diaries || [])) || [];
+      store.diaries = rawDiary.map((x) => ({
+        date: x.diary_date || x.date || '',
+        mine: x.content || x.user_edited || x.ai_original || '',
+        aiOriginal: x.ai_original || '',
+        shared: !!x.shared,
+      }));
+      store.diary = store.diaries.map((x) => ({ date: x.date, from: uid, text: x.mine }));
+
+      // 日记 + 画像（真实接口）
+      try {
+        const [diaryRes, profileRes] = await Promise.all([
+          API.get('/diaries?limit=7').catch(() => null),
+          API.profile().catch(() => null),
+        ]);
+        if (diaryRes && Array.isArray(diaryRes.diaries)) {
+          store.diaries = diaryRes.diaries.map((d) => ({
+            date: d.date || d.diaryDate || '',
+            mine: d.mine || d.content || '',
+            partner: d.partner || d.partnerContent || '',
+            shared: !!d.shared,
+          }));
         }
-      });
+        if (profileRes && Array.isArray(profileRes.blocks)) {
+          const blocks = {};
+          // 后端块名 → 前端块名
+          const nameMap = { goal_progress: 'goal', basic: 'basic', resume: 'resume', skills: 'skills', important: 'important' };
+          profileRes.blocks.forEach((b) => {
+            const k = nameMap[b.block] || b.block;
+            blocks[k] = b.content || '';
+          });
+          store.profiles[uid] = { blocks, history: [] };
+        }
+      } catch (e) { /* 日记/画像失败不阻塞主流程 */ }
 
       // 统计与流水
       if (statsRes && statsRes.stats) store.stats = statsRes.stats;
@@ -895,13 +1068,20 @@
     const freq = goal.freqMode === 'daily' ? '每日' : goal.freqMode === 'weekly' ? `每周 ${goal.freqN} 次`
       : (goal.weekdays || []).map((d) => '周' + WEEK[d]).join(' / ');
     const sub = [goal.durationMin + ' 分钟', freq, win].filter(Boolean).join(' · ');
+    const diff = goal.difficulty || 3;
 
     return `<li class="task-row${c ? ' is-done' : ''}${pend && !c ? ' is-pending' : ''}${rejectedRecently ? ' is-rejected' : ''}" data-goal="${goal.id}">
       <span class="tick-box" aria-hidden="true"><span data-icon="check" data-icon-kind="mono"></span></span>
-      <span class="task-main"><b>${esc(goal.title)}</b><small>${esc(sub)}</small>${
-        rejectedRecently ? `<small class="reject-hint">上次被驳回：${esc(lastRejected.rejectReason || '没写理由')}</small>` : ''
-      }</span>
-      <span class="task-streak" title="连续打卡"><span data-icon="flame" aria-hidden="true"></span>${streak}</span>
+      <span class="task-emoji" aria-hidden="true">${goal.emoji || '🌱'}</span>
+      <span class="task-main">
+        <b>${esc(goal.title)}</b>
+        <small>${esc(sub)}</small>
+        <small class="task-meta">
+          <span class="meta-diff" title="难度 ${diff}/5">${'◆'.repeat(diff)}<i>${'◇'.repeat(5 - diff)}</i></span>
+          ${streak > 0 ? `<span class="meta-streak" title="连续打卡"><span data-icon="flame" aria-hidden="true"></span>连续 ${streak} 天</span>` : ''}
+        </small>
+        ${rejectedRecently ? `<small class="reject-hint">上次被驳回：${esc(lastRejected.rejectReason || '没写理由')}</small>` : ''}
+      </span>
       <span class="task-points">+${pts}</span>
       <span class="task-act">${action}</span>
     </li>`;
@@ -927,6 +1107,36 @@
     return Math.round((done / due.length) * 100);
   }
 
+
+  /* 空状态：像素小插画 + 一句有温度的话（学手机端） */
+  const EMPTY_ART = {
+    sprout: ['6-9', '5-10', '4-5,10-11', '3-4,11-12', '2-13', '2-13', '3-12', '4-11', '5-10'],
+    cup: ['4-11', '3-12', '3-12', '3-12', '4-11', '5-10', '7-8'],
+    moon: ['7-8', '6-9', '5-10', '4-11', '4-11', '5-10', '6-9', '7-8'],
+    book: ['2-3,12-13', '2-13', '2-6,9-13', '2-6,9-13', '2-6,9-13', '2-13', '2-3,12-13'],
+    gift: ['5-10', '4-11', '3-12', '3-12', '3-6,9-12', '3-6,9-12', '3-12'],
+  };
+
+  function emptyArt(name) {
+    const rows = EMPTY_ART[name] || EMPTY_ART.sprout;
+    const rects = [];
+    rows.forEach((row, y) => {
+      row.split(',').forEach((seg) => {
+        const m = seg.match(/^(\d+)-(\d+)$/);
+        if (m) rects.push(`M${m[1]} ${y}h${Number(m[2]) - Number(m[1]) + 1}v1H${m[1]}z`);
+      });
+    });
+    return `<svg viewBox="0 0 16 16" width="40" height="40" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true"><path d="${rects.join('')}"/></svg>`;
+  }
+
+  /* 统一的空状态块：art 选插画，text 是那句话 */
+  function emptyBlock(text, art) {
+    return `<div class="empty-block">
+      <span class="empty-art">${emptyArt(art || 'sprout')}</span>
+      <p class="empty-text">${text}</p>
+    </div>`;
+  }
+
   function renderToday() {
     if (isGuest()) return renderGuestToday();
 
@@ -942,10 +1152,10 @@
 
     const myUl = $('#myTasks'), theirUl = $('#partnerTasks');
     myUl.innerHTML = mineList.length ? mineList.map((g) => taskRow(g, uid, true)).join('')
-      : '<li class="task-empty">今天还没有目标，点右上角「新目标」加一个。</li>';
+      : '<li class="task-empty-wrap">' + emptyBlock('今天还没有目标，点右上角「新目标」加一个。', 'sprout') + '</li>';
     theirUl.innerHTML = pid
-      ? (theirList.length ? theirList.map((g) => taskRow(g, pid, false)).join('') : '<li class="task-empty">对方今天没有目标。</li>')
-      : '<li class="task-empty">还没有搭档，去「我的」里配对。</li>';
+      ? (theirList.length ? theirList.map((g) => taskRow(g, pid, false)).join('') : `<li class="task-empty-wrap">${emptyBlock('ta 今天没有要打卡的目标。', 'cup')}</li>`)
+      : '<li class="task-empty-wrap">' + emptyBlock('还没有搭档。去「我的」生成邀请码，让对方输进来。', 'moon') + '</li>';
     paintIcons(myUl); paintIcons(theirUl);
 
     const myDone = mineList.filter((g) => checkOf(g.id, uid, today)).length;
@@ -987,9 +1197,18 @@
     // 区分三种情况：还没建目标 / 还有事没做 / 全做完了
     const hintEl = $('#partnerHint');
     if (hintEl) {
-      hintEl.textContent = !pid
-        ? '还没有搭档，去「我的」里配对。'
-        : (theirTodo === 0 ? `${pU ? pU.name : '对方'}今天的事全划掉了。` : `${pU ? pU.name : '对方'}今天还差 ${theirTodo} 件事。`);
+      // 对方没有目标时，空状态插画已经说明了，不再重复一句话
+      if (!pid) {
+        hintEl.textContent = '还没有搭档，去「我的」里配对。';
+        hintEl.hidden = false;
+      } else if (theirList.length === 0) {
+        hintEl.hidden = true;
+      } else {
+        hintEl.hidden = false;
+        hintEl.textContent = theirTodo === 0
+          ? `${pU ? pU.name : '对方'}今天的事全划掉了。`
+          : `${pU ? pU.name : '对方'}今天还差 ${theirTodo} 件事。`;
+      }
     }
 
     const noGoals = mineList.length === 0;
@@ -1035,7 +1254,9 @@
     const hour = new Date().getHours();
     const greet = hour < 6 ? '凌晨好' : hour < 11 ? '早上好' : hour < 14 ? '中午好' : hour < 18 ? '下午好' : '晚上好';
     $('#greeting').textContent = `${greet}，先随便看看`;
-    $('#todoLine').innerHTML = '登录后这里会出现今天要做的事。去「我的」可以建账号或配对。';
+    $('#todoLine').innerHTML = `登录后这里会出现今天要做的事。
+      <button class="text-btn guest-inline-btn" type="button" data-open-login>登录</button>
+      <button class="text-btn guest-inline-btn" type="button" data-open-register>注册</button>`;
     $('#duoSummary').textContent = '';
     $('#goalsHint').textContent = '';
     $('#duoTitle').textContent = '还没有搭档';
@@ -1064,6 +1285,10 @@
     }
     const subEl = $('#walletSub');
     if (subEl) subEl.textContent = `≈ ¥${(bal / 10).toFixed(1)}`;
+    const streakEl = $('#walletStreak');
+    if (streakEl) streakEl.textContent = `🔥 ${bestStreak(uid)} 天连续`;
+    const monthEl = $('#walletMonth');
+    if (monthEl) monthEl.textContent = `本月 +${fmt(monthPoints(uid))}`;
 
     const pend = pid ? store.verifications.filter((v) => v.userId === pid && v.status === 'pending') : [];
     const card = $('#verifyCard');
@@ -1935,7 +2160,7 @@
           <button class="wood-btn wood-btn-sm" type="button" data-new-goal="daily">
             <span class="btn-ico" data-icon="plus" data-icon-kind="mono" aria-hidden="true"></span>新目标</button>
         </div>
-        ${rows || '<p class="task-empty">这天没有需要打卡的目标。</p>'}
+        ${rows || emptyBlock('这天没有要打卡的目标。')}
       </section>`;
   }
 
@@ -1959,7 +2184,7 @@
         <div class="panel-head"><h2><span class="wood-tag wood-tag-gold">小目标</span></h2>
           <button class="text-btn" type="button" data-new-goal="stage">+ 新建</button></div>
         <p class="col-hint">一次性的成果，完成后由对方审核。</p>
-        ${rows || '<p class="task-empty">还没有小目标。</p>'}
+        ${rows || emptyBlock('还没有小目标。一次性的成果放这里，做完由对方审核。', 'book')}
       </section>`;
   }
 
@@ -2466,6 +2691,116 @@
     }
   }
 
+
+  /* ═══════════════════════════════════════════════════════
+     周视图：行=目标，列=周一到周日，格子四态
+     ═══════════════════════════════════════════════════════ */
+  function weekStartOf(dateStr) {
+    const d = new Date(String(dateStr).replace(/-/g, '/'));
+    const wd = d.getDay() === 0 ? 7 : d.getDay();   // 周日=7
+    d.setDate(d.getDate() - (wd - 1));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  function addDays(dateStr, n) {
+    const d = new Date(String(dateStr).replace(/-/g, '/'));
+    d.setDate(d.getDate() + n);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  function renderWeekGrid(uid, start) {
+    const today = todayKey();
+    const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
+    const WD = ['一', '二', '三', '四', '五', '六', '日'];
+
+    // 本周应做的日常目标
+    const goals = store.goals.filter((g) =>
+      g.ownerId === uid && g.type === 'daily' && g.status === 'active'
+      && days.some((d) => dueToday(g, d)));
+
+    // 每格状态：done 已打 / miss 漏了 / today 今天 / plan 计划中 / off 不用做
+    const cellState = (g, d) => {
+      if (!dueToday(g, d)) return 'off';
+      if (checkOf(g.id, uid, d)) return 'done';
+      if (pendingCheckOf(g.id, uid, d)) return 'pend';
+      if (d === today) return 'today';
+      if (d > today) return 'plan';
+      return 'miss';
+    };
+
+    const headCells = days.map((d, i) => {
+      const isToday = d === today;
+      return `<div class="wk-head${isToday ? ' is-today' : ''}">
+        <span class="wk-wd">周${WD[i]}</span>
+        <span class="wk-date">${Number(d.slice(8))}</span>
+      </div>`;
+    }).join('');
+
+    const rows = goals.map((g) => {
+      const cells = days.map((d) => {
+        const st = cellState(g, d);
+        return `<div class="wk-cell is-${st}" title="${d} ${st === 'done' ? '已打卡' : st === 'miss' ? '漏了' : st === 'pend' ? '待审核' : st === 'today' ? '今天' : st === 'plan' ? '计划中' : '不用做'}">${
+          st === 'done' ? '<span data-icon="check" data-icon-kind="mono"></span>'
+          : st === 'pend' ? '<i class="wk-dot"></i>'
+          : ''
+        }</div>`;
+      }).join('');
+      const doneCount = days.filter((d) => cellState(g, d) === 'done').length;
+      const dueCount = days.filter((d) => dueToday(g, d)).length;
+      return `<div class="wk-row">
+        <div class="wk-name">
+          <span class="wk-emoji">${g.emoji || '🌱'}</span>
+          <span class="wk-title"><b>${esc(g.title)}</b><small>${doneCount}/${dueCount}</small></span>
+        </div>
+        ${cells}
+      </div>`;
+    }).join('');
+
+    // 本周统计
+    const totalDone = goals.reduce((s, g) => s + days.filter((d) => cellState(g, d) === 'done').length, 0);
+    const totalDue = goals.reduce((s, g) => s + days.filter((d) => dueToday(g, d)).length, 0);
+    // 本周得分：只算正向获得（打卡/连续奖励/小目标），不算兑换扣分
+    const weekPts = store.ledger.filter((l) =>
+      String(l.userId) === String(uid)
+      && l.date >= start && l.date <= addDays(start, 6)
+      && l.delta > 0
+      && ['checkin', 'streak_bonus', 'stage_credit'].includes(l.type))
+      .reduce((s, l) => s + l.delta, 0);
+
+    return `
+      <section class="wood-panel goals-col goals-week">
+        <div class="panel-head">
+          <h2><span class="wood-tag">这一周</span></h2>
+          <div class="wk-nav">
+            <button class="cal-arrow" type="button" data-week-prev aria-label="上一周">‹</button>
+            <span class="wk-range">${start.slice(5).replace('-', '/')} – ${addDays(start, 6).slice(5).replace('-', '/')}</span>
+            <button class="cal-arrow" type="button" data-week-next aria-label="下一周">›</button>
+            <button class="text-btn" type="button" data-week-today>本周</button>
+          </div>
+        </div>
+
+        <div class="wk-stats">
+          <div class="wk-stat"><b>${totalDone}<i>/${totalDue}</i></b><span>本周打卡</span></div>
+          <div class="wk-stat"><b>${Math.round((totalDone / Math.max(1, totalDue)) * 100)}<i>%</i></b><span>完成率</span></div>
+          <div class="wk-stat"><b>${weekPts >= 0 ? '+' : ''}${weekPts}</b><span>本周得分</span></div>
+        </div>
+
+        <div class="wk-grid">
+          <div class="wk-row wk-row-head">
+            <div class="wk-name"><span class="wk-title"><b>目标</b></span></div>
+            ${headCells}
+          </div>
+          ${rows || emptyBlock('这周还没有要做的日常目标。')}
+        </div>
+
+        <div class="wk-legend">
+          <span><i class="lg is-done"></i>已打</span>
+          <span><i class="lg is-miss"></i>漏了</span>
+          <span><i class="lg is-today"></i>今天</span>
+          <span><i class="lg is-plan"></i>计划中</span>
+        </div>
+      </section>`;
+  }
+
   function renderGoalsView() {
     const uid = store.currentUser;
     if (isGuest()) return renderGuestGoals();
@@ -2497,10 +2832,22 @@
       : tab === 'stage' ? renderStagePanel(uid)
       : renderBigGoals(uid);
 
+    // 周 / 月 切换：周视图看「这周坚持得怎么样」，月视图看「整个月」
+    const rangeMode = store.goalsRange || 'month';
+    const weekStart = store.weekStart || weekStartOf(todayKey());
+    const rangeSwitch = `
+      <div class="range-switch">
+        <button class="range-btn${rangeMode === 'week' ? ' is-on' : ''}" type="button" data-goals-range="week">周</button>
+        <button class="range-btn${rangeMode === 'month' ? ' is-on' : ''}" type="button" data-goals-range="month">月</button>
+      </div>`;
+
+    const leftPane = rangeMode === 'week' ? renderWeekGrid(uid, weekStart) : renderCalendar(uid, cursor);
+
     return `${head('目标', '', `进行中 ${mine.filter((g) => g.status === 'active').length} 个 · 本月完成 ${monthChecks(uid)} 次`)}
       <div class="goals-layout">
         <div class="goals-left">
-          ${renderCalendar(uid, cursor)}
+          ${rangeSwitch}
+          ${leftPane}
         </div>
         <div class="goals-right">
           ${subtabs}
@@ -2523,7 +2870,24 @@
     const items = store.wishes.filter((w) => w.ownerId === uid && w.status === 'active');
     const reds = store.redemptions.filter((r) => r.userId === uid).sort((a, b) => b.appliedAt - a.appliedAt);
     const label = { applied: '待对方确认', confirmed: '已扣分', done: '已完成', cancelled: '已取消', expired: '已过期' };
-    return `${head('愿望单', '1 元 = 10 分', `可用 ${fmt(bal)} 分 · ≈ ¥${(bal / 10).toFixed(1)} · 已兑换 ${reds.filter((r) => r.status === 'done').length} 件`)}
+    const doneCnt = reds.filter((r) => r.status === 'done').length;
+    // 金色积分卡（学手机端愿望单顶部）
+    const wishBanner = `
+      <div class="wish-banner">
+        <div class="wb-top">
+          <span class="wb-label">可用积分</span>
+          <span class="wb-yuan">≈ ¥${(bal / 10).toFixed(1)}</span>
+        </div>
+        <b class="wb-num">${fmt(bal)}</b>
+        <div class="wb-bottom">
+          <span class="wb-chip">1 元 = 10 分</span>
+          <span class="wb-chip wb-chip-light">已兑换 ${doneCnt} 件</span>
+          <span class="wb-spacer"></span>
+        </div>
+      </div>`;
+
+    return `${head('愿望单', '', `正在攒 ${items.length} 个 · 已兑换 ${doneCnt} 件`)}
+      ${wishBanner}
       <section class="wood-panel sub-panel">
         <div class="panel-head"><h2><span class="wood-tag wood-tag-berry">正在攒</span></h2>
           <button class="wood-btn wood-btn-sm" type="button" data-new-wish><span class="btn-ico" data-icon="plus" data-icon-kind="mono"></span>新愿望</button></div>
@@ -2541,7 +2905,7 @@
               <span class="hold-fill" aria-hidden="true"></span>
               <span class="hold-label">${st.ok ? '按住兑换' : esc(st.label)}</span>
             </button>
-          </div>`; }).join('') : '<p class="task-empty">愿望单是空的。</p>'}
+          </div>`; }).join('') : emptyBlock('愿望单还是空的。加一个想换的东西，攒够分就能兑。', 'gift')}
       </section>
       <section class="wood-panel sub-panel">
         <div class="panel-head"><h2><span class="wood-tag">兑换记录</span></h2></div>
@@ -2551,7 +2915,7 @@
           <span class="chip chip-muted">${label[r.status] || r.status}</span>
           <span class="goal-act">
             ${r.status === 'confirmed' ? '<button class="text-btn" type="button" data-red-done="' + r.id + '">已收到</button><button class="text-btn" type="button" data-red-cancel="' + r.id + '">撤回</button>' : ''}
-          </span></div>`).join('') : '<p class="task-empty">还没有兑换记录。</p>'}
+          </span></div>`).join('') : emptyBlock('还没有兑换记录。')}
       </section>`;
   }
 
@@ -2619,7 +2983,7 @@
       ${inviteCards}
       <section class="wood-panel sub-panel">
         <div class="panel-head"><h2><span class="wood-tag">大厅</span></h2><p>先看看别人的介绍</p></div>
-        ${listHtml || '<p class="task-empty">现在还没有人在大厅里。</p>'}
+        ${listHtml || emptyBlock('大厅里现在没人。过会儿再来看看。')}
       </section>
       <section class="wood-panel sub-panel">
         <div class="panel-head"><h2><span class="wood-tag">已经有搭子了？</span></h2></div>
@@ -2736,7 +3100,7 @@
         <span><i style="background:var(--sky)"></i>${esc(partnerName)}</span>
       </div>
       <p class="fg-label" style="margin-top:14px">我今天的时间花在哪</p>
-      ${me.today.apps.length ? apps(me) : '<p class="task-empty">还没有记录。手机上装了脚印，每天会自动上报。</p>'}
+      ${me.today.apps.length ? apps(me) : emptyBlock('还没有记录。手机上装了脚印，每天会自动上报。', 'cup')}
     </section>`;
   }
 
@@ -2841,9 +3205,11 @@
   ];
 
   function unreadChatCount(uid) {
+    // 优先用后端算好的未读数
+    if (typeof store.chatUnread === 'number' && store.chatUnread > 0) return store.chatUnread;
     const pid = partnerId();
     if (!pid) return 0;
-    return store.chat.filter((m) => m.from === pid && m.at > (store.chatReadAt || 0)).length;
+    return store.chat.filter((m) => String(m.from) === String(pid) && !m.read).length;
   }
 
   function openChat() {
@@ -2977,7 +3343,7 @@
           <span class="st-emoji">${esc(s.emoji)}</span>
           <span class="st-txt"><b>${esc(s.label)}</b><small>${esc(s.text || '没有留言')} · ${timeAgo(s.at)}</small></span>
         </button>`
-      : '<p class="task-empty">对方还没设状态。</p>'}
+      : emptyBlock('ta 还没设状态。', 'moon')}
     </section>`;
   }
 
@@ -3029,6 +3395,7 @@
     const pid = partnerId();
     const pU = pid ? userById(pid) : null;
     if (!pU) return renderHallPage();
+
     const rows = (id) => ({
       bal: balanceOf(id), month: monthPoints(id), streak: bestStreak(id), rate: completionRate(id),
       mins: store.checks.filter((c) => c.userId === id && c.status === 'credited' && c.date.slice(0, 7) === todayKey().slice(0, 7))
@@ -3038,7 +3405,7 @@
     const pend = store.verifications.filter((v) => v.userId === pid);
     const pendingChecks = store.checks.filter((c) => c.userId === pid && c.status === 'pending');
     const pendingVerifies = pend.filter((v) => v.status === 'pending');
-    // 打卡与验收合并成一份「待我审核」，用标签区分类型
+
     const reviewItems = [
       ...pendingChecks.map((c) => {
         const g = goalOf(c.goalId);
@@ -3063,21 +3430,28 @@
       }),
     ];
     const reviewTotal = reviewItems.length;
-    const timeline = store.ledger.filter((l) => l.userId === uid).slice(-6).reverse();
-    const tab = store.usTab || 'compare';
-    const pendingTotal = reviewTotal + unreadChatCount(uid);
+    const unread = unreadChatCount(uid);
 
-    const subtabs = `
-      <div class="us-subtabs">
-        <button class="us-subtab${tab === 'more' ? ' is-on' : ''}" type="button" data-us-tab="more">
-          概览${reviewTotal ? `<i class="us-sub-badge">${reviewTotal}</i>` : ''}
+    // 抽屉：默认「今天要处理」展开，其余收起
+    const openSet = store.usDrawers || { review: true, compare: false, plan: false, shared: false };
+    const drawer = (key, ico, title, sub, badge, body) => `
+      <section class="us-drawer${openSet[key] ? ' is-open' : ''}">
+        <button class="us-drawer-head" type="button" data-us-drawer="${key}">
+          <span class="usd-ico">${ico}</span>
+          <span class="usd-main"><b>${title}</b><small>${sub}</small></span>
+          ${badge ? `<span class="usd-badge">${badge}</span>` : ''}
+          <span class="usd-arrow" aria-hidden="true"></span>
         </button>
-        <button class="us-subtab${tab === 'compare' ? ' is-on' : ''}" type="button" data-us-tab="compare">
-          对比
-        </button>
-      </div>`;
+        <div class="us-drawer-body">${body}</div>
+      </section>`;
 
-    const comparePane = `
+    // ① 今天要处理
+    const reviewBody = reviewItems.length
+      ? reviewItems.join('')
+      : '<p class="task-empty">☕ 今天没有等你审核的事，歇会儿。</p>';
+
+    // ② 数据对比
+    const compareBody = `
       <div class="duo-cards">
         <div class="duo-card"><div class="dc-head"><span data-icon="avatar"></span> ${userById(uid).name}</div>
           <dl><dt>可用积分</dt><dd>${fmt(a.bal)}</dd><dt>本月得分</dt><dd>+${fmt(a.month)}</dd><dt>当前连续</dt><dd>${a.streak} 天</dd><dt>完成率</dt><dd>${a.rate}%</dd><dt>时间投入</dt><dd>${a.mins} 分钟</dd></dl></div>
@@ -3086,35 +3460,141 @@
       </div>
       ${renderUsageSection(uid, pid)}`;
 
-    const morePane = `
-      <section class="wood-panel sub-panel">
-        <div class="panel-head"><h2><span class="wood-tag">待我审核</span></h2><p>${reviewTotal} 件</p></div>
-        ${reviewTotal ? reviewItems.join('') : '<p class="task-empty">没有等你审核的事。</p>'}
-      </section>
+    // ③ ta 的计划：优先用 /api/partner 拉回来的
+    const partnerGoals = (store.partnerGoals && store.partnerGoals.length)
+      ? store.partnerGoals
+      : store.goals.filter((g) => String(g.ownerId) === String(pid) && g.status !== 'abandoned');
+    const planBody = `
       ${renderPartnerStatusCard(pid)}
-      <section class="wood-panel sub-panel chat-entry-panel">
-        <div class="hall-entry-row">
-          <span class="hall-entry-ico" data-icon="us"></span>
-          <div class="hall-entry-copy"><b>和 ${esc(pU.name)} 说两句</b><small>可以打字，也有常用语</small></div>
-          ${unreadChatCount(uid) ? `<span class="chat-unread">${unreadChatCount(uid)}</span>` : ''}
-          <button class="text-btn" type="button" data-chat-open>打开 →</button>
-        </div>
-      </section>
-      <section class="wood-panel sub-panel">
-        <div class="panel-head"><h2><span class="wood-tag">${esc(pU.name)}最近的打卡</span></h2></div>
-        <ul class="timeline-list">
-          ${store.checks.filter((c) => c.userId === pid).slice(-5).reverse().map((c) => {
-            const g = goalOf(c.goalId);
-            return `<li><span class="tl-date">${c.date.slice(5)}</span><span class="tl-dot is-partner"></span>
-              <span><b>${esc(g ? g.title : '')}</b> ${c.minutes} 分钟 · +${c.points} 分${c.note ? ' · ' + esc(c.note) : ''}</span></li>`;
-          }).join('') || '<li class="task-empty">对方还没有打卡记录。</li>'}
-        </ul>
-      </section>
+      <div class="plan-list">
+        ${partnerGoals.length ? partnerGoals.map((g) => `
+          <div class="plan-row">
+            <span class="plan-emoji">${g.emoji || '🌱'}</span>
+            <span class="plan-main"><b>${esc(g.title)}</b><small>${g.type === 'stage' ? '小目标' : '日常'} · ${g.status === 'achieved' ? '已达成' : g.status === 'reviewing' ? '待审核' : '进行中'}</small></span>
+          </div>`).join('') : emptyBlock('ta 还没建目标。', 'sprout')}
+      </div>`;
+
+    // ④ 共同记录
+    const recentChecks = store.checks.filter((c) => c.userId === pid).slice(-5).reverse();
+    const sharedBody = `
+      <ul class="timeline-list">
+        ${recentChecks.map((c) => {
+          const g = goalOf(c.goalId);
+          return `<li><span class="tl-date">${c.date.slice(5)}</span><span class="tl-dot is-partner"></span>
+            <span><b>${esc(g ? g.title : '')}</b> ${c.minutes} 分钟 · +${c.points} 分${c.note ? ' · ' + esc(c.note) : ''}</span></li>`;
+        }).join('') || '<li class="task-empty-wrap">' + emptyBlock('ta 还没有打卡记录。', 'cup') + '</li>'}
+      </ul>
       ${renderHallEntry()}`;
 
     return `${head('我们', `第 ${Math.max(1, Math.round((Date.now() - new Date(pairOf(uid).since.replace(/-/g, '/')).getTime()) / 86400000) + 1)} 天`, `一起打卡 ${Math.min(a.streak, b.streak)} 天`)}
-      ${subtabs}
-      <div class="us-pane">${tab === 'compare' ? comparePane : morePane}</div>`;
+      <div class="us-drawers">
+        ${drawer('review', '📌', '今天要处理', `待审核 · ta 今天的打卡${unread ? ' · 未读消息' : ''}`, reviewTotal ? `${reviewTotal} 件` : '', reviewBody)}
+        ${drawer('compare', '📊', '数据对比', '并排看看 · 手机时长 · 7 天趋势', '3 个板块', compareBody)}
+        ${drawer('plan', '📖', 'ta 的计划', '大目标 · 日常目标 · 当前状态', `${partnerGoals.length} 个`, planBody)}
+        ${drawer('shared', '🎁', '共同记录', '最近的打卡 · 兑换 · 大厅', '', sharedBody)}
+      </div>
+      <section class="wood-panel sub-panel chat-entry-panel" style="margin-top:18px">
+        <div class="hall-entry-row">
+          <span class="hall-entry-ico" data-icon="us"></span>
+          <div class="hall-entry-copy"><b>和 ${esc(pU.name)} 说两句</b><small>可以打字，也有常用语</small></div>
+          ${unread ? `<span class="chat-unread">${unread}</span>` : ''}
+          <button class="text-btn" type="button" data-chat-open>打开 →</button>
+        </div>
+      </section>`;
+  }
+
+
+  /* ── 「我的」页：日报 / 画像 / 账号 ─────────────────── */
+  function openReportEdit() {
+    const uid = store.currentUser;
+    const r = store.dailyReports.filter((x) => x.userId === uid).sort((a, b) => b.date.localeCompare(a.date))[0];
+    if (!r) { toast('还没有小结可以改'); return; }
+    const s = openSheet({
+      title: '修改小结', width: 480,
+      body: `<textarea id="repText" class="fg-input" rows="5" maxlength="300">${esc(r.edited || r.text)}</textarea>`,
+      actions: `<button class="text-btn" type="button" data-cancel>取消</button>
+        <button class="wood-btn" type="button" data-ok>保存</button>`,
+    });
+    $('[data-cancel]', s.el).addEventListener('click', () => s.close());
+    $('[data-ok]', s.el).addEventListener('click', () => {
+      r.edited = $('#repText', s.el).value.trim();
+      s.close(); renderView('data'); toast('已保存');
+    });
+  }
+
+  function openProfileEdit(key) {
+    const uid = store.currentUser;
+    store.profiles[uid] = store.profiles[uid] || { blocks: {}, history: [] };
+    const p = store.profiles[uid];
+    p.blocks = p.blocks || {};
+    const label = { basic: '基本情况', resume: '经历', skills: '技能', goal: '目标', important: '对方需要知道的' }[key] || key;
+    const s = openSheet({
+      title: `填写${label}`, width: 480,
+      body: `<textarea id="profText" class="fg-input" rows="4" maxlength="300" placeholder="写给对方看的">${esc(p.blocks[key] || '')}</textarea>
+        <p class="fg-note">这部分对方能看见，改动会记进变更历史。</p>`,
+      actions: `<button class="text-btn" type="button" data-cancel>取消</button>
+        <button class="wood-btn" type="button" data-ok>保存</button>`,
+    });
+    $('[data-cancel]', s.el).addEventListener('click', () => s.close());
+    $('[data-ok]', s.el).addEventListener('click', async () => {
+      const v = $('#profText', s.el).value.trim();
+      const btn = $('[data-ok]', s.el);
+      if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
+      try {
+        // 后端块名：basic / resume / skills / goal / important
+        const apiKey = { basic: 'basic', resume: 'resume', skills: 'skills', goal: 'goal_progress', important: 'important' }[key] || key;
+        await API.saveProfileBlock(apiKey, v);
+        const before = p.blocks[key] || '';
+        p.blocks[key] = v;
+        p.history = p.history || [];
+        if (v !== before) p.history.unshift({ at: Date.now(), summary: `${before ? '修改' : '新增'}「${label}」`, seen: false });
+        s.close(); renderView('data'); toast('已保存');
+      } catch (e) {
+        if (btn) { btn.disabled = false; btn.textContent = '保存'; }
+        toast(e.message || '保存失败');
+      }
+    });
+  }
+
+  function openAccountEdit() {
+    const uid = store.currentUser;
+    const acc = userById(uid);
+    if (!acc) return;
+    const s = openSheet({
+      title: '账号设置', width: 460,
+      body: `
+        <label class="fg-field">用户名
+          <input id="acName" type="text" maxlength="20" value="${esc(acc.name)}"/>
+        </label>
+        <label class="fg-field">新密码（不改就留空）
+          <input id="acPwd" type="password" maxlength="32" placeholder="至少 6 位"/>
+        </label>
+        <label class="fg-field">确认新密码
+          <input id="acPwd2" type="password" maxlength="32" placeholder="再输一次"/>
+        </label>`,
+      actions: `<button class="text-btn" type="button" data-cancel>取消</button>
+        <button class="wood-btn" type="button" data-ok>保存</button>`,
+    });
+    $('[data-cancel]', s.el).addEventListener('click', () => s.close());
+    $('[data-ok]', s.el).addEventListener('click', async () => {
+      const name = $('#acName', s.el).value.trim();
+      const pwd = $('#acPwd', s.el).value;
+      const pwd2 = $('#acPwd2', s.el).value;
+      if (!name) { toast('用户名不能为空'); return; }
+      if (pwd) {
+        if (pwd.length < 6) { toast('密码至少 6 位'); return; }
+        if (pwd !== pwd2) { toast('两次密码不一样'); return; }
+      }
+      try {
+        if (name !== acc.name) await API.updateMe({ username: name });
+        if (pwd) await API.changePassword('', pwd);
+        s.close();
+        await loadAll();
+        toast('已保存');
+      } catch (e) {
+        toast(e.message || '保存失败');
+      }
+    });
   }
 
   function renderMeView() {
@@ -3132,9 +3612,59 @@
     const settings = store.settings[uid] || { aiReport: false, dailyDigest: false };
     const unreadChanges = profile && profile.history ? profile.history.filter((h) => !h.seen).length : 0;
     const diary = store.diary.filter((d) => d.date >= shiftDay(-1));
-    return `${head('我的', '', `本月完成 ${monthChecks(uid)} 次 · 连续 ${bestStreak(uid)} 天`)}
-      <div class="me-grid">
-        <section class="wood-panel sub-panel">
+
+    const tab = store.meTab || 'account';
+    const tabs = `
+      <div class="me-subtabs">
+        <button class="me-subtab${tab === 'account' ? ' is-on' : ''}" type="button" data-me-tab="account">账号</button>
+        <button class="me-subtab${tab === 'record' ? ' is-on' : ''}" type="button" data-me-tab="record">记录</button>
+        <button class="me-subtab${tab === 'setting' ? ' is-on' : ''}" type="button" data-me-tab="setting">设置</button>
+      </div>`;
+
+    /* 数据总览：六宫格（学手机端 stat-grid） */
+    const myChecks = store.checks.filter((c) => String(c.userId) === String(uid));
+    const totalMins = myChecks.filter((c) => c.status === 'credited').reduce((s, c) => s + c.minutes, 0);
+    const rejectedCnt = myChecks.filter((c) => c.status === 'rejected').length;
+    // 本月完成率：已过天数 × 每天应做目标数 作为分母，更贴近真实
+    const monthKey = todayKey().slice(0, 7);
+    const dayOfMonth = new Date().getDate();
+    const activeDaily = store.goals.filter((g) => String(g.ownerId) === String(uid) && g.type === 'daily' && g.status === 'active');
+    let monthDue = 0;
+    for (let d = 1; d <= dayOfMonth; d++) {
+      const date = `${monthKey}-${String(d).padStart(2, '0')}`;
+      monthDue += activeDaily.filter((g) => dueToday(g, date)).length;
+    }
+    const monthDone = myChecks.filter((c) => c.status === 'credited' && c.date.slice(0, 7) === monthKey).length;
+    const monthRate = monthDue ? Math.round((monthDone / monthDue) * 100) : 0;
+    const statsGrid = `
+      <div class="me-stats">
+        <div class="stat-cell">
+          <span class="sc-label">本月得分</span>
+          <b class="sc-val">+${fmt(monthPoints(uid))}</b>
+        </div>
+        <div class="stat-cell">
+          <span class="sc-label">当前余额</span>
+          <b class="sc-val">${fmt(bal)}</b>
+        </div>
+        <div class="stat-cell">
+          <span class="sc-label">最长连续</span>
+          <b class="sc-val">${bestStreak(uid)}<i>天</i></b>
+        </div>
+        <div class="stat-cell">
+          <span class="sc-label">本月完成率</span>
+          <b class="sc-val">${Math.min(100, monthRate)}<i>%</i></b>
+        </div>
+        <div class="stat-cell">
+          <span class="sc-label">总投入时长</span>
+          <b class="sc-val">${(totalMins / 60).toFixed(1)}<i>小时</i></b>
+        </div>
+        <div class="stat-cell">
+          <span class="sc-label">被驳回次数</span>
+          <b class="sc-val${rejectedCnt > 0 ? ' is-warn' : ''}">${rejectedCnt}</b>
+        </div>
+      </div>`;
+
+    const pane = tab === 'account' ? `<section class="wood-panel sub-panel">
           <div class="panel-head"><h2><span class="wood-tag">账号</span></h2></div>
           ${incomingReqs.length ? incomingReqs.map((q) => `
             <div class="me-row req-row">
@@ -3163,38 +3693,7 @@
             <p class="fg-note">这个码是你的，不会变。让对方在「我的」里输入，再点同意就配对了。</p>
           </div>
         </section>
-        ${renderMyStatusCard(uid)}
-        <section class="wood-panel sub-panel">
-          <div class="panel-head"><h2><span class="wood-tag wood-tag-gold">积分系数</span></h2></div>
-          <div class="cfg-row"><span>每分钟基础分</span><input type="number" step="0.1" min="0.1" max="2" value="${CFG.unit}" data-cfg="unit"/></div>
-          <div class="cfg-row"><span>单次封顶</span><input type="number" step="10" min="10" max="300" value="${CFG.cap}" data-cfg="cap"/></div>
-          <p class="fg-note">两人共用一套系数，改完立即生效。</p>
-        </section>
-      </div>
-      <section class="wood-panel sub-panel">
-        <div class="panel-head"><h2><span class="wood-tag">积分流水</span></h2><p>当前 ${fmt(bal)} 分</p></div>
-        <table class="ledger">
-          <thead><tr><th>日期</th><th>类型</th><th>说明</th><th class="num">变动</th><th class="num">结余</th></tr></thead>
-          <tbody>${led.map((l) => `<tr><td>${l.date.slice(5)}</td><td>${typeName[l.type] || l.type}</td>
-            <td>${esc(l.note || '')}</td><td class="num ${l.delta > 0 ? 'is-plus' : 'is-minus'}">${l.delta > 0 ? '+' : ''}${l.delta}</td>
-            <td class="num">${fmt(l.balanceAfter)}</td></tr>`).join('')}</tbody>
-        </table>
-      </section>
-      <section class="wood-panel sub-panel">
-        <div class="panel-head"><h2><span class="wood-tag wood-tag-gold">昨日小结</span></h2>
-          <p>${report ? (report.shared ? '已分享给对方' : '仅自己可见') : '还没生成'}</p></div>
-        ${report ? `<p class="report-text">${esc(report.edited || report.text)}</p>
-          <div class="ng-actions" style="margin-top:12px">
-            <button class="text-btn" type="button" data-report-edit>修改</button>
-            <button class="text-btn" type="button" data-report-share>${report.shared ? '取消分享' : '分享给对方'}</button>
-          </div>`
-        : '<p class="task-empty">每天 23:30 自动生成，也可以点下面手动生成。</p>'}
-        <div class="ng-actions" style="margin-top:10px">
-          <button class="wood-btn wood-btn-sm" type="button" data-report-gen>生成今天的小结</button>
-        </div>
-      </section>
-
-      <section class="wood-panel sub-panel">
+<section class="wood-panel sub-panel">
         <div class="panel-head"><h2><span class="wood-tag">我的画像</span></h2>
           ${unreadChanges ? `<p>${unreadChanges} 条变更未读</p>` : '<p>对方可见</p>'}</div>
         ${['basic:基本情况', 'resume:经历', 'skills:技能', 'goal:目标', 'important:对方需要知道的'].map((pair) => {
@@ -3207,16 +3706,50 @@
         ${(profile && profile.history && profile.history.length) ? `
           <p class="fg-label" style="margin-top:14px">最近变更</p>
           ${profile.history.slice(0, 3).map((h) => `<div class="hist-row">${h.seen ? '' : '<i class="hist-dot"></i>'}${esc(h.summary)}<small>${new Date(h.at).toLocaleDateString('zh-CN')}</small></div>`).join('')}` : ''}
+      </section>`
+      : tab === 'record' ? `<section class="wood-panel sub-panel">
+        <div class="panel-head"><h2><span class="wood-tag">积分流水</span></h2><p>当前 ${fmt(bal)} 分</p></div>
+        <table class="ledger">
+          <thead><tr><th>日期</th><th>类型</th><th>说明</th><th class="num">变动</th><th class="num">结余</th></tr></thead>
+          <tbody>${led.map((l) => `<tr><td>${l.date.slice(5)}</td><td>${typeName[l.type] || l.type}</td>
+            <td>${esc(l.note || '')}</td><td class="num ${l.delta > 0 ? 'is-plus' : 'is-minus'}">${l.delta > 0 ? '+' : ''}${l.delta}</td>
+            <td class="num">${fmt(l.balanceAfter)}</td></tr>`).join('')}</tbody>
+        </table>
       </section>
-
-      <section class="wood-panel sub-panel">
+<section class="wood-panel sub-panel">
+        <div class="panel-head"><h2><span class="wood-tag wood-tag-gold">昨日小结</span></h2>
+          <p>${report ? (report.shared ? '已分享给对方' : '仅自己可见') : '还没生成'}</p></div>
+        ${report ? `<p class="report-text">${esc(report.edited || report.text)}</p>
+          <div class="ng-actions" style="margin-top:12px">
+            <button class="text-btn" type="button" data-report-edit>修改</button>
+            <button class="text-btn" type="button" data-report-share>${report.shared ? '取消分享' : '分享给对方'}</button>
+          </div>`
+        : emptyBlock('每天 23:30 自动生成，也可以点下面手动生成。', 'book')}
+        <div class="ng-actions" style="margin-top:10px">
+          <button class="wood-btn wood-btn-sm" type="button" data-report-gen>生成今天的小结</button>
+        </div>
+      </section>
+<section class="wood-panel sub-panel">
+        <div class="panel-head"><h2><span class="wood-tag">昨天的话</span></h2><p>${diary.length} 条</p></div>
+        ${diary.length ? diary.map((d) => `<div class="diary-row"><b>${userById(d.from).name}</b><p>${esc(d.text)}</p></div>`).join('') : '<p class="task-empty">昨天没留下什么。</p>'}
+        <label class="fg-field" style="margin-top:12px">留一句给明天
+          <input id="diaryInput" type="text" maxlength="80" placeholder="明天想怎么过"/>
+        </label>
+        <div class="ng-actions" style="margin-top:10px"><button class="wood-btn wood-btn-sm" type="button" data-diary>记下来</button></div>
+      </section>`
+      : `<section class="wood-panel sub-panel">
+          <div class="panel-head"><h2><span class="wood-tag wood-tag-gold">积分系数</span></h2></div>
+          <div class="cfg-row"><span>每分钟基础分</span><input type="number" step="0.1" min="0.1" max="2" value="${CFG.unit}" data-cfg="unit"/></div>
+          <div class="cfg-row"><span>单次封顶</span><input type="number" step="10" min="10" max="300" value="${CFG.cap}" data-cfg="cap"/></div>
+          <p class="fg-note">两人共用一套系数，改完立即生效。</p>
+        </section>
+<section class="wood-panel sub-panel">
         <div class="panel-head"><h2><span class="wood-tag">设置</span></h2></div>
         <div class="cfg-row"><span>每天生成小结</span><button class="chip-btn${settings.aiReport ? ' is-on' : ''}" type="button" data-set="aiReport">${settings.aiReport ? '开' : '关'}</button></div>
         <div class="cfg-row"><span>打完了汇报给对方</span><button class="chip-btn${settings.dailyDigest ? ' is-on' : ''}" type="button" data-set="dailyDigest">${settings.dailyDigest ? '开' : '关'}</button></div>
         <div class="cfg-row"><span>改用户名 / 改密码</span><button class="text-btn" type="button" data-account>去改</button></div>
       </section>
-
-      <section class="wood-panel sub-panel">
+<section class="wood-panel sub-panel">
         <div class="panel-head"><h2><span class="wood-tag">数据备份</span></h2><p>${store.backups.length} 份快照</p></div>
         <p class="fg-note">把两个人的目标、打卡、积分都存一份，换设备时可以导回来。</p>
         <div class="ng-actions" style="margin-top:12px">
@@ -3225,112 +3758,12 @@
         </div>
         ${store.backups.length ? `<p class="fg-label" style="margin-top:12px">最近备份</p>
           ${store.backups.slice(-3).reverse().map((b) => `<div class="hist-row">${new Date(b.at).toLocaleString('zh-CN')}<small>${(b.size / 1024).toFixed(1)} KB</small></div>`).join('')}` : ''}
-      </section>
-
-      <section class="wood-panel sub-panel">
-        <div class="panel-head"><h2><span class="wood-tag">昨天的话</span></h2><p>${diary.length} 条</p></div>
-        ${diary.length ? diary.map((d) => `<div class="diary-row"><b>${userById(d.from).name}</b><p>${esc(d.text)}</p></div>`).join('') : '<p class="task-empty">昨天没留下什么。</p>'}
-        <label class="fg-field" style="margin-top:12px">留一句给明天
-          <input id="diaryInput" type="text" maxlength="80" placeholder="明天想怎么过"/>
-        </label>
-        <div class="ng-actions" style="margin-top:10px"><button class="wood-btn wood-btn-sm" type="button" data-diary>记下来</button></div>
       </section>`;
-  }
 
-
-
-  /* ── 我的页：日报 / 画像 / 账号 ─────────────────────── */
-  function genDailyReport() {
-    const uid = store.currentUser;
-    const today = todayKey();
-    const mine = store.goals.filter((g) => g.ownerId === uid && g.type === 'daily' && g.status === 'active');
-    const done = mine.filter((g) => checkOf(g.id, uid, today)).length;
-    const pts = store.ledger.filter((l) => l.userId === uid && l.date === today && l.delta > 0).reduce((s, l) => s + l.delta, 0);
-    const streak = Math.max(0, ...mine.map((g) => streakOf(g.id, uid)));
-    const text = `今天完成了 ${done} 个目标，拿到 ${pts} 分，最长连续 ${streak} 天。` +
-      (done < mine.length ? `还有 ${mine.length - done} 个没做完，明天补上。` : '今天的都做完了，保持住。');
-    const exist = store.dailyReports.find((r) => r.userId === uid && r.date === today);
-    if (exist) { exist.text = text; exist.edited = ''; }
-    else store.dailyReports.push({ date: today, userId: uid, text, shared: false, edited: '' });
-    renderView('data'); toast('今天的小结生成好了');
-  }
-
-  function openReportEdit() {
-    const uid = store.currentUser;
-    const r = store.dailyReports.filter((x) => x.userId === uid).sort((a, b) => b.date.localeCompare(a.date))[0];
-    if (!r) return;
-    const s = openSheet({
-      title: '修改小结', width: 480,
-      body: `<textarea id="repText" class="fg-input" rows="5" maxlength="300">${esc(r.edited || r.text)}</textarea>`,
-      actions: `<button class="text-btn" type="button" data-cancel>取消</button>
-        <button class="wood-btn" type="button" data-ok>保存</button>`,
-    });
-    $('[data-cancel]', s.el).addEventListener('click', () => s.close());
-    $('[data-ok]', s.el).addEventListener('click', () => {
-      r.edited = $('#repText', s.el).value.trim();
-      s.close(); renderView('data'); toast('已保存');
-    });
-  }
-
-  function openProfileEdit(key) {
-    const uid = store.currentUser;
-    store.profiles[uid] = store.profiles[uid] || { blocks: {}, history: [] };
-    const p = store.profiles[uid];
-    p.blocks = p.blocks || {};
-    const label = { basic: '基本情况', resume: '经历', skills: '技能', goal: '目标', important: '对方需要知道的' }[key] || key;
-    const s = openSheet({
-      title: `填写${label}`, width: 480,
-      body: `<textarea id="profText" class="fg-input" rows="4" maxlength="300" placeholder="写给对方看的">${esc(p.blocks[key] || '')}</textarea>
-        <p class="fg-note">这部分对方能看见，改动会记进变更历史。</p>`,
-      actions: `<button class="text-btn" type="button" data-cancel>取消</button>
-        <button class="wood-btn" type="button" data-ok>保存</button>`,
-    });
-    $('[data-cancel]', s.el).addEventListener('click', () => s.close());
-    $('[data-ok]', s.el).addEventListener('click', () => {
-      const v = $('#profText', s.el).value.trim();
-      const before = p.blocks[key] || '';
-      if (v !== before) {
-        p.blocks[key] = v;
-        p.history = p.history || [];
-        p.history.unshift({ at: Date.now(), summary: `${before ? '修改' : '新增'}「${label}」`, seen: false });
-      }
-      s.close(); renderView('data'); toast('已保存');
-    });
-  }
-
-  function openAccountEdit() {
-    const uid = store.currentUser;
-    const acc = userById(uid);
-    const s = openSheet({
-      title: '账号设置', width: 460,
-      body: `
-        <label class="fg-field">用户名
-          <input id="acName" type="text" maxlength="20" value="${esc(acc.name)}"/>
-        </label>
-        <label class="fg-field">新密码（不改就留空）
-          <input id="acPwd" type="password" maxlength="32" placeholder="至少 6 位"/>
-        </label>
-        <label class="fg-field">确认新密码
-          <input id="acPwd2" type="password" maxlength="32" placeholder="再输一次"/>
-        </label>`,
-      actions: `<button class="text-btn" type="button" data-cancel>取消</button>
-        <button class="wood-btn" type="button" data-ok>保存</button>`,
-    });
-    $('[data-cancel]', s.el).addEventListener('click', () => s.close());
-    $('[data-ok]', s.el).addEventListener('click', () => {
-      const name = $('#acName', s.el).value.trim();
-      const pwd = $('#acPwd', s.el).value;
-      const pwd2 = $('#acPwd2', s.el).value;
-      if (!name) { toast('用户名不能为空'); return; }
-      if (name !== acc.name && store.accounts.some((a) => a.name === name)) { toast('这个用户名有人用了'); return; }
-      if (pwd) {
-        if (pwd.length < 6) { toast('密码至少 6 位'); return; }
-        if (pwd !== pwd2) { toast('两次密码不一样'); return; }
-        acc.pwd = pwd;
-      }
-      acc.name = name;
-      s.close(); renderAll(); toast('已保存');
-    });
+    return `${head('我的', '', `本月完成 ${monthChecks(uid)} 次 · 连续 ${bestStreak(uid)} 天`)}
+      ${statsGrid}
+      ${tabs}
+      <div class="me-pane">${pane}</div>`;
   }
 
   /* 访客版「我的」：账号与配对的入口都在这一页 */
@@ -3387,7 +3820,6 @@
         <div class="wl-pct" data-wl-pct>00%</div>
       </div>
       <div class="wl-bar" data-wl-bar role="progressbar" aria-label="加载进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">${cells}</div>
-      <div class="wl-legend"><span>刚种下</span><span>浇水中</span><span>成熟了</span></div>
     </div>`;
   }
 
@@ -3534,6 +3966,34 @@
   /* 视图内事件委托 */
   mount.addEventListener('click', (e) => {
     const t = e.target;
+    const drawerBtn = t.closest('[data-us-drawer]');
+    if (drawerBtn) {
+      const key = drawerBtn.dataset.usDrawer;
+      store.usDrawers = store.usDrawers || { review: true, compare: false, plan: false, shared: false };
+      store.usDrawers[key] = !store.usDrawers[key];
+      renderView('us');
+      return;
+    }
+    const rangeBtn = t.closest('[data-goals-range]');
+    if (rangeBtn) {
+      store.goalsRange = rangeBtn.dataset.goalsRange;
+      if (store.goalsRange === 'week' && !store.weekStart) store.weekStart = weekStartOf(todayKey());
+      renderView('goals'); return;
+    }
+    if (t.closest('[data-week-prev]')) {
+      store.weekStart = addDays(store.weekStart || weekStartOf(todayKey()), -7);
+      renderView('goals'); return;
+    }
+    if (t.closest('[data-week-next]')) {
+      store.weekStart = addDays(store.weekStart || weekStartOf(todayKey()), 7);
+      renderView('goals'); return;
+    }
+    if (t.closest('[data-week-today]')) {
+      store.weekStart = weekStartOf(todayKey());
+      renderView('goals'); return;
+    }
+    const meTabBtn = t.closest('[data-me-tab]');
+    if (meTabBtn) { store.meTab = meTabBtn.dataset.meTab; renderView('data'); return; }
     const goalsTabBtn = t.closest('[data-goals-tab]');
     if (goalsTabBtn) { store.goalsTab = goalsTabBtn.dataset.goalsTab; renderView('goals'); return; }
     const usTabBtn = t.closest('[data-us-tab]');
@@ -3781,10 +4241,14 @@
     }
 
     if (t.closest('[data-diary]')) {
-      const v = $('#diaryInput').value.trim();
-      if (!v) { toast('写点什么再记'); return; }
-      store.diary.push({ date: todayKey(), from: store.currentUser, text: v });
-      renderView('data'); toast('记下了');
+      const v = ($('#diaryInput') || {}).value ? $('#diaryInput').value.trim() : '';
+      if (!v) { toast('写点什么再记下来'); return; }
+      const today = todayKey();
+      API.patch(`/diaries/${today}`, { content: v })
+        .then(() => loadAll())
+        .then(() => { const inp = $('#diaryInput'); if (inp) inp.value = ''; toast('记下来了'); })
+        .catch((e) => toast(e.message || '记录失败'));
+      return;
     }
   });
 
@@ -4207,7 +4671,6 @@
           <span class="boot-sub">两个人一起坚持的地方</span>
         </div>
         ${waterLoaderHtml('准备中')}
-        <p class="boot-hint">一垄一垄种下去，慢慢就长成了。</p>
       </div>`;
     document.body.appendChild(layer);
     paintIcons(layer);

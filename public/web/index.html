@@ -113,9 +113,15 @@
     <!-- ── 右侧窄状态栏：今日结果 + 待办提醒 ────────────── -->
     <aside class="rail" aria-label="今日结果">
       <section class="wallet">
-        <span class="wallet-label">共同积分</span>
-        <div class="wallet-num" id="walletNum">1,896</div>
-        <div class="wallet-sub" id="walletSub">≈ ¥189.6</div>
+        <div class="wallet-top">
+          <span class="wallet-label">可用积分</span>
+          <span class="wallet-chip" id="walletStreak">🔥 0 天连续</span>
+        </div>
+        <div class="wallet-num" id="walletNum">0</div>
+        <div class="wallet-bottom">
+          <span class="wallet-sub" id="walletSub">≈ ¥0.0</span>
+          <span class="wallet-chip wallet-chip-light" id="walletMonth">本月 +0</span>
+        </div>
       </section>
 
       <section class="rail-card" id="verifyCard" hidden>
@@ -134,6 +140,7 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <div class="sheet-layer" id="sheetLayer" aria-live="polite"></div>
   <div class="auth-layer" id="authLayer" hidden></div>
+  <script src="/web/icons.js"></script>
   <script src="/web/api.js"></script>
 <script src="/web/adapter.js"></script>
 <script src="/web/app.js"></script>

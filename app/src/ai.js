@@ -8,7 +8,26 @@ function completionsUrl() {
   return `${base}/chat/completions`;
 }
 const DEFAULT_MODEL = 'deepseek-flash';
+// 官方 DeepSeek 模型白名单
 const DEEPSEEK_MODELS = Object.freeze([DEFAULT_MODEL, 'deepseek-v4-pro']);
+
+/* 本地 magpie 网关（OpenAI 兼容）暴露的模型名。
+   设了 AI_BASE_URL 指向自建网关时，允许这些名字通过校验，
+   否则 aiAvailable() 会一直返回 false。 */
+const GATEWAY_MODELS = Object.freeze([
+  'hy4free', 'hy3', 'hy3-x', 'hy4-preview',
+  'glm-5.3', 'glm-5.3-flash', 'glm-5.2', 'glm-5.1',
+  'deepseek-v4.1-flash-sg', 'deepseek-v4.1-flash',
+  'minimax-m3.1-flash', 'gemini-3.8-flash',
+  'default-model', 'fast-model', 'balanced-model', 'deep-model', 'auto',
+]);
+
+/* 当前允许的模型：走官方时只认 DeepSeek，走自建网关时两种都认 */
+function allowedModels() {
+  const base = (process.env.AI_BASE_URL || '').trim();
+  const custom = base && !base.includes('api.deepseek.com');
+  return custom ? [...DEEPSEEK_MODELS, ...GATEWAY_MODELS] : [...DEEPSEEK_MODELS];
+}
 
 class AiError extends Error {
   constructor(message, { kind = 'ai_error', status = 0, detail = '' } = {}) {
@@ -33,7 +52,7 @@ function aiConfig() {
 
 function aiAvailable() {
   const cfg = aiConfig();
-  return Boolean(cfg.apiKey) && DEEPSEEK_MODELS.includes(cfg.model);
+  return Boolean(cfg.apiKey) && allowedModels().includes(cfg.model);
 }
 
 // ---- ai_calls 记账（best effort，绝不抛出）----
@@ -66,7 +85,7 @@ async function chat(db, opts = {}) {
   } = opts;
   throwIfCancelled(signal);
   if (!cfg?.apiKey) throw new AiError('请先配置 DeepSeek API Key', { kind: 'no_key' });
-  if (!DEEPSEEK_MODELS.includes(cfg.model)) throw new AiError('DeepSeek 模型配置无效', { kind: 'invalid_model' });
+  if (!allowedModels().includes(cfg.model)) throw new AiError('模型「' + cfg.model + '」不在允许列表里', { kind: 'invalid_model' });
   if (!Number.isInteger(maxTokens) || maxTokens < 1) throw new AiError('输出 token 预算无效', { kind: 'invalid_budget' });
 
   const thinking = deepThinking === true;
