@@ -1,6 +1,6 @@
 // 应用壳：启动、认证门、Tab 路由、滑动指示条。
 const App = (() => {
-  const state = { me: null, partner: null, tab: 'home', refresh: {}, pointsCfg: null, localNoLogin: false };
+  const state = { me: null, partner: null, tab: 'home', refresh: {}, pointsCfg: null, chatUnread: 0 };
 
   // 客户端积分预览（与服务端同公式，用于弹层即时反馈）
   window.__DEFAULT_CFG = {
@@ -47,7 +47,7 @@ const App = (() => {
     if (!bar) return;
     bar.innerHTML = `<div class="tab-slider"></div>` + TABS.map((t) => `
       <button class="tab-item ${state.tab === t.key ? 'active' : ''}" data-key="${t.key}">
-        <span class="tab-ico">${window.icon(t.icon)}</span>
+        <span class="tab-ico">${window.pixelIcon ? window.pixelIcon(t.icon, 'tab-art') : window.icon(t.icon)}${t.key === 'partner' && state.chatUnread ? `<i class="tab-badge">${Math.min(state.chatUnread, 99)}</i>` : ''}</span>
         <span class="tab-label">${t.label}</span>
       </button>`).join('');
     bar.className = `tabbar sel-${TABS.findIndex((t) => t.key === state.tab)}`;
@@ -56,79 +56,117 @@ const App = (() => {
     });
   }
 
+  // 切页漂浮动效：参数集中在这里，改风格只改这一处
+  const ANIM = { dur: 0.46, ease: 'power3.out', drift: 18, lift: 16, stagger: 0.035 };
+  let activeKey = null;
+  let stopDeco = null; // 上一次切页的分区图标观察器
+
+  function playTransition(holder, key, dir) {
+    const gsap = window.gsap;
+    // 库没加载 / 系统开启「减弱动态效果」时，降级为原来的直接切换
+    if (!gsap || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    const run = () => {
+      if (!holder.isConnected || activeKey !== key) return; // 快速连点：丢弃过期动画
+      gsap.fromTo(holder,
+        { autoAlpha: 0, x: (dir >= 0 ? 1 : -1) * ANIM.drift, y: ANIM.lift, scale: 0.985 },
+        { autoAlpha: 1, x: 0, y: 0, scale: 1, duration: ANIM.dur, ease: ANIM.ease,
+          overwrite: 'auto', clearProps: 'transform,opacity,visibility' });
+      // 顶层块错落上浮，制造轻盈的错层漂浮感；跳过已有 CSS stagger 动画的元素
+      const kids = Array.from(holder.children)
+        .filter((el) => !el.classList.contains('stagger-in')).slice(0, 12);
+      if (kids.length > 1) {
+        gsap.fromTo(kids,
+          { autoAlpha: 0, y: 9 },
+          { autoAlpha: 1, y: 0, duration: 0.38, stagger: ANIM.stagger, ease: 'sine.out',
+            delay: 0.05, overwrite: 'auto', clearProps: 'transform,opacity,visibility' });
+      }
+    };
+
+    // 多数页面是异步渲染（先塞 .page-loading 再换内容），等真实内容落定再播，避免动效空转
+    if (!holder.querySelector('.page-loading')) { run(); return; }
+    holder.style.visibility = 'hidden';
+    let done = false;
+    const obs = new MutationObserver(() => {
+      if (!holder.querySelector('.page-loading')) finish();
+    });
+    obs.observe(holder, { childList: true });
+    const timer = setTimeout(finish, 1500); // 接口卡住时兜底，绝不让页面一直隐身
+    function finish() {
+      if (done) return;
+      done = true;
+      obs.disconnect();
+      clearTimeout(timer);
+      holder.style.visibility = '';
+      run();
+    }
+  }
+
   function showTab(key) {
     if (!pages[key]) return;
+    const prev = TABS.findIndex((t) => t.key === state.tab);
+    const next = TABS.findIndex((t) => t.key === key);
+    if (stopDeco) { stopDeco(); stopDeco = null; }
     state.tab = key;
+    activeKey = key;
     renderTabbar();
     const view = document.getElementById('view');
-    view.style.transition = 'opacity 0.2s';
-    
-    // 1. 设置加载中状态
-    view.style.opacity = '0';
-    setTimeout(() => {
-        view.innerHTML = `<div class="page-cloud-loader">${UI.cloudLoading(
-            key === 'home' ? '正在整理今天的待办... 🐾' :
-            key === 'goals' ? '正在翻看这周的目标打卡... 🎯' :
-            key === 'wish' ? '正在查看心愿清单... 🎁' :
-            key === 'partner' ? '正在联络搭档的数据... 👫' :
-            '正在载入个人脚印... 🌿'
-        )}</div>`;
-        view.style.opacity = '1';
-    }, 50);
-
-    // 2. 异步执行页面渲染
+    if (window.gsap) window.gsap.killTweensOf(view.querySelectorAll('.page'));
+    view.innerHTML = '';
     const holder = document.createElement('div');
     holder.className = 'page';
-    
-    // 确保 render 完成后再替换视图
-    pages[key].render(holder).then(() => {
-        view.style.opacity = '0';
-        setTimeout(() => {
-            view.innerHTML = '';
-            view.appendChild(holder);
-            view.style.opacity = '1';
-        }, 200);
-    });
-
+    view.appendChild(holder);
+    pages[key].render(holder);
+    // 各页多为异步渲染，等真实内容落定后给分区标题补上语义图标
+    stopDeco = window.SecIcons ? window.SecIcons.watch(holder) : null;
     window.scrollTo(0, 0);
+    playTransition(holder, key, next - prev);
   }
 
   function showShell() {
     document.getElementById('auth-screen').classList.add('hidden');
     document.getElementById('app-shell').classList.remove('hidden');
     renderTabbar();
-    showTab('home');
+    showTab(state.tab);
+    if (state.me && typeof Chat !== 'undefined') Chat.connect();
   }
 
-  function showAuth() {
-    // 本地免登录模式不允许回到登录页
-    if (state.localNoLogin) {
-      showShell();
-      return;
-    }
+  // mode: 'login' | 'register'
+  function showAuth(mode = 'login') {
     document.getElementById('app-shell').classList.add('hidden');
     document.getElementById('auth-screen').classList.remove('hidden');
-    if (typeof AuthPage !== 'undefined') AuthPage.render(document.getElementById('auth-screen'));
+    if (typeof Chat !== 'undefined') Chat.disconnect();
+    if (typeof AuthPage !== 'undefined') AuthPage.render(document.getElementById('auth-screen'), { register: mode === 'register' });
+  }
+
+  // 访客：未登录（仍能逛界面，只是不能使用功能）
+  function isGuest() { return !state.me; }
+
+  // 登录/注册成功后：拉积分系数 + 回到当前 Tab 重渲染
+  async function onAuthed() {
+    try {
+      const cfg = await api.get('/api/settings');
+      state.pointsCfg = cfg.points;
+    } catch (e) { /* 系数拉不到就用默认 */ }
+    showShell();
   }
 
   async function boot() {
+    // 先探测登录态，但无论是否登录都进壳：未登录即「访客可逛」模式
     try {
       const me = await api.get('/api/me');
       state.me = me.user;
-      state.localNoLogin = !!me.localNoLogin;
       try {
         const cfg = await api.get('/api/settings');
         state.pointsCfg = cfg.points;
       } catch (e) { /* 系数拉不到就用默认 */ }
-      showShell();
-      document.getElementById('loader').style.display = 'none';
     } catch (e) {
-      document.getElementById('loader').style.display = 'none';
-      showAuth();
+      state.me = null;
     }
+    showShell();
   }
 
-  return { state, pages, register, showTab, showShell, showAuth, boot };
+  return { state, pages, register, showTab, showShell, showAuth, isGuest, onAuthed, boot, setChatUnread(n) { state.chatUnread = n; renderTabbar(); } };
 })();
 
 document.addEventListener('DOMContentLoaded', () => App.boot());

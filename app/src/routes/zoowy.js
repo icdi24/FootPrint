@@ -1,49 +1,95 @@
-// zoowy 常驻问答接口（P2-#13 后端部分）：
-//  - POST /zoowy/chat：带用户信息的知识库问答（直接拼结构化数据进上下文，不引向量库），
-//    保留工具调用能力（chat 白名单），会话落服务端
-//  - GET /zoowy/messages：拉自己账号的会话记录（按 user_id 隔离，Web/Android 同一份）
+// zoowy 常驻问答接口（zoowy v2）。
+// 第一批 5 个接口；账号级 Key 录入、图片/搜索/压缩摘要/偏好接口均不提供。
 const express = require('express');
 const { makeMiddleware } = require('../middleware');
-const { runChat } = require('../agent/workflows/chat');
-const { ensureSession, recentMessages } = require('../agent/session');
+const ai = require('../ai');
+const { runChat, acceptOffer, confirmChatDraft } = require('../agent/workflows/chat');
+const { recentMessages } = require('../agent/session');
+const { getDraft } = require('../agent/workflows/planning');
+const { cancelTurn, validRequestId, turnError } = require('../agent/zoowy-turns');
+const { AiError } = require('../ai');
 
 module.exports = function zoowyRoutes(db) {
   const r = express.Router();
   const mw = makeMiddleware(db);
+  const handle = (fn) => async (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    try { res.json(await fn(req, req.user.id)); }
+    catch (error) {
+      if (error.kind === 'cancelled' || error.code === 'turn_cancelled') {
+        return res.status(409).json({ error: '本轮已停止', code: 'turn_cancelled' });
+      }
+      if (error instanceof AiError) {
+        const status = error.kind === 'timeout' ? 504 : 502;
+        return res.status(status).json({ error: error.message });
+      }
+      if (Number.isInteger(error.status) && error.status >= 400 && error.status <= 503) {
+        return res.status(error.status).json({ error: error.message });
+      }
+      next(error);
+    }
+  };
+  const requireJson = (req, res, next) => {
+    if (!req.is('application/json')) return res.status(415).json({ error: '请发送 JSON 请求' });
+    next();
+  };
 
-  r.post('/zoowy/chat', mw.requireUser, async (req, res, next) => {
-    try {
-      if (!process.env.AI_API_KEY) return res.status(503).json({ error: 'AI 未配置，zoowy 不可用' });
-      const b = req.body || {};
-      const message = String(b.message || '').trim();
-      if (!message || message.length > 2000) return res.status(400).json({ error: '消息需为 1–2000 字' });
-      const out = await runChat({
-        db, userId: req.user.id, message,
-        bigGoalId: b.big_goal_id ? Number(b.big_goal_id) : null,
-      });
-      res.json(out);
-    } catch (e) { next(e); }
-  });
+  r.post('/zoowy/chat', mw.requireUser, requireJson, handle(async (req, userId) => {
+    const b = req.body || {};
+    const message = typeof b.message === 'string' ? b.message.trim() : '';
+    const requestId = typeof b.requestId === 'string' ? b.requestId : '';
+    if (!validRequestId(requestId)) throw Object.assign(new Error('缺少有效的消息编号'), { status: 400 });
+    if (!message || message.length > 2000 || !message.isWellFormed() || message.includes('\0')) {
+      throw Object.assign(new Error('请输入 1–2000 字消息'), { status: 400 });
+    }
+    if (!ai.aiAvailable()) throw Object.assign(new Error('AI 未配置，zoowy 不可用'), { status: 503 });
+    const bigGoalId = b.big_goal_id ?? null;
+    if (bigGoalId !== null && (!Number.isInteger(bigGoalId) || bigGoalId < 1 || bigGoalId > 2147483647)) {
+      throw Object.assign(new Error('大目标编号无效'), { status: 400 });
+    }
+    return runChat({ db, userId, message, requestId, bigGoalId });
+  }));
 
-  r.get('/zoowy/messages', mw.requireUser, async (req, res, next) => {
-    try {
-      const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 40));
-      const { session, messages } = await recentMessages(db, req.user.id, limit);
-      res.json({
-        sessionId: session.id,
-        messages: messages.map((m) => ({
+  r.get('/zoowy/messages', mw.requireUser, handle(async (req, userId) => {
+    const limit = Math.trunc(Math.max(1, Math.min(100, Number(req.query.limit) || 40)));
+    const { session, messages } = await recentMessages(db, userId, limit);
+    const drafts = new Map();
+    return {
+      sessionId: session.id,
+      messages: await Promise.all(messages.map(async (m) => {
+        let meta;
+        try { meta = JSON.parse(m.meta); } catch (_) { meta = {}; }
+        const cards = Array.isArray(meta?.cards) ? meta.cards : [];
+        return {
           role: m.role,
           content: m.content,
-          tools: m.meta ? (safeParse(m.meta).tools || null) : null,
+          tools: meta?.tools || null,
+          profileChanges: meta?.profileChanges || null,
+          failed: meta?.failed || null,
           createdAt: m.created_at,
-        })),
-      });
-    } catch (e) { next(e); }
-  });
+          cards: await Promise.all(cards.map(async (card) => {
+            if (card?.type !== 'plan_draft' || !card.draft?.id) return card;
+            const id = card.draft.id;
+            if (!drafts.has(id)) drafts.set(id, getDraft(db, userId, id));
+            const live = await drafts.get(id);
+            return live?.revision === card.draft.revision ? { ...card, draft: live } : card;
+          })),
+        };
+      })),
+    };
+  }));
+
+  r.post('/zoowy/turns/:requestId/cancel', mw.requireUser, requireJson, handle(async (req, userId) => ({
+    cancelled: await cancelTurn(db, userId, req.params.requestId),
+  })));
+
+  r.post('/zoowy/offers/:id/accept', mw.requireUser, requireJson, handle(async (req, userId) => ({
+    card: await acceptOffer(db, userId, Number(req.params.id), req.body?.requestId),
+  })));
+
+  r.post('/zoowy/drafts/:id/confirm', mw.requireUser, requireJson, handle(async (req, userId) => ({
+    card: await confirmChatDraft(db, userId, Number(req.params.id), req.body?.revision),
+  })));
 
   return r;
 };
-
-function safeParse(s) {
-  try { return JSON.parse(s); } catch (e) { return {}; }
-}

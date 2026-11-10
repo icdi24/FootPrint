@@ -40,18 +40,30 @@ fun Modifier.pixelBorder(
     color: Color = PixelColors.Outline,
 ): Modifier = border(width, color)
 
-/** 一块像素面板：羊皮纸卡片 + 2px 描边 + 硬投影 */
+/** 一块像素面板：羊皮纸卡片 + 2px 描边 + 硬投影 + 四角金铆钉（对齐 Web 木质皮肤） */
 @Composable
 fun PixelPanel(
     modifier: Modifier = Modifier,
     background: Color = PixelColors.Card,
-    borderColor: Color = PixelColors.Outline,
+    borderColor: Color = PixelColors.WoodDark,
+    rivets: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     Box(
         modifier = modifier
-            .pixelHardShadow(3.dp, PixelColors.Outline)
+            .pixelHardShadow(3.dp, PixelColors.WoodDark)
             .background(background)
+            .drawBehind {
+                if (rivets) {
+                    val s = 6.dp.toPx()
+                    val pad = 5.dp.toPx()
+                    val gold = PixelColors.Gold
+                    drawRect(gold, Offset(pad, pad), Size(s, s))
+                    drawRect(gold, Offset(size.width - pad - s, pad), Size(s, s))
+                    drawRect(gold, Offset(pad, size.height - pad - s), Size(s, s))
+                    drawRect(gold, Offset(size.width - pad - s, size.height - pad - s), Size(s, s))
+                }
+            }
             .pixelBorder(2.dp, borderColor)
     ) {
         content()
@@ -66,7 +78,7 @@ fun Modifier.parchmentGround(): Modifier = drawBehind {
     drawRect(PixelColors.Bg)
     val step = 9.dp.toPx()
     val r = 1.dp.toPx()
-    val dot = Color(0x143B2E22) // 很淡的深棕
+    val dot = Color(0x146B452C) // 很淡的深木棕（木质皮肤：点阵纹理随描边一起暖化）
     var y = 0f
     while (y < size.height) {
         var x = 0f

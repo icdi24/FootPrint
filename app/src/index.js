@@ -1,4 +1,5 @@
 // 脚印 V0.1 · 单进程 Web 服务入口。一条命令启动：npm start
+const http = require('http');
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -62,7 +63,10 @@ async function main() {
   app.use('/api', diariesRoutes(db));
   app.use('/api', zoowyRoutes(db));
   app.use('/api', require('./routes/pair')(db));
+  app.use('/api', require('./routes/chat')(db));
+  app.use('/api', require('./routes/hall')(db));
   app.use('/api', require('./routes/admin')(db));
+  app.use('/api', require('./routes/status')(db));
 
   // AI 日报定时（P2-#12）：每晚 23:30 两人各一份；幂等，服务重启当天会补跑
   scheduleDaily(db, async () => db.all('SELECT id FROM users'));
@@ -72,8 +76,16 @@ async function main() {
     res.json({ ok: true });
   });
 
-  // 静态前端（本地演示关闭缓存，避免改了页面还看到旧文件）
-  app.use(express.static(PUBLIC_DIR, { maxAge: String(process.env.LOCAL_NO_LOGIN || '') === '1' ? 0 : '1h' }));
+  // 静态前端：HTML/JS/CSS 用 no-cache（每次带 ETag 重新验证），避免部署后拿到旧文件
+  app.use(express.static(PUBLIC_DIR, {
+    setHeaders(res, filePath) {
+      if (/\.(html|js|css)$/i.test(filePath)) {
+        res.setHeader('Cache-Control', 'public, no-cache');
+      } else {
+        res.setHeader('Cache-Control', 'public, max-age=1h');
+      }
+    },
+  }));
 
   /* ── 同一个地址，按设备分流 ────────────────────────────────
      桌面浏览器 → public/web/（桌面工作台）
@@ -82,31 +94,23 @@ async function main() {
      ──────────────────────────────────────────────────────── */
   function isMobileUA(ua) {
     const s = String(ua || '');
-    // 手机和平板：常见的移动端关键字；iPad 用 Macintosh + 触屏判断交给前端，这里按 UA 兜底
     return /Android|iPhone|iPod|iPad|Windows Phone|Mobile|harmonyos|OpenHarmony/i.test(s);
   }
 
   function pickIndex(req) {
-    // 允许用查询参数强制覆盖，调试方便
     const force = String(req.query.site || '').toLowerCase();
     if (force === 'mobile' || force === 'desktop') return force;
-
-    // URL 路径显式带了 /web/ 的，走桌面版
     if (req.path === '/web' || req.path.startsWith('/web/')) return 'desktop';
-
     return isMobileUA(req.headers['user-agent']) ? 'mobile' : 'desktop';
   }
 
-  // 根路径分流：只有访问站点根时才判断，其他静态资源照常走
+  // 根路径分流：桌面走 web/，手机走手机端 index.html
   app.get('/', (req, res, next) => {
-    const target = pickIndex(req);
-    if (target === 'desktop') {
+    if (pickIndex(req) === 'desktop') {
       const desktop = path.join(PUBLIC_DIR, 'web', 'index.html');
       if (fs.existsSync(desktop)) return res.sendFile(desktop);
-      // 桌面版还没部署时，退回手机端，避免白屏
-      return next();
     }
-    next();  // mobile：交给下面的静态与 SPA 兜底
+    next();
   });
 
   // SPA 兜底
@@ -134,7 +138,9 @@ async function main() {
     if (!res.headersSent) res.status(500).json({ error: '服务器开小差了' });
   });
 
-  app.listen(PORT, () => {
+  const server = http.createServer(app);
+  require('./ws').initWs(server, db);
+  server.listen(PORT, process.env.HOST || undefined, () => {
     console.log('');
     console.log('  🐾 脚印 V0.1 已启动');
     console.log(`  ➜ 本机访问  http://localhost:${PORT}`);

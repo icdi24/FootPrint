@@ -1,6 +1,8 @@
 package me.footprint.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,16 +44,54 @@ import android.widget.Toast
  * 打卡 / 积分 / 愿望单那些继续用 Web 版，App 里不做（文档 16.10）。
  */
 
-// ==================== 登录页 ====================
+// ==================== 认证页（登录 + 注册，访客可随时返回） ====================
+
+private val AVATARS = listOf("🐱", "🐻", "🐰", "🦊", "🐶", "🐼", "🐨", "🦁")
+
+/** 访客空状态：提示该功能需要登录，附「登录 / 注册」按钮（点击跳认证页） */
+@Composable
+fun GuestEmpty(
+    vm: AppViewModel,
+    emoji: String,
+    title: String,
+    sub: String,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 72.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(emoji, style = PixelType.Huge)
+        Spacer(Modifier.height(16.dp))
+        Text(title, style = PixelType.Title, color = PixelColors.Ink, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(8.dp))
+        Text(sub, style = PixelType.Small, color = PixelColors.Ink2, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(24.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            PixelButton(text = "登录", onClick = { vm.showAuth("login") })
+            PixelSmallButton(text = "注册", onClick = { vm.showAuth("register") }, filled = false)
+        }
+    }
+}
 
 @Composable
-fun LoginScreen(vm: AppViewModel) {
+fun AuthScreen(vm: AppViewModel) {
+    val authMode by vm.authMode.collectAsStateWithLifecycle()
+    val isRegister = authMode == "register"
     val login by vm.login.collectAsStateWithLifecycle()
+    val reg by vm.register.collectAsStateWithLifecycle()
 
-    // 口令只放在本地 state 里，不塞进 ViewModel 长期持有
-    var password: String by rememberSaveable { mutableStateOf("") }
+    // 密码/确认密码只放本地 state，不塞进 ViewModel
+    var password by rememberSaveable { mutableStateOf("") }
+    var password2 by rememberSaveable { mutableStateOf("") }
+    var confirmError by rememberSaveable { mutableStateOf<String?>(null) }
 
-    // 登录失败时把错误清掉的简单做法：用户一改动就重置
+    val username = if (isRegister) reg.username else login.username
+    val busy = if (isRegister) reg.busy else login.busy
+    val error = if (isRegister) reg.error else login.error
+
     Screen {
         Column(
             modifier = Modifier
@@ -59,9 +99,8 @@ fun LoginScreen(vm: AppViewModel) {
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Spacer(Modifier.height(40.dp))
+            Spacer(Modifier.height(32.dp))
 
-            // logo：绿底像素面板里放一个爪印
             PixelPanel(background = PixelColors.Green) {
                 Text(
                     text = "🐾",
@@ -69,38 +108,70 @@ fun LoginScreen(vm: AppViewModel) {
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
                 )
             }
-
             Spacer(Modifier.height(20.dp))
             Text("脚 印", style = PixelType.Huge, color = PixelColors.Ink)
             Spacer(Modifier.height(8.dp))
-            Text("只给你们两个人看的手机时长", style = PixelType.Small, color = PixelColors.Ink2)
+            Text(if (isRegister) "注册后即可开始打卡" else "只给你们两个人看的手机时长", style = PixelType.Small, color = PixelColors.Ink2)
 
             Spacer(Modifier.height(32.dp))
 
-            Text("昵称", style = PixelType.Small, color = PixelColors.Ink2, modifier = Modifier.fillMaxWidth())
+            Text("用户名", style = PixelType.Small, color = PixelColors.Ink2, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(6.dp))
             PixelTextField(
-                value = login.nickname,
-                onValueChange = vm::onNicknameChange,
-                placeholder = "比如：栗子",
+                value = username,
+                onValueChange = if (isRegister) vm::onRegisterUsernameChange else vm::onUsernameChange,
+                placeholder = if (isRegister) "2–30 字，登录用" else "比如：栗子",
                 modifier = Modifier.fillMaxWidth(),
             )
 
             Spacer(Modifier.height(16.dp))
-
-            Text("口令", style = PixelType.Small, color = PixelColors.Ink2, modifier = Modifier.fillMaxWidth())
+            Text("密码", style = PixelType.Small, color = PixelColors.Ink2, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(6.dp))
             PixelTextField(
                 value = password,
                 onValueChange = { password = it },
-                placeholder = "和网页版一样",
+                placeholder = if (isRegister) "至少 8 位" else "和网页版一样",
                 modifier = Modifier.fillMaxWidth(),
                 isPassword = true,
             )
 
+            if (isRegister) {
+                Spacer(Modifier.height(16.dp))
+                Text("再输一遍", style = PixelType.Small, color = PixelColors.Ink2, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(6.dp))
+                PixelTextField(
+                    value = password2,
+                    onValueChange = { password2 = it },
+                    placeholder = "确认密码",
+                    modifier = Modifier.fillMaxWidth(),
+                    isPassword = true,
+                )
+
+                Spacer(Modifier.height(16.dp))
+                Text("选个头像", style = PixelType.Small, color = PixelColors.Ink2, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    for (a in AVATARS) {
+                        Box(
+                            modifier = Modifier
+                                .background(if (reg.avatar == a) PixelColors.GreenSoft else PixelColors.Card)
+                                .pixelBorder(2.dp, if (reg.avatar == a) PixelColors.Green else PixelColors.Outline)
+                                .clickable { vm.onRegisterAvatarChange(a) }
+                                .padding(6.dp),
+                        ) {
+                            Text(a, style = PixelType.Title)
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.height(12.dp))
 
-            val error = login.error
             if (error != null) {
                 Text(
                     text = error,
@@ -109,22 +180,58 @@ fun LoginScreen(vm: AppViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
+            } else if (confirmError != null) {
+                Text(
+                    text = confirmError!!,
+                    style = PixelType.Small,
+                    color = PixelColors.RedDeep,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
             }
 
             PixelButton(
-                text = if (login.busy) "登录中…" else "登 录",
-                onClick = { vm.login(login.nickname, password) },
+                text = if (busy) "稍候…" else if (isRegister) "注册" else "登 录",
+                onClick = {
+                    confirmError = null
+                    if (isRegister) {
+                        if (password != password2) {
+                            confirmError = "两次密码不一样"
+                        } else {
+                            vm.register(username, password, reg.avatar)
+                        }
+                    } else {
+                        vm.login(username, password)
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !login.busy,
+                enabled = !busy,
             )
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(16.dp))
+
+            // 登录 / 注册切换
             Text(
-                text = "用网页版同一套账号登录。\n时长只在你和 ta 之间可见。",
+                text = if (isRegister) "已有账号？去登录" else "还没有账号？注册",
                 style = PixelType.Small,
-                color = PixelColors.Ink3,
-                textAlign = TextAlign.Center,
+                color = PixelColors.GreenDeep,
+                modifier = Modifier
+                    .clickable { vm.showAuth(if (isRegister) "login" else "register") }
+                    .padding(8.dp),
             )
+
+            Spacer(Modifier.height(8.dp))
+
+            // 访客返回逛逛
+            Text(
+                text = "← 返回逛逛",
+                style = PixelType.Small,
+                color = PixelColors.Ink2,
+                modifier = Modifier
+                    .clickable { vm.closeAuth() }
+                    .padding(8.dp),
+            )
+
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -134,6 +241,7 @@ fun LoginScreen(vm: AppViewModel) {
 
 @Composable
 fun HomeScreen(vm: AppViewModel, onOpenUsageSettings: () -> Unit) {
+    val loggedIn by vm.loggedIn.collectAsStateWithLifecycle()
     val granted by vm.granted.collectAsStateWithLifecycle()
     val mine by vm.mine.collectAsStateWithLifecycle()
     val partner by vm.partner.collectAsStateWithLifecycle()
@@ -145,6 +253,16 @@ fun HomeScreen(vm: AppViewModel, onOpenUsageSettings: () -> Unit) {
     val toast by vm.toast.collectAsStateWithLifecycle()
     val myName by vm.myName.collectAsStateWithLifecycle()
     val pendingCount = (home?.todos ?: emptyList<Todo>()).count { it.dueToday && it.checked == null }
+
+    if (!loggedIn) {
+        GuestEmpty(
+            vm = vm,
+            emoji = "🐾",
+            title = "欢迎来脚印",
+            sub = "两个人互相看得见的打卡与目标。逛逛没问题，用起来得先登录～",
+        )
+        return
+    }
 
     val context = LocalContext.current
     // 一次性提示：显示完立刻清掉，避免重组时反复弹
@@ -169,7 +287,7 @@ fun HomeScreen(vm: AppViewModel, onOpenUsageSettings: () -> Unit) {
             ) {
                 Column {
                     Text(
-                        text = greetingText() + "，" + (home?.me?.nickname ?: myName.ifBlank { "你好" }) + " " + (home?.me?.avatar ?: ""),
+                        text = greetingText() + "，" + (home?.me?.username ?: myName.ifBlank { "你好" }) + " " + (home?.me?.avatar ?: ""),
                         style = PixelType.Big,
                         color = PixelColors.Ink,
                     )
@@ -261,7 +379,7 @@ fun HomeScreen(vm: AppViewModel, onOpenUsageSettings: () -> Unit) {
 
             // ---- ta ----
             PartnerCard(
-                nickname = partner?.partner?.nickname ?: "ta",
+                username = partner?.partner?.username ?: "ta",
                 totalSeconds = partner?.totalSeconds ?: 0L,
                 apps = partner?.apps ?: emptyList(),
                 lastReportAt = partner?.lastReportAt,
@@ -472,7 +590,7 @@ private fun MyUsageCard(
 
 @Composable
 private fun PartnerCard(
-    nickname: String,
+    username: String,
     totalSeconds: Long,
     apps: List<AppUsage>,
     lastReportAt: String?,
@@ -480,7 +598,7 @@ private fun PartnerCard(
 ) {
     PixelPanel(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("$nickname · 今天", style = PixelType.Title, color = PixelColors.Ink)
+            Text("$username · 今天", style = PixelType.Title, color = PixelColors.Ink)
             Spacer(Modifier.height(8.dp))
 
             if (!hasPartner) {

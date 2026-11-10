@@ -6,6 +6,7 @@
 //  4. 每个工作流只拿到白名单内的工具（WHITELIST）
 const { nowIso, todayStr, addDaysStr } = require('../tz');
 const { getPoints } = require('../points');
+const { recordChange } = require('../profileChanges');
 
 // ---------- 小工具 ----------
 function clampInt(v, min, max, dft) {
@@ -36,43 +37,84 @@ async function snapshotPlan(db, bigGoalId, source, reason) {
   );
 }
 
-// 画像快照 + 块级补丁（1.7）：add/update/delete 必带 reason；delete 只标失效不物理删
-async function applyProfilePatch(db, userId, patches, source) {
+// 画像快照 + 块级补丁（1.7）：add/update/delete 必带 reason；delete 只标失效不物理删。
+// 服务端裁决（不盲信模型）：内容没变就跳过；只有真的产生变更才写版本快照 + 变更留痕。
+// 返回 { applied, changes, summary, reported, changeId, versionId }，供「改完告诉用户改了什么」。
+async function applyProfilePatch(db, userId, patches, source, meta = {}) {
   if (!Array.isArray(patches) || !patches.length) return fail('patches 需为非空数组');
   if (patches.length > 8) return fail('一次最多 8 条补丁');
   const results = [];
-  // apply 前存全量快照，可回滚
+  const changes = [];
   const current = await db.all(
     "SELECT block, content, source, status FROM user_profiles WHERE user_id = ? ORDER BY block", [userId]
   );
-  await db.run(
-    'INSERT INTO profile_versions (user_id, snapshot, changed_by, reason, created_at) VALUES (?, ?, ?, ?, ?)',
-    [userId, JSON.stringify(current), source || 'ai', `patch:${patches.length}`, nowIso()]
-  );
+  const before = new Map(current.map((r) => [r.block, r]));
+  let versionId = null;
+
+  // 懒写快照：只有第一条真实变更才落 profile_versions，避免「模型说要改、其实没变」的版本噪音
+  async function ensureVersion() {
+    if (versionId !== null) return versionId;
+    const info = await db.run(
+      'INSERT INTO profile_versions (user_id, snapshot, changed_by, reason, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id',
+      [userId, JSON.stringify(current), source || 'ai', `patch:${patches.length}`, nowIso()]
+    );
+    versionId = Number(info.id);
+    return versionId;
+  }
+
   for (const p of patches) {
     const block = String(p && p.block || '').trim();
     if (!/^[a-z][a-z0-9_]{0,31}$/.test(block)) { results.push({ block, skipped: '块名不合法' }); continue; }
     if (!p.reason || !String(p.reason).trim()) { results.push({ block, skipped: '缺 reason，拒绝执行' }); continue; }
+    const reason = String(p.reason).slice(0, 120);
+    const evidence = String(p.evidence || '').slice(0, 200);
+    const existing = before.get(block);
+
     if (p.op === 'delete') {
       const row = await db.get('SELECT id FROM user_profiles WHERE user_id = ? AND block = ?', [userId, block]);
       if (!row) { results.push({ block, skipped: '块不存在' }); continue; }
+      await ensureVersion();
       await db.run("UPDATE user_profiles SET status = 'void', updated_at = ? WHERE user_id = ? AND block = ?",
         [nowIso(), userId, block]);
       results.push({ block, op: 'delete', note: '已标失效（不物理删）' });
+      changes.push({ op: 'delete', block, reason, evidence, before: existing ? existing.content : '', after: '' });
       continue;
     }
     if (p.op !== 'add' && p.op !== 'update') { results.push({ block, skipped: 'op 需为 add/update/delete' }); continue; }
     const content = String(p.content || '').trim();
     if (!content) { results.push({ block, skipped: 'content 为空' }); continue; }
     if (content.length > 4000) { results.push({ block, skipped: '单块超过 4000 字' }); continue; }
+    // 模型说了不算：与现有 active 内容一致就不写、不记版本、不告诉用户
+    if (existing && existing.status === 'active' && existing.content === content) {
+      results.push({ block, skipped: '内容无变化，已跳过' });
+      continue;
+    }
+    await ensureVersion();
     await db.run(
       `INSERT INTO user_profiles (user_id, block, content, source, status, updated_at) VALUES (?, ?, ?, ?, 'active', ?)
        ON CONFLICT (user_id, block) DO UPDATE SET content = EXCLUDED.content, source = EXCLUDED.source, status = 'active', updated_at = EXCLUDED.updated_at`,
       [userId, block, content, source || 'ai', nowIso()]
     );
-    results.push({ block, op: p.op, note: p.reason ? String(p.reason).slice(0, 120) : '' });
+    const op = !existing || existing.status !== 'active' ? 'add' : 'update';
+    results.push({ block, op, note: reason });
+    changes.push({ op, block, reason, evidence, before: existing ? existing.content : '', after: content });
   }
-  return ok({ applied: results });
+
+  const out = { applied: results, changes };
+  if (!changes.length) {
+    out.summary = '';
+    out.note = '无实质变化，已跳过（未写库、未存快照、未记变更）';
+    return ok(out);
+  }
+  // 留痕无条件写；reportChanges 只决定推送 / 未读，不决定留不留痕
+  const rec = await recordChange(db, {
+    userId, workflow: meta.workflow || source || 'ai', changes, versionId,
+  });
+  out.summary = rec ? rec.summary : '';
+  out.reported = rec ? rec.reported : true;
+  out.changeId = rec ? rec.id : null;
+  out.versionId = versionId;
+  return ok(out);
 }
 
 // ---------- 工具实现 ----------
@@ -120,7 +162,7 @@ const IMPLEMENTATIONS = {
   },
 
   read_big_goal: {
-    desc: '读自己的某个大目标：描述、AI 进度、客观计数 done/total、链上全部小目标（含未启动的）',
+    desc: '读自己的某个大目标（需先由 list_big_goals 拿 id）：描述、AI 进度、客观计数 done/total、链上全部小目标（含未启动的）',
     readOnly: true,
     params: { type: 'object', properties: { id: { type: 'integer' } }, required: ['id'] },
     async run(ctx, args) {
@@ -133,6 +175,29 @@ const IMPLEMENTATIONS = {
       );
       const done = chain.filter((g) => g.status === 'achieved').length;
       return ok({ big_goal: bg, chain, done, total: chain.length });
+    },
+  },
+
+  list_big_goals: {
+    desc: '列出自己的全部大目标（id、标题、描述、AI 进度、客观 done/total、状态）。想读某个大目标详情或给它加小目标前，先用这个拿 id',
+    readOnly: true,
+    params: { type: 'object', properties: {}, required: [] },
+    async run(ctx) {
+      const rows = await ctx.db.all(
+        `SELECT b.id, b.title, b.emoji, b.description, b.progress, b.progress_note, b.status, b.created_at,
+                (SELECT COUNT(*) FROM goals g WHERE g.big_goal_id = b.id AND g.owner_id = ? AND g.status != 'archived') AS total,
+                (SELECT COUNT(*) FROM goals g WHERE g.big_goal_id = b.id AND g.owner_id = ? AND g.status = 'achieved') AS done
+         FROM big_goals b WHERE b.owner_id = ? AND b.status != 'archived'
+         ORDER BY b.id DESC LIMIT 50`,
+        [ctx.userId, ctx.userId, ctx.userId]
+      );
+      return ok({
+        bigGoals: rows.map((r) => ({
+          id: Number(r.id), title: r.title, emoji: r.emoji, description: r.description,
+          progress: Number(r.progress), progressNote: r.progress_note, status: r.status,
+          done: Number(r.done), total: Number(r.total), createdAt: r.created_at,
+        })),
+      });
     },
   },
 
@@ -198,6 +263,51 @@ const IMPLEMENTATIONS = {
   },
 
   // ===== 写 =====
+  create_big_goal: {
+    desc: '给自己创建一个大目标（长期方向，不能直接打卡）。用户明确要立目标时才用；建之前先用 list_big_goals 查是否已有同名的。幂等：同名且未归档的不重复建',
+    readOnly: false,
+    params: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: '大目标名称，1–40 字' },
+        description: { type: 'string', description: '描述 / 现状 / 重点，≤500 字' },
+        deadline: { type: 'string', description: '可选截止日期 YYYY-MM-DD；当前大目标没有独立截止字段，会写进描述末尾' },
+        emoji: { type: 'string' },
+      },
+      required: ['title'],
+    },
+    async run(ctx, args) {
+      const b = args || {};
+      const title = String(b.title || '').trim();
+      if (!title || title.length > 40) return fail('名称需为 1–40 字');
+      let desc = String(b.description || '').trim().slice(0, 500);
+      const deadline = String(b.deadline || '').trim();
+      if (deadline) {
+        if (!isValidDate(deadline)) return fail('deadline 需为 YYYY-MM-DD');
+        // 大目标表暂无独立截止列，把日期落到描述末尾，信息不丢
+        const tag = `【截止】${deadline}`;
+        if (!desc.includes(deadline)) {
+          desc = (desc ? desc.slice(0, Math.max(0, 500 - tag.length - 1)) + '\n' : '') + tag;
+        }
+      }
+      // 幂等：同名未归档的大目标不重复建（防 loop 里模型反复调用）
+      const dup = await ctx.db.get(
+        "SELECT id, title FROM big_goals WHERE owner_id = ? AND title = ? AND status != 'archived' LIMIT 1",
+        [ctx.userId, title]
+      );
+      if (dup) return ok({ big_goal_id: Number(dup.id), duplicate: true, note: '已存在同名大目标，未重复创建' });
+      const info = await ctx.db.run(
+        `INSERT INTO big_goals (owner_id, title, emoji, description, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+        [ctx.userId, title, String(b.emoji || '🏔️').slice(0, 8), desc, nowIso(), nowIso()]
+      );
+      return ok({
+        big_goal_id: Number(info.id), title, description: desc,
+        deadlineStoredInDescription: Boolean(deadline),
+      });
+    },
+  },
+
   create_plan_goal: {
     desc: '在大目标计划链上创建一个小目标（未启动状态，不会出现在首页）。幂等：同大目标下同名同日期不会重复建',
     readOnly: false,
@@ -365,7 +475,7 @@ const IMPLEMENTATIONS = {
       required: ['patches'],
     },
     async run(ctx, args) {
-      return applyProfilePatch(ctx.db, ctx.userId, args && args.patches, 'ai');
+      return applyProfilePatch(ctx.db, ctx.userId, args && args.patches, 'ai', { workflow: ctx.workflow });
     },
   },
 };
@@ -375,8 +485,9 @@ const WHITELIST = {
   plan: ['read_my_profile', 'read_big_goal', 'read_my_goals', 'create_plan_goal', 'shift_plan_dates'],
   progress: ['read_my_goals', 'read_big_goal', 'read_checkins', 'write_big_goal_progress', 'patch_my_profile'],
   daily: ['read_my_goals', 'read_big_goal', 'read_checkins', 'read_my_profile', 'read_my_usage', 'read_my_diaries', 'write_my_diary', 'patch_my_profile'],
-  // chat 保留调用能力，但同一套白名单机制：读全 + 排计划相关写；不给写日报/写进度（防伪造）
-  chat: ['read_my_profile', 'read_my_goals', 'read_big_goal', 'read_checkins', 'read_my_usage', 'read_my_diaries', 'create_plan_goal', 'shift_plan_dates', 'patch_my_profile'],
+  // chat 按授权来源分级（v2）：读工具 + 用户明确请求的单条直写；
+  // patch_my_profile 从 chat 收口成「提议 → 确认卡片 → applyProfilePatch」，只保留在 progress/daily 后台工作流。
+  chat: ['read_my_profile', 'read_my_goals', 'read_big_goal', 'list_big_goals', 'read_checkins', 'read_my_usage', 'read_my_diaries', 'create_big_goal', 'create_plan_goal', 'shift_plan_dates'],
 };
 
 // 工具名 → OpenAI tools 格式
@@ -397,7 +508,7 @@ async function executeTool(db, workflow, userId, name, args) {
     return fail(`无权调用「${name}」：不在 ${workflow} 工作流白名单内`);
   }
   try {
-    return await IMPLEMENTATIONS[name].run({ db, userId }, args || {});
+    return await IMPLEMENTATIONS[name].run({ db, userId, workflow }, args || {});
   } catch (e) {
     return fail(`工具执行出错：${e.message}`);
   }

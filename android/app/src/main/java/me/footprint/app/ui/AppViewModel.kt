@@ -10,9 +10,13 @@ import kotlinx.coroutines.launch
 import me.footprint.app.net.Api
 import me.footprint.app.net.ApiException
 import me.footprint.app.net.AppUsage
+import me.footprint.app.net.ChatMessage
+import me.footprint.app.net.ChatWebSocket
 import me.footprint.app.net.HomeResponse
+import me.footprint.app.net.HallState
 import me.footprint.app.net.PartnerResponse
 import me.footprint.app.net.Session
+import me.footprint.app.net.UserDto
 import me.footprint.app.usage.UsageAccess
 import me.footprint.app.usage.UsageCollector
 import me.footprint.app.usage.UsageReporter
@@ -29,7 +33,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ---------------- 登录 ----------------
 
     data class LoginState(
-        val nickname: String = "",
+        val username: String = "",
         val busy: Boolean = false,
         val error: String? = null,
     )
@@ -37,12 +41,38 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _login = MutableStateFlow(LoginState())
     val login: StateFlow<LoginState> = _login.asStateFlow()
 
+    // ---------------- 注册 ----------------
+
+    data class RegisterState(
+        val username: String = "",
+        val avatar: String = "🐱",
+        val busy: Boolean = false,
+        val error: String? = null,
+    )
+
+    private val _register = MutableStateFlow(RegisterState())
+    val register: StateFlow<RegisterState> = _register.asStateFlow()
+
+    // ---------------- 认证入口（访客点「登录/注册」跳转） ----------------
+
+    /** null = 不显示认证页；"login" / "register" = 显示对应认证页 */
+    private val _authMode = MutableStateFlow<String?>(null)
+    val authMode: StateFlow<String?> = _authMode.asStateFlow()
+
+    fun showAuth(mode: String) {
+        _authMode.value = mode
+    }
+
+    fun closeAuth() {
+        _authMode.value = null
+    }
+
     // ---------------- 会话 ----------------
 
     private val _loggedIn = MutableStateFlow(Session.isLoggedIn(app))
     val loggedIn: StateFlow<Boolean> = _loggedIn.asStateFlow()
 
-    private val _myName = MutableStateFlow(Session.nickname(app).orEmpty())
+    private val _myName = MutableStateFlow(Session.username(app).orEmpty())
     val myName: StateFlow<String> = _myName.asStateFlow()
 
     /** 使用情况访问权限：每次回到前台都要重新查（用户可能刚从系统设置回来） */
@@ -87,16 +117,275 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _toast.value = null
     }
 
-    // ---------------- 登录动作 ----------------
+    // ---------------- 搭子私聊 ----------------
 
-    fun onNicknameChange(v: String) {
-        _login.value = _login.value.copy(nickname = v, error = null)
+    private val _chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
+    val chatMessages: StateFlow<List<ChatMessage>> = _chatMessages.asStateFlow()
+
+    private val _chatUnread = MutableStateFlow(0)
+    val chatUnread: StateFlow<Int> = _chatUnread.asStateFlow()
+
+    private val _chatPartner = MutableStateFlow<UserDto?>(null)
+    val chatPartner: StateFlow<UserDto?> = _chatPartner.asStateFlow()
+
+    /** 聊天数据是否已加载过（ChatScreen 据此区分「加载中」与「真的没消息」） */
+    private val _chatLoaded = MutableStateFlow(false)
+    val chatLoaded: StateFlow<Boolean> = _chatLoaded.asStateFlow()
+
+    private var chatWs: ChatWebSocket? = null
+
+    private fun connectChatWs() {
+        val token = Session.token(getApplication()) ?: return
+        chatWs?.disconnect()
+        chatWs = ChatWebSocket(
+            onMessage = { m, unread ->
+                val list = _chatMessages.value
+                if (list.none { it.id == m.id }) {
+                    _chatMessages.value = list + m
+                }
+                // 未读数只在「发给搭档」的推送里带；同步自己其它端不带，不动红点
+                if (unread != null) {
+                    if (chatOpen) {
+                        // 聊天页正开着，直接标记已读，不亮红点
+                        val t = Session.token(getApplication())
+                        if (t != null) {
+                            viewModelScope.launch {
+                                try { Api.markChatRead(t, m.id) } catch (_: Exception) {}
+                            }
+                        }
+                    } else {
+                        _chatUnread.value = unread
+                    }
+                }
+            },
+            onAuthFailed = {
+                Session.clear(getApplication())
+                _loggedIn.value = false
+                _chatUnread.value = 0
+            },
+        )
+        chatWs?.connect(token)
     }
 
-    fun login(nickname: String, password: String) {
-        val name = nickname.trim()
+    private fun disconnectChatWs() {
+        chatWs?.disconnect()
+        chatWs = null
+    }
+
+    /** 拉取聊天历史 + 未读数（打开 ChatScreen 时 / 登录后调用） */
+    fun loadChat() {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                val r = Api.getChat(token)
+                _chatPartner.value = r.partner
+                _chatMessages.value = r.messages
+                _chatUnread.value = r.unread
+                _chatLoaded.value = true
+            } catch (e: Exception) {
+                // 失败不打断已有数据，静默
+            }
+        }
+    }
+
+    /** 发消息；成功回调 null，失败回调错误文案 */
+    fun sendChatMessage(content: String, onDone: (String?) -> Unit) {
+        val token = Session.token(getApplication()) ?: return
+        val text = content.trim()
+        if (text.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                val m = Api.sendChatMessage(token, text)
+                val list = _chatMessages.value
+                if (list.none { it.id == m.id }) {
+                    _chatMessages.value = list + m
+                }
+                onDone(null)
+            } catch (e: Exception) {
+                onDone(e.message ?: "发送失败")
+            }
+        }
+    }
+
+    /** 标记搭档发来的消息已读（打开 ChatScreen 后把红点清掉） */
+    fun markChatRead(upToId: Long?) {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                Api.markChatRead(token, upToId)
+            } catch (e: Exception) {
+                // 静默
+            } finally {
+                _chatUnread.value = 0
+            }
+        }
+    }
+
+    /** 本地直接清未读红点（无需等网络） */
+    fun clearChatUnread() {
+        _chatUnread.value = 0
+    }
+
+    /** 聊天页是否处于打开状态（打开时收到推送直接已读、不亮红点） */
+    private var chatOpen = false
+
+    fun setChatOpen(open: Boolean) {
+        chatOpen = open
+        if (open) _chatUnread.value = 0
+    }
+
+    // ---------------- 匹配大厅 ----------------
+
+    private val _hall = MutableStateFlow<HallState?>(null)
+    val hall: StateFlow<HallState?> = _hall.asStateFlow()
+
+    /** 拉取大厅全部状态（我的发布 + 收/发邀请 + 列表） */
+    fun loadHall() {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                _hall.value = Api.getHall(token)
+            } catch (e: Exception) {
+                // 静默：大厅拿不到数据就保持旧状态
+            }
+        }
+    }
+
+    fun publishHall(note: String, onDone: (String?) -> Unit) {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                Api.publishHall(token, note)
+                _hall.value = Api.getHall(token)
+                onDone(null)
+            } catch (e: Exception) {
+                onDone(e.message ?: "发布失败")
+            }
+        }
+    }
+
+    fun withdrawHall(onDone: (String?) -> Unit) {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                Api.withdrawHall(token)
+                _hall.value = Api.getHall(token)
+                onDone(null)
+            } catch (e: Exception) {
+                onDone(e.message ?: "撤回失败")
+            }
+        }
+    }
+
+    fun inviteHall(toUserId: Long, onDone: (String?) -> Unit) {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                Api.inviteHall(token, toUserId)
+                _hall.value = Api.getHall(token)
+                onDone(null)
+            } catch (e: Exception) {
+                onDone(e.message ?: "邀请失败")
+            }
+        }
+    }
+
+    /** 接受邀请并组队；成功后刷新首页/搭档数据 */
+    fun acceptHallInvite(id: Long, onDone: (String?) -> Unit) {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                Api.acceptHallInvite(token, id)
+                _hall.value = null
+                onDone(null)
+                refreshAll()
+            } catch (e: Exception) {
+                onDone(e.message ?: "接受失败")
+            }
+        }
+    }
+
+    fun declineHallInvite(id: Long, onDone: (String?) -> Unit) {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                Api.declineHallInvite(token, id)
+                _hall.value = Api.getHall(token)
+                onDone(null)
+            } catch (e: Exception) {
+                onDone(e.message ?: "操作失败")
+            }
+        }
+    }
+
+    fun cancelHallInvite(id: Long, onDone: (String?) -> Unit) {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                Api.cancelHallInvite(token, id)
+                _hall.value = Api.getHall(token)
+                onDone(null)
+            } catch (e: Exception) {
+                onDone(e.message ?: "操作失败")
+            }
+        }
+    }
+
+    init {
+        // 冷启动时若已登录（上次会话留存），也要把 WS 连上并拉一次未读
+        if (_loggedIn.value) {
+            connectChatWs()
+            loadChat()
+        }
+    }
+
+    // ---------------- 登录动作 ----------------
+
+    fun onUsernameChange(v: String) {
+        _login.value = _login.value.copy(username = v, error = null)
+    }
+
+    fun onRegisterUsernameChange(v: String) {
+        _register.value = _register.value.copy(username = v, error = null)
+    }
+
+    fun onRegisterAvatarChange(avatar: String) {
+        _register.value = _register.value.copy(avatar = avatar)
+    }
+
+    fun register(username: String, password: String, avatar: String) {
+        val name = username.trim()
         if (name.isEmpty() || password.isEmpty()) {
-            _login.value = _login.value.copy(error = "昵称和口令都要填")
+            _register.value = _register.value.copy(error = "用户名和密码都要填")
+            return
+        }
+        _register.value = _register.value.copy(busy = true, error = null)
+        viewModelScope.launch {
+            try {
+                val resp = Api.register(name, password, avatar) { token ->
+                    Session.saveToken(getApplication(), token)
+                    Session.saveUsername(getApplication(), name)
+                }
+                _myName.value = resp.user?.username ?: name
+                _loggedIn.value = true
+                _register.value = RegisterState()
+                _authMode.value = null
+                refreshAll()
+                connectChatWs()
+                loadChat()
+            } catch (e: Exception) {
+                _register.value = _register.value.copy(
+                    busy = false,
+                    error = e.message ?: "注册失败",
+                )
+            }
+        }
+    }
+
+    fun login(username: String, password: String) {
+        val name = username.trim()
+        if (name.isEmpty() || password.isEmpty()) {
+            _login.value = _login.value.copy(error = "用户名和密码都要填")
             return
         }
         _login.value = _login.value.copy(busy = true, error = null)
@@ -104,12 +393,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val resp = Api.login(name, password) { token ->
                     Session.saveToken(getApplication(), token)
-                    Session.saveNickname(getApplication(), name)
+                    Session.saveUsername(getApplication(), name)
                 }
-                _myName.value = resp.user?.nickname ?: name
+                _myName.value = resp.user?.username ?: name
                 _loggedIn.value = true
                 _login.value = _login.value.copy(busy = false, error = null)
+                _authMode.value = null
                 refreshAll()
+                connectChatWs()
+                loadChat()
             } catch (e: Exception) {
                 _login.value = _login.value.copy(
                     busy = false,
@@ -121,12 +413,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun logout() {
         Session.clear(getApplication())
+        disconnectChatWs()
         _loggedIn.value = false
         _myName.value = ""
         _mine.value = null
         _partner.value = null
         _syncNote.value = null
         _login.value = LoginState()
+        _register.value = RegisterState()
+        _authMode.value = null
+        _chatMessages.value = emptyList()
+        _chatUnread.value = 0
+        _chatPartner.value = null
+        _chatLoaded.value = false
+        _hall.value = null
     }
 
     // ---------------- 刷新 / 上报 ----------------

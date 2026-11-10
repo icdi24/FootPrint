@@ -656,7 +656,7 @@ module.exports = function goalsRoutes(db) {
   r.get('/verifications/pending', mw.requireUser, async (req, res, next) => {
     try {
       const rows = await db.all(
-        `SELECT v.*, g.title AS goal_title, g.emoji AS goal_emoji, g.total_points, u.nickname AS submitter_nickname, u.avatar AS submitter_avatar
+        `SELECT v.*, g.title AS goal_title, g.emoji AS goal_emoji, g.total_points, u.nickname AS submitter_username, u.avatar AS submitter_avatar
          FROM verifications v
          JOIN goals g ON g.id = v.goal_id
          JOIN users u ON u.id = v.submitter_id
@@ -674,7 +674,7 @@ module.exports = function goalsRoutes(db) {
       const v = await db.get(
         `SELECT v.*, g.title AS goal_title, g.emoji AS goal_emoji, g.description AS goal_desc,
                 g.accept_criteria, g.total_points, g.end_date,
-                u.nickname AS submitter_nickname, u.avatar AS submitter_avatar
+                u.nickname AS submitter_username, u.avatar AS submitter_avatar
          FROM verifications v JOIN goals g ON g.id = v.goal_id JOIN users u ON u.id = v.submitter_id
          WHERE v.id = ?`,
         [Number(req.params.id) || 0]
@@ -704,7 +704,7 @@ module.exports = function goalsRoutes(db) {
           title: v.goal_title, emoji: v.goal_emoji, description: v.goal_desc,
           acceptCriteria: v.accept_criteria, totalPoints: Number(v.total_points) || 0, endDate: v.end_date,
         },
-        submitter: { nickname: v.submitter_nickname, avatar: v.submitter_avatar },
+        submitter: { nickname: v.submitter_username, avatar: v.submitter_avatar },
         history,
       });
     } catch (e) { next(e); }
@@ -787,3 +787,34 @@ module.exports = function goalsRoutes(db) {
 
   return r;
 };
+
+// ===== 供 planning 草案链路复用：从创建逻辑抽出的公共函数（zoowy v2）=====
+async function createGoal(db, ownerId, b, cfg) {
+  const status = b.active === false ? 'draft' : 'active';
+  const type = b.type === 'stage' ? 'stage' : 'daily';
+  const difficulty = Number(b.difficulty) || 3;
+  const estTotalMin = type === 'stage' ? (Number(b.est_total_min) || 600) : null;
+  const customPoints = (b.custom_points !== undefined && b.custom_points !== null && b.custom_points !== '')
+    ? Number(b.custom_points) : null;
+  const autoTotal = type === 'stage'
+    ? Math.min(Math.round(estTotalMin * cfg.unit * (cfg.difficulty[difficulty] || 1.5)), 1200)
+    : null;
+  const totalPoints = type === 'stage' ? (customPoints != null ? customPoints : autoTotal) : null;
+  const info = await db.run(
+    `INSERT INTO goals (owner_id, type, title, emoji, description, freq_mode, freq_n, weekdays,
+      window_start, window_end, duration_min, difficulty, start_date, end_date, status,
+      est_total_min, accept_criteria, total_points, custom_points, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    [ownerId, type, b.title.trim(), b.emoji || '🎯', String(b.description || '').trim(),
+      type === 'stage' ? 'daily' : (b.freq_mode || 'daily'), Number(b.freq_n) || 1,
+      b.freq_mode === 'weekdays' ? String(b.weekdays) : '',
+      type === 'stage' ? null : (b.window_start || null), type === 'stage' ? null : (b.window_end || null),
+      Number(b.duration_min) || 30, difficulty, b.start_date || todayStr(), b.end_date || null, status,
+      estTotalMin, type === 'stage' ? String(b.accept_criteria || '').trim() : null,
+      totalPoints, customPoints, nowIso(), nowIso()]
+  );
+  return Number(info.id);
+}
+
+module.exports.createGoal = createGoal;
+module.exports.validateGoalBody = validateGoalBody;

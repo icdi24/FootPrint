@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -20,8 +21,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.footprint.app.ui.theme.PixelColors
 import me.footprint.app.ui.theme.PixelType
 
@@ -45,6 +48,7 @@ fun MainScaffold(
     onOpenUsageSettings: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableStateOf(MainTab.Home) }
+    val chatUnread by vm.chatUnread.collectAsStateWithLifecycle()
 
     Box(modifier = Modifier.fillMaxSize().background(PixelColors.Bg)) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -57,17 +61,18 @@ fun MainScaffold(
                     MainTab.Me -> MeScreen(vm = vm)
                 }
             }
-            BottomTabBar(current = tab, onSelect = { tab = it })
+            BottomTabBar(current = tab, onSelect = { tab = it }, chatUnread = chatUnread)
         }
     }
 }
 
 @Composable
-private fun BottomTabBar(current: MainTab, onSelect: (MainTab) -> Unit) {
+private fun BottomTabBar(current: MainTab, onSelect: (MainTab) -> Unit, chatUnread: Int) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(PixelColors.Card)
+            .background(PixelColors.WoodLight)
+            .woodGrain()
             .pixelBorderTop(),
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
@@ -84,18 +89,42 @@ private fun BottomTabBar(current: MainTab, onSelect: (MainTab) -> Unit) {
                     .padding(vertical = 10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                // 激活态：绿色小方块指示（像素风，不用圆点）
+                // 激活态：绿色滑块 + 金边（对齐 Web 木质皮肤的 tab-slider）
                 Box(
                     modifier = Modifier
                         .height(6.dp)
                         .fillMaxWidth(0.4f)
-                        .background(if (selected) PixelColors.Green else PixelColors.Card),
+                        .then(
+                            if (selected) Modifier
+                                .background(PixelColors.Green)
+                                .pixelBorder(2.dp, PixelColors.Gold)
+                            else Modifier.background(PixelColors.WoodLight)
+                        ),
                 )
-                androidx.compose.material3.Text(
-                    text = t.icon,
-                    style = PixelType.Body,
-                    color = if (selected) PixelColors.GreenDeep else PixelColors.Ink2,
-                )
+                // 图标 + 未读红点角标（「我们」tab 的搭子私聊未读）
+                Box {
+                    androidx.compose.material3.Text(
+                        text = t.icon,
+                        style = PixelType.Body,
+                        color = if (selected) PixelColors.GreenDeep else PixelColors.Ink2,
+                    )
+                    if (t == MainTab.Partner && chatUnread > 0) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .offset(x = 8.dp, y = (-4).dp)
+                                .background(PixelColors.Red)
+                                .pixelBorder(2.dp, PixelColors.Outline)
+                                .padding(horizontal = 3.dp, vertical = 1.dp),
+                        ) {
+                            androidx.compose.material3.Text(
+                                text = if (chatUnread > 99) "99+" else chatUnread.toString(),
+                                style = PixelType.Small,
+                                color = PixelColors.White,
+                            )
+                        }
+                    }
+                }
                 androidx.compose.material3.Text(
                     text = t.label,
                     style = PixelType.Small,
@@ -106,12 +135,33 @@ private fun BottomTabBar(current: MainTab, onSelect: (MainTab) -> Unit) {
     }
 }
 
-/** 底部 Tab 顶部一条 2px 深棕描边（像素风的分隔） */
+/** 底部 Tab 顶部一条 3px 深木描边（对齐 Web 木质皮肤 tabbar border-top） */
 private fun Modifier.pixelBorderTop(): Modifier = this.then(
     Modifier.drawBehind {
         drawRect(
-            color = PixelColors.Outline,
-            size = Size(size.width, 2.dp.toPx()),
+            color = PixelColors.WoodDark,
+            size = Size(size.width, 3.dp.toPx()),
+        )
+    }
+)
+
+/** 木纹：横向细纹 + 顶部奶油高光（对齐 Web tabbar 的 repeating-linear-gradient） */
+private fun Modifier.woodGrain(): Modifier = this.then(
+    Modifier.drawBehind {
+        val dark = PixelColors.WoodDark.copy(alpha = 0.10f)
+        var y = 2.dp.toPx()
+        while (y < size.height) {
+            drawRect(
+                color = dark,
+                topLeft = Offset(0f, y),
+                size = Size(size.width, 2.dp.toPx()),
+            )
+            y += 8.dp.toPx()
+        }
+        // 顶部奶油高光
+        drawRect(
+            color = PixelColors.White.copy(alpha = 0.55f),
+            size = Size(size.width, 3.dp.toPx()),
         )
     }
 )

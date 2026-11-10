@@ -97,7 +97,7 @@ fun PixelSmallButton(
     }
 }
 
-/** 像素输入框：2px 描边、无圆角；占位符用弱化色，口令走 PasswordVisualTransformation */
+/** 像素输入框：2px 描边、无圆角；占位符用弱化色，密码走 PasswordVisualTransformation */
 @Composable
 fun PixelTextField(
     value: String,

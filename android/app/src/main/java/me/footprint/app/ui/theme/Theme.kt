@@ -13,7 +13,7 @@ import androidx.compose.ui.unit.sp
 import me.footprint.app.R
 
 /**
- * 像素风配色，取自 DESIGN.md 的令牌表。
+ * 像素风配色 · 星露谷木质皮肤（对齐 Web 版 app.css 的「木质像素皮肤」增量层）。
  *
  * 字体：Fusion Pixel 12px（与 Web 版同一套字体，woff2 转 ttf 打进 res/font）。
  * zh_hans 子集已包含全部拉丁字符，所以只需两个字重文件。
@@ -22,16 +22,16 @@ val PixelFont: FontFamily = FontFamily(Font(R.font.fusion_pixel_zh))
 val PixelFontMono: FontFamily = FontFamily(Font(R.font.fusion_pixel_mono_zh))
 
 object PixelColors {
-    val Bg = Color(0xFFFAF3E3)          // 羊皮纸地面
-    val Bg2 = Color(0xFFF3E9D2)         // 次级面板
-    val Card = Color(0xFFFFFDF6)        // 卡片
+    val Bg = Color(0xFFF8EDD4)          // 暖羊皮纸地面（木质皮肤全局暖化）
+    val Bg2 = Color(0xFFF0E1C1)         // 次级面板
+    val Card = Color(0xFFFFFAEC)        // 卡片
     val Ink = Color(0xFF46382B)         // 正文深棕
     val Ink2 = Color(0xFF6E5C46)        // 次级文字
     val Ink3 = Color(0xFF7D6C56)        // 弱化文字（比 DESIGN 的 #8A7A62 略深，保住对比度）
-    val Line = Color(0xFFE9DFC7)
-    val LineStrong = Color(0xFFD8C9A6)
-    val Outline = Color(0xFF3B2E22)     // 2px 像素描边
-    val Green = Color(0xFF3F7C37)       // 主色
+    val Line = Color(0xFFE4D0A9)
+    val LineStrong = Color(0xFFC9A875)
+    val Outline = Color(0xFF6B452C)     // 2px 像素描边（木质皮肤：深木棕，替换旧深棕 #3B2E22）
+    val Green = Color(0xFF3F7C37)       // 主色（主按钮仍为绿色，Web 木质皮肤未改）
     val GreenDeep = Color(0xFF2E6228)
     val GreenSoft = Color(0xFFE2EFDA)
     val Orange = Color(0xFFE8953C)
@@ -39,8 +39,18 @@ object PixelColors {
     val OrangeSoft = Color(0xFFFBEDD5)
     val Red = Color(0xFFB44A40)
     val RedDeep = Color(0xFF93342B)
-    val Gold = Color(0xFFF2B84B)
+    val Gold = Color(0xFFF5C451)        // 星露谷金（金铆钉/金边）
     val White = Color(0xFFFFFFFF)
+
+    // ---- 星露谷木质令牌（--sv-*）----
+    val Wood = Color(0xFFB07D4E)        // 木色
+    val WoodMid = Color(0xFFA2703F)     // 木色中间调
+    val WoodDark = Color(0xFF6B452C)    // 深木色（面板/按钮边框）
+    val WoodDeep = Color(0xFF4E3220)    // 更深木色
+    val WoodLight = Color(0xFFE8C89A)   // 浅木色（导航栏木纹底）
+    val Paper = Color(0xFFFFF8E7)       // 纸面
+    val Berry = Color(0xFFD4675C)       // 浆果红（像素小花）
+    val Leaf = Color(0xFF5C9E47)        // 叶绿（像素小花/藤蔓）
 }
 
 /** 字号只用 12 的整数倍（12 / 24 / 36），全部用 Fusion Pixel 像素字体（与 Web 版同款） */

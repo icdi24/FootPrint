@@ -42,19 +42,20 @@ const UI = (() => {
       }
       requestAnimationFrame(() => wrap.classList.add('show'));
 
+      let closed = false;
       function close(result) {
+        if (closed) return;
+        closed = true;
         wrap.classList.remove('show');
-        setTimeout(() => wrap.remove(), 320);
+        setTimeout(() => {
+          wrap.remove();
+          // 关闭时回调（用于丢弃草稿等）；此前靠 transitionend 监听，
+          // 但 .sheet-wrap 自身无 transition，e.target 恒为子元素，回调从不触发。
+          if (opts.onClose) opts.onClose();
+        }, 320);
         resolve(result);
       }
       wrap.querySelector('.sheet-backdrop').addEventListener('click', () => close(null));
-      if (opts.onClose) {
-        // 关闭时回调（用于丢弃草稿）
-        const orig = opts.onClose;
-        wrap.addEventListener('transitionend', (e) => {
-          if (e.target === wrap && !wrap.classList.contains('show')) orig();
-        });
-      }
       wrap.querySelectorAll('.sheet-action').forEach((btn) => {
         btn.addEventListener('click', () => {
           const a = opts.actions[Number(btn.dataset.idx)];
@@ -171,49 +172,59 @@ const UI = (() => {
     return t.content.firstElementChild;
   }
 
-  function cloudLoading(text = '正在穿过云层... ☁️') {
+  // 访客空状态：提示该功能需要登录，附「登录 / 注册」按钮。
+  // opts: {emoji, title, sub, tagline}
+  function guestPrompt(opts = {}) {
+    const emoji = opts.emoji || '🐾';
+    const title = opts.title || '登录后才能使用这个功能';
+    const sub = opts.sub || '';
     return `
-      <div class="page-cloud-loader">
-        <div class="cloud-mini-stage">
-          <div class="cloud-mini-sun">
-            <svg viewBox="0 0 14 14" width="22" height="22" shape-rendering="crispEdges">
-              <rect x="5" y="0" width="4" height="2" fill="#EFA938"/>
-              <rect x="5" y="12" width="4" height="2" fill="#EFA938"/>
-              <rect x="0" y="5" width="2" height="4" fill="#EFA938"/>
-              <rect x="12" y="5" width="2" height="4" fill="#EFA938"/>
-              <rect x="3" y="3" width="8" height="8" fill="#F7CA44"/>
-              <rect x="4" y="4" width="6" height="6" fill="#FBE580"/>
-            </svg>
-          </div>
-          <div class="cloud-mini-body">
-            <svg viewBox="0 0 44 28" width="64" height="40" shape-rendering="crispEdges">
-              <rect x="10" y="4" width="24" height="2" fill="#281E19"/>
-              <rect x="6" y="6" width="6" height="2" fill="#281E19"/>
-              <rect x="32" y="6" width="6" height="2" fill="#281E19"/>
-              <rect x="4" y="8" width="4" height="2" fill="#281E19"/>
-              <rect x="36" y="8" width="4" height="2" fill="#281E19"/>
-              <rect x="2" y="10" width="4" height="12" fill="#281E19"/>
-              <rect x="38" y="10" width="4" height="12" fill="#281E19"/>
-              <rect x="4" y="22" width="36" height="2" fill="#281E19"/>
-              <rect x="6" y="8" width="32" height="14" fill="#FFFFFF"/>
-              <rect x="10" y="6" width="24" height="3" fill="#FFFFFF"/>
-              <rect x="4" y="11" width="36" height="10" fill="#FFFFFF"/>
-              <rect x="14" y="13" width="3" height="2" fill="#281E19"/>
-              <rect x="27" y="13" width="3" height="2" fill="#281E19"/>
-              <rect x="11" y="16" width="4" height="2" fill="#FFB0B0"/>
-              <rect x="29" y="16" width="4" height="2" fill="#FFB0B0"/>
-              <rect x="21" y="17" width="2" height="1" fill="#C46A62"/>
-            </svg>
-          </div>
-          <div class="cloud-mini-drops">
-            <span class="cmd-drop"></span>
-            <span class="cmd-drop"></span>
-            <span class="cmd-drop"></span>
-          </div>
+      <div class="guest-empty">
+        <div class="guest-emoji">${emoji}</div>
+        <div class="guest-title">${title}</div>
+        ${sub ? `<div class="guest-sub">${sub}</div>` : ''}
+        <div class="auth-entry-actions">
+          <button class="btn primary" data-auth="login">登录</button>
+          <button class="btn" data-auth="register">注册</button>
         </div>
-        <div class="cloud-mini-text">${esc(text)}</div>
       </div>`;
   }
 
-  return { toast, sheet, confirm, numberRoll, fmtNum, fmtYuan, fmtDate, fmtDateShort, wdayCN, fmtTimeIso, greeting, esc, debounce, el, cloudLoading };
+  // 给容器里的 [data-auth] 按钮绑定跳转到登录/注册页。
+  function bindAuthEntry(root) {
+    root.querySelectorAll('[data-auth]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (typeof App !== 'undefined') App.showAuth(btn.dataset.auth);
+      });
+    });
+  }
+
+  // 访客门：点功能按钮先弹「尚未登录/注册」确认框，再点击才进登录/注册页。
+  function requireAuth() {
+    UI.sheet({
+      title: '尚未登录 / 注册',
+      body: `<div class="require-auth">
+        <div class="ra-emoji">🐾</div>
+        <div class="ra-text">登录或注册后，才能使用这个功能。</div>
+      </div>`,
+      actions: [
+        { label: '再逛逛', onClick: (close) => close() },
+        { label: '注册', onClick: (close) => { close(); if (typeof App !== 'undefined') App.showAuth('register'); } },
+        { label: '登录', kind: 'primary', onClick: (close) => { close(); if (typeof App !== 'undefined') App.showAuth('login'); } },
+      ],
+    });
+  }
+
+  // 把容器里所有按钮 / FAB / 可点入口统一绑定为「点一下弹登录提示」。
+  // 用于游客「看得见全部功能入口，点了先提示，再确认进登录」。
+  function guestGate(root) {
+    root.querySelectorAll('button, .fab').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        requireAuth();
+      });
+    });
+  }
+
+  return { toast, sheet, confirm, numberRoll, fmtNum, fmtYuan, fmtDate, fmtDateShort, wdayCN, fmtTimeIso, greeting, esc, debounce, el, guestPrompt, bindAuthEntry, guestGate, requireAuth };
 })();

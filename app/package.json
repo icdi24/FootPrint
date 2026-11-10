@@ -6,6 +6,9 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "check:schema-doc": "node scripts/check-schema-doc.js",
+    "check:flow-v2": "node scripts/flow-v2-check.js",
+    "migrate:register-pair": "node scripts/migrate-register-pair.js",
     "reset-password": "node scripts/reset-password.js",
     "restore": "node scripts/restore.js"
   },
@@ -16,6 +19,7 @@
     "adm-zip": "^0.5.16",
     "bcryptjs": "^2.4.3",
     "express": "^4.21.2",
-    "pg": "^8.23.1"
+    "pg": "^8.23.1",
+    "ws": "^8.22.1"
   }
 }

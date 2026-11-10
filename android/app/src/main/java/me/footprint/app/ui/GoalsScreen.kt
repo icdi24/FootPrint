@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.launch
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.footprint.app.net.Api
 import me.footprint.app.net.ApiException
 import me.footprint.app.net.BigGoalDetailResponse
@@ -43,6 +44,8 @@ import me.footprint.app.net.ChainEditPayload
 import me.footprint.app.net.CheckinResult
 import me.footprint.app.net.GoalDetail
 import me.footprint.app.net.GoalPayload
+import me.footprint.app.net.MonthCell
+import me.footprint.app.net.MonthGoal
 import me.footprint.app.net.MonthView
 import me.footprint.app.net.Session
 import me.footprint.app.net.WeekCell
@@ -88,6 +91,11 @@ private val DIFFICULTY_LABELS = listOf("1 轻松", "2 简单", "3 中等", "4 �
 
 @Composable
 fun GoalsScreen(vm: AppViewModel) {
+  val loggedIn by vm.loggedIn.collectAsStateWithLifecycle()
+  if (!loggedIn) {
+    GuestEmpty(vm = vm, emoji = "🎯", title = "登录后一起定目标", sub = "两个人的打卡目标，从登录开始")
+    return
+  }
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
 
@@ -102,6 +110,11 @@ fun GoalsScreen(vm: AppViewModel) {
   var monthAnchor by remember { mutableStateOf(YearMonth.now(ZONE)) }
   var week by remember { mutableStateOf<WeekView?>(null) }
   var month by remember { mutableStateOf<MonthView?>(null) }
+  // 日历：目标定义（推算未来日期用）+ 展开态 + 锚定月 + 点日期弹当天目标
+  var goalDefs by remember { mutableStateOf<List<GoalDetail>>(emptyList()) }
+  var calOpen by remember { mutableStateOf(true) }
+  var calMonth by remember { mutableStateOf(YearMonth.now(ZONE).toString()) }
+  var daySheetDate by remember { mutableStateOf<String?>(null) }
   // 小目标列表
   var stageGoals by remember { mutableStateOf<List<GoalDetail>?>(null) }
   // 大目标列表（P1-#8）
@@ -146,6 +159,14 @@ fun GoalsScreen(vm: AppViewModel) {
           week = Api.getWeek(token, weekAnchor.format(DateTimeFormatter.ISO_LOCAL_DATE))
         } else {
           month = Api.getMonth(token, monthAnchor.format(DateTimeFormatter.ofPattern("yyyy-MM")))
+        }
+        // 日历用的目标定义（日常目标，推算未来日期）
+        if (mode == 0) {
+          try {
+            goalDefs = Api.listGoals(token, "daily")
+          } catch (e: Exception) {
+            goalDefs = emptyList()
+          }
         }
       } catch (e: ApiException) {
         error = e.message ?: "加载失败"
@@ -366,6 +387,20 @@ fun GoalsScreen(vm: AppViewModel) {
             onOpen = { bigDetailId = it },
           )
         } else if (tab == 0) {
+          // 日历（对齐 Web calendarHtml）：可折叠 + 点日期看当天目标
+          CalendarCard(
+            monthData = month,
+            goalDefs = goalDefs,
+            today = LocalDate.now(ZONE).toString(),
+            calMonth = calMonth,
+            open = calOpen,
+            onToggle = { calOpen = !calOpen },
+            onPrev = { calMonth = shiftMonth(calMonth, -1) },
+            onNext = { calMonth = shiftMonth(calMonth, 1) },
+            onToday = { calMonth = YearMonth.now(ZONE).toString() },
+            onDayClick = { daySheetDate = it },
+          )
+          Spacer(Modifier.height(12.dp))
           WeekView(
             week = week,
             loading = loading,
@@ -378,6 +413,20 @@ fun GoalsScreen(vm: AppViewModel) {
             },
           )
         } else {
+          // 日历（月视图也显示）
+          CalendarCard(
+            monthData = month,
+            goalDefs = goalDefs,
+            today = LocalDate.now(ZONE).toString(),
+            calMonth = calMonth,
+            open = calOpen,
+            onToggle = { calOpen = !calOpen },
+            onPrev = { calMonth = shiftMonth(calMonth, -1) },
+            onNext = { calMonth = shiftMonth(calMonth, 1) },
+            onToday = { calMonth = YearMonth.now(ZONE).toString() },
+            onDayClick = { daySheetDate = it },
+          )
+          Spacer(Modifier.height(12.dp))
           MonthView(month = month, loading = loading)
         }
         Spacer(Modifier.height(24.dp))
@@ -460,6 +509,22 @@ fun GoalsScreen(vm: AppViewModel) {
       },
       onConfirm = { durationMin, evidence ->
         doCheckin(checkinGoal!!.id, checkinDate.orEmpty(), durationMin, evidence)
+      },
+    )
+  }
+
+  // 日历：点日期弹当天目标
+  daySheetDate?.let { date ->
+    DaySheetDialog(
+      date = date,
+      monthData = month,
+      goalDefs = goalDefs,
+      today = LocalDate.now(ZONE).toString(),
+      onDismiss = { daySheetDate = null },
+      onViewWeek = {
+        daySheetDate = null
+        tab = 0
+        weekAnchor = LocalDate.parse(date).with(DayOfWeek.MONDAY)
       },
     )
   }
@@ -745,8 +810,8 @@ private fun MonthView(month: MonthView?, loading: Boolean) {
           Text(goal.emoji, style = PixelType.Body)
           Spacer(Modifier.width(6.dp))
           Text(goal.title, style = PixelType.Body, color = PixelColors.Ink, modifier = Modifier.weight(1f))
-          val doneCount = goal.days.count { it.done }
-          val totalPoints = goal.days.sumOf { it.points }
+          val doneCount = goal.cells.count { it.state == "done" }
+          val totalPoints = goal.cells.sumOf { it.points }
           Text(
             text = "${doneCount} 次 · ${totalPoints} 分",
             style = PixelType.Small,
@@ -756,12 +821,13 @@ private fun MonthView(month: MonthView?, loading: Boolean) {
         Spacer(Modifier.height(4.dp))
         // 行2：每天小方块（绿=已打，橙框=今天，白=未打/未来）
         Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
-          goal.days.forEach { day ->
+          goal.cells.forEach { day ->
             val isToday = day.date == m.today
-            val bg = if (day.done) PixelColors.Green else PixelColors.Card
+            val done = day.state == "done"
+            val bg = if (done) PixelColors.Green else PixelColors.Card
             val border = when {
               isToday -> PixelColors.Orange
-              day.done -> PixelColors.GreenDeep
+              done -> PixelColors.GreenDeep
               else -> PixelColors.LineStrong
             }
             Box(
@@ -1032,7 +1098,7 @@ private fun GoalEditorDialog(
 }
 
 @Composable
-private fun FieldLabel(text: String) {
+internal fun FieldLabel(text: String) {
   Text(text = text, style = PixelType.Small, color = PixelColors.Ink3)
   Spacer(Modifier.height(4.dp))
 }
@@ -1062,6 +1128,18 @@ private fun CheckinDialog(
   var duration by remember { mutableStateOf("") }
   var evidence by remember { mutableStateOf("") }
 
+  // 积分预览：custom_points 固定分值优先；否则按 perCheckinPoints 按时长比例估算
+  fun previewPoints(): Int {
+    val cp = goal.custom_points
+    if (cp != null && cp > 0) return cp
+    val base = goal.perCheckinPoints
+    if (base <= 0) return 0
+    val d = duration.toIntOrNull()
+    if (d == null || d <= 0) return base
+    // 后端公式大致按时长线性，这里做简化预览
+    return maxOf(1, (base * d / 30))
+  }
+
   Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
     Column(
       modifier = Modifier
@@ -1071,24 +1149,91 @@ private fun CheckinDialog(
       horizontalAlignment = Alignment.CenterHorizontally,
     ) {
       PixelPanel(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-          Text(
-            text = "打卡 ${goal.emoji} ${goal.title}",
-            style = PixelType.Title,
-            color = PixelColors.Ink,
-          )
-          if (date != null) {
-            Spacer(Modifier.height(4.dp))
-            Text(text = date, style = PixelType.Small, color = PixelColors.Ink3)
+        Column(
+          modifier = Modifier
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        ) {
+          // 目标信息
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+              modifier = Modifier
+                .background(PixelColors.GreenSoft)
+                .pixelBorder(2.dp, PixelColors.Outline)
+                .padding(6.dp),
+            ) {
+              Text(goal.emoji, style = PixelType.Title)
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+              Text(goal.title, style = PixelType.Body, color = PixelColors.Ink)
+              if (date != null) {
+                Text(date, style = PixelType.Small, color = PixelColors.Ink3)
+              }
+            }
           }
+
           Spacer(Modifier.height(12.dp))
 
-          FieldLabel("时长（分钟，留空用默认）")
-          PixelTextField(value = duration, onValueChange = { duration = it }, placeholder = "留空 = 默认", modifier = Modifier.fillMaxWidth())
+          // 时长 chips（对齐 Web：15/30/45/60）
+          FieldLabel("实际时长（分钟）")
+          Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(15, 30, 45, 60).forEach { c ->
+              val on = duration.toIntOrNull() == c
+              Box(
+                modifier = Modifier
+                  .weight(1f)
+                  .background(if (on) PixelColors.GreenSoft else PixelColors.Card)
+                  .pixelBorder(2.dp, if (on) PixelColors.Green else PixelColors.Outline)
+                  .clickable { duration = c.toString() }
+                  .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+              ) {
+                Text("$c′", style = PixelType.Small, color = if (on) PixelColors.GreenDeep else PixelColors.Ink2)
+              }
+            }
+          }
 
           Spacer(Modifier.height(8.dp))
+
+          // stepper：-5 / 值 / +5
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+          ) {
+            PixelSmallButton(text = "−", filled = false, onClick = {
+              val d = (duration.toIntOrNull() ?: 30) - 5
+              duration = maxOf(1, d).toString()
+            })
+            Spacer(Modifier.width(12.dp))
+            Text(
+              text = "${duration.toIntOrNull() ?: "—"} 分钟",
+              style = PixelType.Mono,
+              color = PixelColors.Ink,
+            )
+            Spacer(Modifier.width(12.dp))
+            PixelSmallButton(text = "+", filled = false, onClick = {
+              val d = (duration.toIntOrNull() ?: 30) + 5
+              duration = minOf(1440, d).toString()
+            })
+          }
+
+          Spacer(Modifier.height(12.dp))
+
           FieldLabel("打卡说明（可选）")
           PixelTextField(value = evidence, onValueChange = { evidence = it }, placeholder = "例如：读完了第 3 章", modifier = Modifier.fillMaxWidth())
+
+          Spacer(Modifier.height(12.dp))
+
+          // 积分预览
+          PixelPanel(background = PixelColors.Bg2, borderColor = PixelColors.LineStrong) {
+            Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+              Text("本次预计", style = PixelType.Small, color = PixelColors.Ink3)
+              Spacer(Modifier.weight(1f))
+              Text("+${previewPoints()}", style = PixelType.Big, color = PixelColors.GreenDeep)
+            }
+          }
 
           Spacer(Modifier.height(16.dp))
 
@@ -1276,6 +1421,314 @@ private fun StageCard(
           }
           "abandoned" -> {
             Text("已放弃", style = PixelType.Small, color = PixelColors.Ink3)
+          }
+        }
+      }
+    }
+  }
+}
+
+// ==================== 日历（对齐 Web calendarHtml / daySheet） ====================
+
+/** 月份字符串 +- n 月（"yyyy-MM"） */
+private fun shiftMonth(month: String, delta: Int): String {
+  return try {
+    YearMonth.parse(month).plusMonths(delta.toLong()).toString()
+  } catch (e: Exception) {
+    month
+  }
+}
+
+/** 目标在某天是否需执行（对齐 Web calDueOn，仅 daily / weekdays） */
+private fun goalDueOn(g: GoalDetail, date: String): Boolean {
+  if (g.start_date.isNotBlank() && date < g.start_date) return false
+  if (g.end_date != null && g.end_date.isNotBlank() && date > g.end_date) return false
+  return when (g.freq_mode) {
+    "daily" -> true
+    "weekdays" -> {
+      val wd = (LocalDate.parse(date).dayOfWeek.value) // 1=一…7=日
+      g.weekdays.split(',').mapNotNull { it.trim().toIntOrNull() }.contains(wd)
+    }
+    else -> false
+  }
+}
+
+/** 月历卡片：可折叠 + 月份导航 + 今日按钮 + 点日期弹当天目标 + 图例 */
+@Composable
+private fun CalendarCard(
+  monthData: MonthView?,
+  goalDefs: List<GoalDetail>,
+  today: String,
+  calMonth: String,
+  open: Boolean,
+  onToggle: () -> Unit,
+  onPrev: () -> Unit,
+  onNext: () -> Unit,
+  onToday: () -> Unit,
+  onDayClick: (String) -> Unit,
+) {
+  val ymParts = calMonth.split('-').mapNotNull { it.toIntOrNull() }
+  val Y = ymParts.getOrNull(0) ?: YearMonth.now(ZONE).year
+  val M = ymParts.getOrNull(1) ?: YearMonth.now(ZONE).monthValue
+  PixelPanel(modifier = Modifier.fillMaxWidth()) {
+    Column(modifier = Modifier.padding(10.dp)) {
+      // 折叠头
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clickable(onClick = onToggle),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text("📅", style = PixelType.Body)
+        Spacer(Modifier.width(6.dp))
+        Text("日历", style = PixelType.Body, color = PixelColors.Ink, modifier = Modifier.weight(1f))
+        Text("点日期看当天目标", style = PixelType.Small, color = PixelColors.Ink3)
+        Spacer(Modifier.width(4.dp))
+        Text(if (open) "▾" else "▸", style = PixelType.Small, color = PixelColors.Ink2)
+      }
+
+      if (open) {
+        Spacer(Modifier.height(10.dp))
+        // 月份导航
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+          PixelSmallButton(text = "‹", filled = false, onClick = onPrev)
+          Text("${Y} 年 ${M} 月", style = PixelType.Body, color = PixelColors.Ink)
+          PixelSmallButton(text = "›", filled = false, onClick = onNext)
+        }
+        Spacer(Modifier.height(6.dp))
+        // 星期表头
+        val wds = listOf("一", "二", "三", "四", "五", "六", "日")
+        Row(modifier = Modifier.fillMaxWidth()) {
+          wds.forEachIndexed { i, w ->
+            Text(
+              text = w,
+              style = PixelType.Small,
+              color = if (i >= 5) PixelColors.OrangeDeep else PixelColors.Ink3,
+              modifier = Modifier.weight(1f),
+              textAlign = TextAlign.Center,
+            )
+          }
+        }
+        Spacer(Modifier.height(4.dp))
+        // 网格
+        val lead = ((java.time.DayOfWeek.from(LocalDate.of(Y, M, 1)).value) - 1) // 周一=0
+        val daysInMonth = YearMonth.of(Y, M).lengthOfMonth()
+        val total = ((lead + daysInMonth + 6) / 7) * 7
+        // 汇总某天的目标状态
+        fun dayInfo(date: String): Pair<Int, Int> {
+          var due = 0
+          var done = 0
+          for (g in monthData?.goals ?: emptyList()) {
+            val cell = g.cells.find { it.date == date }
+            if (cell != null) {
+              when (cell.state) {
+                "done" -> { due += 1; done += 1 }
+                "missed", "todo" -> { due += 1 }
+                "future" -> {
+                  val def = goalDefs.find { it.id == g.id }
+                  if (def != null && goalDueOn(def, date)) due += 1
+                }
+              }
+            } else {
+              val def = goalDefs.find { it.id == g.id }
+              if (def != null && def.status == "active" && goalDueOn(def, date)) {
+                // 月数据没有该日（未来月），纯靠定义推算
+                if (date > today || date == today) due += 1
+              }
+            }
+          }
+          return due to done
+        }
+        var cellIndex = 0
+        for (row in 0 until total / 7) {
+          Row(modifier = Modifier.fillMaxWidth()) {
+            for (col in 0 until 7) {
+              val offset = cellIndex - lead + 1
+              cellIndex += 1
+              val inMonth = offset in 1..daysInMonth
+              val date = String.format("%04d-%02d-%02d", Y, M, offset)
+              val (due, done) = if (inMonth) dayInfo(date) else 0 to 0
+              val isToday = date == today
+              // tone：due>0 时区分
+              val bg = when {
+                !inMonth -> PixelColors.Bg2
+                isToday -> PixelColors.OrangeSoft
+                due > 0 && done == due -> PixelColors.GreenSoft
+                due > 0 && done > 0 -> PixelColors.OrangeSoft
+                due > 0 && date < today -> PixelColors.RedDeep.copy(alpha = 0.12f)
+                else -> PixelColors.Card
+              }
+              Column(
+                modifier = Modifier
+                  .weight(1f)
+                  .padding(2.dp)
+                  .height(48.dp)
+                  .background(bg)
+                  .pixelBorder(if (isToday) 2.dp else 1.dp, if (isToday) PixelColors.Orange else PixelColors.LineStrong)
+                  .clickable(enabled = inMonth) { if (inMonth) onDayClick(date) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+              ) {
+                Text(
+                  text = if (inMonth) offset.toString() else "",
+                  style = PixelType.Small,
+                  color = if (col >= 5) PixelColors.OrangeDeep else PixelColors.Ink,
+                )
+                if (inMonth && due > 0) {
+                  Text(
+                    text = if (date > today) "$due" else "$done/$due",
+                    style = PixelType.Small,
+                    color = if (done == due) PixelColors.GreenDeep else PixelColors.OrangeDeep,
+                  )
+                }
+              }
+            }
+          }
+        }
+        Spacer(Modifier.height(8.dp))
+        // 今天按钮 + 图例
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+          PixelSmallButton(text = "今天", filled = false, onClick = onToday)
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            LegendDot(PixelColors.GreenSoft, "全完成")
+            Spacer(Modifier.width(4.dp))
+            LegendDot(PixelColors.OrangeSoft, "部分")
+            Spacer(Modifier.width(4.dp))
+            LegendDot(PixelColors.RedDeep.copy(alpha = 0.12f), "漏了")
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun LegendDot(color: Color, label: String) {
+  Row(verticalAlignment = Alignment.CenterVertically) {
+    Box(
+      modifier = Modifier
+        .size(10.dp)
+        .background(color)
+        .pixelBorder(1.dp, PixelColors.LineStrong),
+    )
+    Spacer(Modifier.width(2.dp))
+    Text(label, style = PixelType.Small, color = PixelColors.Ink3)
+  }
+}
+
+/** 当天目标弹层（对齐 Web daySheet） */
+@Composable
+private fun DaySheetDialog(
+  date: String,
+  monthData: MonthView?,
+  goalDefs: List<GoalDetail>,
+  today: String,
+  onDismiss: () -> Unit,
+  onViewWeek: () -> Unit,
+) {
+  val items = mutableListOf<Pair<MonthGoal, MonthCell>>()
+  for (g in monthData?.goals ?: emptyList()) {
+    val cell = g.cells.find { it.date == date }
+    if (cell != null && (cell.state == "done" || cell.state == "missed" || cell.state == "todo")) {
+      items.add(g to cell)
+    }
+  }
+  // 未来日期：纯靠定义推算（对齐 Web dayItems 的 future 分支）
+  for (def in goalDefs) {
+    if (def.status != "active") continue
+    val exists = items.any { it.first.id == def.id }
+    if (!exists && goalDueOn(def, date)) {
+      // 用 monthData 里的 goal（若有 cells），否则构造
+      val mg = monthData?.goals?.find { it.id == def.id }
+        ?: MonthGoal(id = def.id, title = def.title, emoji = def.emoji, perCheckinPoints = def.perCheckinPoints)
+      items.add(mg to MonthCell(date = date, state = "plan"))
+    }
+  }
+  val doneCount = items.count { it.second.state == "done" }
+  val totalPoints = items.filter { it.second.state == "done" }.sumOf { it.second.points }
+
+  Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Box(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(20.dp),
+      contentAlignment = Alignment.Center,
+    ) {
+      PixelPanel(Modifier.fillMaxWidth()) {
+        Column(
+          modifier = Modifier
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        ) {
+          val label = try {
+            val d = LocalDate.parse(date)
+            "${d.monthValue} 月 ${d.dayOfMonth} 日 · 周${"日一二三四五六"[d.dayOfWeek.value % 7]}"
+          } catch (e: Exception) { date }
+          Text(label, style = PixelType.Title, color = PixelColors.Ink)
+          Spacer(Modifier.height(12.dp))
+
+          // 汇总
+          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              Text("$doneCount/${items.size}", style = PixelType.Big, color = PixelColors.Ink)
+              Text("已完成", style = PixelType.Small, color = PixelColors.Ink3)
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              Text("+$totalPoints", style = PixelType.Big, color = PixelColors.GreenDeep)
+              Text("当日得分", style = PixelType.Small, color = PixelColors.Ink3)
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              Text(if (date > today) "未来" else if (date < today) "过去" else "今天", style = PixelType.Big, color = PixelColors.Ink)
+              Text("日期", style = PixelType.Small, color = PixelColors.Ink3)
+            }
+          }
+          Spacer(Modifier.height(12.dp))
+
+          Text("当天要执行的目标", style = PixelType.Body, color = PixelColors.Ink2)
+          Spacer(Modifier.height(8.dp))
+
+          if (items.isEmpty()) {
+            Text("这天没有安排，休息一下 🌿", style = PixelType.Small, color = PixelColors.Ink3)
+          } else {
+            items.forEach { (g, cell) ->
+              val tag = when (cell.state) {
+                "done" -> "已完成" to PixelColors.GreenSoft
+                "missed" -> "漏了" to PixelColors.OrangeSoft
+                "todo" -> "今天待打" to PixelColors.OrangeSoft
+                else -> "计划中" to PixelColors.Bg2
+              }
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Text(g.emoji, style = PixelType.Body)
+                Spacer(Modifier.width(8.dp))
+                Text(g.title, style = PixelType.Body, color = PixelColors.Ink, modifier = Modifier.weight(1f))
+                PixelChip(text = tag.first, bg = tag.second, fg = PixelColors.Ink2)
+              }
+            }
+          }
+          Spacer(Modifier.height(6.dp))
+          Text(
+            "过去与今天取自打卡记录；未来日期按目标频率推算，实际打卡状态以后端为准。",
+            style = PixelType.Small,
+            color = PixelColors.Ink3,
+          )
+          Spacer(Modifier.height(14.dp))
+          Row(Modifier.fillMaxWidth()) {
+            PixelButton(text = "查看这一周", onClick = onViewWeek, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
+            PixelButton(text = "知道了", onClick = onDismiss, modifier = Modifier.weight(1f))
           }
         }
       }

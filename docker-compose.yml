@@ -17,15 +17,16 @@ services:
   footprint:
     build: .
     ports:
-      - "3201:3000"
+      - "127.0.0.1:3201:3000"
     environment:
       - PORT=3000
       - DATA_DIR=/app/data
       - DATABASE_URL=postgres://postgres:${POSTGRES_PASSWORD}@db:5432/footprint
-      # AI 底座（P0-3）：密钥只在服务器 .env，compose 注入容器，不下发到 Web/Android
-      - AI_BASE_URL=${AI_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
-      - AI_API_KEY=${AI_API_KEY:?请在 .env 里设置 AI_API_KEY}
-      - AI_MODEL=${AI_MODEL:-qwen-plus}
+      # 统一调用 DeepSeek 官方 API，密钥只在服务器 .env，compose 注入容器，不下发到 Web/Android
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:?请在 .env 里设置 DEEPSEEK_API_KEY}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-flash}
+      # 可选：指向自有网关/本地黑洞；留空则走官方地址，便于离线调试不产生外部请求
+      - AI_BASE_URL=${AI_BASE_URL:-}
     volumes:
       - ./runtime/data:/app/data
     depends_on:

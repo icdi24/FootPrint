@@ -14,7 +14,6 @@ module.exports = function partnerRoutes(db) {
       if (!partner) {
         return res.json({ partner: null, empty: true, myStats: await statsFor(db, req.user.id) });
       }
-      const myPairId = await mw.currentPairId(req.user.id);
       const cfg = await getPoints(db);
       const today = todayStr();
 
@@ -54,7 +53,7 @@ module.exports = function partnerRoutes(db) {
       // 待我验收的小目标（对方提交、我是 reviewer）
       const pendingVerifications = await db.all(
         `SELECT v.*, g.title AS goal_title, g.emoji AS goal_emoji, g.total_points, g.accept_criteria,
-                u.nickname AS submitter_nickname, u.avatar AS submitter_avatar
+                u.nickname AS submitter_username, u.avatar AS submitter_avatar
          FROM verifications v
          JOIN goals g ON g.id = v.goal_id
          JOIN users u ON u.id = v.submitter_id
@@ -75,19 +74,20 @@ module.exports = function partnerRoutes(db) {
         bg.total = Number(cnt.total);
       }
 
-      // 对方主动分享的：日报（P3-#17，摘要取全文由前端截断）+ 画像块
+      // 对方主动分享的：不再按 pair_id 过滤。
+      // 配对前产生的数据 pair_id 为 NULL，搭档身份已由 pair_members 保证，这里只按人 + shared 判定。
       const sharedDiaries = await db.all(
         `SELECT diary_date, ai_original, user_edited, updated_at FROM diaries
-         WHERE user_id = ? AND shared = 1 AND pair_id = ? ORDER BY diary_date DESC LIMIT 7`,
-        [partner.id, myPairId]
+         WHERE user_id = ? AND shared = 1 ORDER BY diary_date DESC LIMIT 7`,
+        [partner.id]
       );
       const sharedProfile = await db.all(
-        "SELECT block, content, updated_at FROM user_profiles WHERE user_id = ? AND shared = 1 AND status = 'active' AND pair_id = ? ORDER BY block",
-        [partner.id, myPairId]
+        "SELECT block, content, updated_at FROM user_profiles WHERE user_id = ? AND shared = 1 AND status = 'active' ORDER BY block",
+        [partner.id]
       );
 
       res.json({
-        partner: { id: partner.id, nickname: partner.nickname, avatar: partner.avatar },
+        partner: { id: partner.id, username: partner.login_name, avatar: partner.avatar },
         partnerStats: await statsFor(db, partner.id),
         myStats: await statsFor(db, req.user.id),
         partnerBigGoals,

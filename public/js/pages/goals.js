@@ -2,10 +2,16 @@
 const GoalsPage = {
   weekStart: null,
   monthAnchor: null,
+  calMonth: null,
+  calOpen: true,
   viewMode: 'week',
   goalType: 'daily', // daily | stage
 
   async render(root) {
+    if (App.isGuest()) {
+      this.renderGuest(root);
+      return;
+    }
     if (!this.weekStart) this.weekStart = this._monday(new Date());
     root.innerHTML = UI.cloudLoading ? UI.cloudLoading('正在翻开这周的目标打卡... 🎯') : '<div class="page-loading">加载中…</div>';
     try {
@@ -23,6 +29,39 @@ const GoalsPage = {
     return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
   },
 
+  // 游客视图：展示完整界面结构（类型切换、周/月、网格、FAB），数据区为空，点任何入口都跳登录。
+  renderGuest(root) {
+    root.innerHTML = `
+      <header class="page-head goals-head">
+        ${this._typeSeg('daily')}
+        <div class="week-nav sub-nav">
+          <div class="seg">
+            <button data-v="week" class="on">周</button>
+            <button data-v="month">月</button>
+          </div>
+          <div class="week-nav">
+            <button class="nav-btn">${window.icon('left')}</button>
+            <span class="week-label">本周</span>
+            <button class="nav-btn">${window.icon('right')}</button>
+          </div>
+        </div>
+      </header>
+      <section class="grid-card">
+        <div class="grid-stats">
+          <div class="gs-item"><div class="gs-val">0</div><div class="gs-label">周得分</div></div>
+          <div class="gs-item"><div class="gs-val">0<span class="gs-dim">/0</span></div><div class="gs-label">打卡人次</div></div>
+          <div class="gs-item"><div class="gs-val">0</div><div class="gs-label">进行中目标</div></div>
+        </div>
+        <div class="grid-empty">
+          <div class="empty-emoji">🌱</div>
+          <div>还没有目标，点右下角 + 建一个</div>
+        </div>
+      </section>
+      <button class="fab" aria-label="新建目标">${window.icon('plus')}</button>
+    `;
+    UI.guestGate(root);
+  },
+
   async draw(root) {
     // 兜底：任何入口（refresh、深链、外部直接调 draw）进来都不会因为没有 weekStart 而崩
     if (!this.weekStart) this.weekStart = this._monday(new Date());
@@ -31,13 +70,19 @@ const GoalsPage = {
     if (this.goalType === 'big') { await this.drawBig(root); return; }
 
     const isWeek = this.viewMode === 'week';
-    let data;
-    if (isWeek) {
-      data = await api.get(`/api/goals/week?start=${this.weekStart}`);
-    } else {
-      if (!this.monthAnchor) this.monthAnchor = this.weekStart.slice(0, 7);
-      data = await api.get(`/api/goals/month?month=${this.monthAnchor}`);
-    }
+    if (!this.monthAnchor) this.monthAnchor = this.weekStart.slice(0, 7);
+    const calMonth = this.calMonth || (isWeek ? this.weekStart.slice(0, 7) : this.monthAnchor);
+    const mainUrl = isWeek ? `/api/goals/week?start=${this.weekStart}` : `/api/goals/month?month=${this.monthAnchor}`;
+    // 日历纯前端：复用现有月接口拿每日打卡状态、现有目标列表拿频率定义，不改后端
+    const [data, calMonthRes, goalDefsRes] = await Promise.all([
+      api.get(mainUrl),
+      (!isWeek && this.monthAnchor === calMonth)
+        ? Promise.resolve(null)
+        : api.get(`/api/goals/month?month=${calMonth}`).catch(() => null),
+      api.get('/api/goals?type=daily').catch(() => null),
+    ]);
+    const calData = (!isWeek && this.monthAnchor === calMonth) ? data : calMonthRes;
+    const goalDefs = (goalDefsRes && goalDefsRes.goals) || [];
     const [y, m, d] = this.weekStart.split('-').map(Number);
     const today = data.today;
     const navLabel = isWeek ? `${m}月第${this._weekIndex(new Date(y, m - 1, d))}周` : `${Number(this.monthAnchor.slice(5, 7))}月`;
@@ -60,6 +105,8 @@ const GoalsPage = {
           </div>
         </div>
       </header>
+
+      ${this.calendarHtml(calData, goalDefs, today, calMonth)}
 
       <section class="grid-card">
         <div class="grid-stats">
@@ -96,6 +143,34 @@ const GoalsPage = {
       else this.monthAnchor = this._shiftMonth(this.monthAnchor, 1);
       this.draw(root);
     });
+    // 日历：折叠、翻月、回今天、点日期弹层
+    root.querySelector('#cal-toggle')?.addEventListener('click', () => {
+      this.calOpen = !this.calOpen;
+      this.draw(root);
+    });
+    root.querySelector('#cal-prev')?.addEventListener('click', () => {
+      this.calMonth = this._shiftMonth(calMonth, -1);
+      this.draw(root);
+    });
+    root.querySelector('#cal-next')?.addEventListener('click', () => {
+      this.calMonth = this._shiftMonth(calMonth, 1);
+      this.draw(root);
+    });
+    root.querySelector('#cal-today')?.addEventListener('click', () => {
+      this.calMonth = today.slice(0, 7);
+      this.draw(root);
+    });
+    root.querySelectorAll('.cal-cell').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (btn.dataset.out) {           // 补位的上下月日期：只切月，不弹层
+          this.calMonth = btn.dataset.date.slice(0, 7);
+          this.draw(root);
+          return;
+        }
+        this.daySheet(root, btn.dataset.date, calData, goalDefs, today);
+      });
+    });
+
     root.querySelector('#add-goal').addEventListener('click', () => {
       GoalForm.open({ onSaved: () => this.draw(root) });
     });
@@ -210,7 +285,7 @@ const GoalsPage = {
       });
       card.querySelector('[data-act="zoowy"]')?.addEventListener('click', () => {
         const bg = bigGoals.find((b) => b.id === Number(card.dataset.id));
-        if (bg) ZoowyPlan.open({ bigGoal: bg, onConfirmed: () => this.draw(root) });
+        if (bg) ZoowyChat.open({ bigGoalId: bg.id, title: bg.title, onApplied: () => this.draw(root) });
       });
     });
   },
@@ -476,13 +551,168 @@ const GoalsPage = {
               });
               close();
               UI.toast('已提交，等对方验收', 'ok');
-              this.draw(root);
+              GoalsPage.draw(root);
             } catch (e) {
               submitting = false;
               UI.toast(e.message, 'err');
             }
           },
         },
+      ],
+    });
+  },
+
+  // 真实月历：只消费现有 /goals/month 与 /goals 的数据，不改后端
+  calendarHtml(calData, goalDefs, today, calMonth) {
+    const [Y, M] = calMonth.split('-').map(Number);
+    const defMap = new Map(goalDefs.map((g) => [g.id, g]));
+    const dayMap = new Map();
+    if (calData && calData.goals) {
+      for (const g of calData.goals) {
+        for (const c of (g.cells || [])) {
+          if (!dayMap.has(c.date)) dayMap.set(c.date, []);
+          dayMap.get(c.date).push({ goal: g, cell: c, def: defMap.get(g.id) });
+        }
+      }
+    }
+    const lead = (new Date(Date.UTC(Y, M - 1, 1)).getUTCDay() + 6) % 7; // 周一开头
+    const daysInMonth = new Date(Date.UTC(Y, M, 0)).getUTCDate();
+    const total = Math.ceil((lead + daysInMonth) / 7) * 7;
+    const WDS = ['一', '二', '三', '四', '五', '六', '日'];
+    const cells = [];
+    for (let i = 0; i < total; i++) {
+      const offset = i - lead + 1;
+      const dt = new Date(Date.UTC(Y, M - 1, offset));
+      const date = dt.toISOString().slice(0, 10);
+      const inMonth = offset >= 1 && offset <= daysInMonth;
+      const items = this.dayItems(dayMap.get(date) || []);
+      const due = items.filter((x) => !x.flex).length;
+      const done = items.filter((x) => x.state === 'done').length;
+      let tone = 'none';
+      if (due > 0) {
+        if (date > today) tone = 'plan';
+        else if (date === today && done < due) tone = 'today'; // 今天还没过完，不算漏
+        else if (done === due) tone = 'full';
+        else if (done > 0) tone = 'part';
+        else tone = 'miss';
+      }
+      cells.push(`
+        <button type="button" class="cal-cell ${inMonth ? '' : 'out'} ${date === today ? 'is-today' : ''} tone-${tone} ${i % 7 >= 5 ? 'wknd' : ''}"
+                data-date="${date}" ${inMonth ? '' : 'data-out="1"'} aria-label="${date}">
+          <span class="cal-num">${dt.getUTCDate()}</span>
+          <span class="cal-count">${due ? (date > today ? due : `${done}/${due}`) : ''}</span>
+          <span class="cal-dots">${done ? '<i class="cd done"></i>' : ''}${due - done > 0 ? '<i class="cd pending"></i>' : ''}</span>
+        </button>`);
+    }
+    return `
+      <section class="cal-card">
+        <button type="button" class="cal-toggle" id="cal-toggle" aria-expanded="${this.calOpen}">
+          <span class="cal-ico">${window.icon('calendar')}</span>
+          <b>日历</b><span class="cal-hint">点日期看当天目标</span>
+          <i class="cal-chev ${this.calOpen ? 'open' : ''}">▾</i>
+        </button>
+        ${this.calOpen ? `
+        <div class="cal-nav">
+          <button class="nav-btn" id="cal-prev">${window.icon('left')}</button>
+          <span class="cal-month">${Y} 年 ${M} 月</span>
+          <button class="nav-btn" id="cal-next">${window.icon('right')}</button>
+          <button class="cal-today-btn" id="cal-today">今天</button>
+        </div>
+        <div class="cal-grid">
+          ${WDS.map((w, i) => `<div class="cal-wd ${i >= 5 ? 'wknd' : ''}">${w}</div>`).join('')}
+          ${cells.join('')}
+        </div>
+        <div class="cal-legend">
+          <span><i class="cl full"></i>全完成</span><span><i class="cl part"></i>部分</span>
+          <span><i class="cl miss"></i>漏了</span><span><i class="cl today"></i>今天待打</span>
+          <span><i class="cl plan"></i>计划中</span>
+        </div>` : ''}
+      </section>`;
+  },
+
+  // 某天要执行的目标：过去/今天用后端判定的状态，未来按频率规则前端推算
+  dayItems(entries) {
+    const out = [];
+    for (const e of entries) {
+      const st = e.cell.state;
+      if (st === 'done' || st === 'missed' || st === 'todo') {
+        out.push({ ...e, state: st, flex: false });
+      } else if (st === 'future') {
+        const def = e.def;
+        if (!def || (def.status && def.status !== 'active')) continue;
+        if (def.freq_mode === 'weekly') { out.push({ ...e, state: 'flex', flex: true }); continue; }
+        if (this.calDueOn(def, e.cell.date)) out.push({ ...e, state: 'plan', flex: false });
+      }
+      // off / blank：该目标这天不需执行
+    }
+    return out;
+  },
+
+  calDueOn(g, date) {
+    if (g.start_date && date < g.start_date) return false;
+    if (g.end_date && date > g.end_date) return false;
+    if (g.freq_mode === 'daily') return true;
+    if (g.freq_mode === 'weekdays') {
+      const wd = (new Date(date + 'T00:00:00Z').getUTCDay() + 6) % 7 + 1; // 1=一…7=日
+      return String(g.weekdays || '').split(',').map(Number).includes(wd);
+    }
+    return false;
+  },
+
+  daySheet(root, date, calData, goalDefs, today) {
+    const defMap = new Map(goalDefs.map((g) => [g.id, g]));
+    const entries = [];
+    if (calData && calData.goals) {
+      for (const g of calData.goals) {
+        const c = (g.cells || []).find((x) => x.date === date);
+        if (c) entries.push({ goal: g, cell: c, def: defMap.get(g.id) });
+      }
+    }
+    const items = this.dayItems(entries);
+    const main = items.filter((x) => !x.flex);
+    const flex = items.filter((x) => x.flex);
+    const done = main.filter((x) => x.state === 'done');
+    const pts = done.reduce((s, x) => s + (Number(x.cell.points) || 0), 0);
+    const wd = ['日', '一', '二', '三', '四', '五', '六'][new Date(date + 'T00:00:00Z').getUTCDay()];
+    const label = `${Number(date.slice(5, 7))} 月 ${Number(date.slice(8, 10))} 日 · 周${wd}`;
+    const TAGS = {
+      done: '<span class="ds-tag ok">已完成</span>',
+      missed: '<span class="ds-tag bad">漏了</span>',
+      todo: '<span class="ds-tag now">今天待打</span>',
+      plan: '<span class="ds-tag plan">计划中</span>',
+      flex: '<span class="ds-tag flex">本周任选</span>',
+    };
+    const row = (x) => `
+      <div class="ds-row">
+        <span class="ds-emoji">${UI.esc(x.goal.emoji || '🎯')}</span>
+        <span class="ds-name">${UI.esc(x.goal.title)}</span>
+        ${TAGS[x.state] || ''}
+        <b class="ds-pts">${x.cell.points ? `+${UI.fmtNum(x.cell.points)} 分` : (x.goal.perCheckinPoints ? `约 +${UI.fmtNum(x.goal.perCheckinPoints)}` : '')}</b>
+      </div>`;
+    const body = document.createElement('div');
+    body.className = 'cal-day-sheet';
+    body.innerHTML = `
+      <div class="ds-sum">
+        <div><b>${done.length}<span>/${main.length}</span></b><span>已完成</span></div>
+        <div><b>+${UI.fmtNum(pts)}</b><span>当日得分</span></div>
+        <div><b>${date > today ? '未来' : date < today ? '过去' : '今天'}</b><span>日期</span></div>
+      </div>
+      <div class="ds-title">当天要执行的目标</div>
+      ${main.length ? main.map(row).join('') : '<div class="ds-empty">这天没有安排，休息一下 🌿</div>'}
+      ${flex.length ? `<div class="ds-title sub">本周灵活安排（不固定日期）</div>${flex.map(row).join('')}` : ''}
+      <p class="ds-note">过去与今天取自打卡记录；未来日期按目标频率推算，实际打卡状态以后端为准。</p>
+    `;
+    UI.sheet({
+      title: label,
+      body,
+      actions: [
+        { label: '查看这一周', onClick: (close) => {
+          close();
+          this.weekStart = this._monday(new Date(date + 'T00:00:00Z'));
+          this.viewMode = 'week';
+          this.draw(root);
+        } },
+        { label: '知道了', kind: 'primary', onClick: (close) => close() },
       ],
     });
   },
@@ -1133,7 +1363,7 @@ const StageGoalForm = {
     });
     preview();
     const zfEntry = body.querySelector('#sf-zoowy');
-    if (zfEntry) zfEntry.addEventListener('click', () => ZoowyPlan.open({ onConfirmed: onSaved }));
+    if (zfEntry) zfEntry.addEventListener('click', () => ZoowyChat.open({ onApplied: onSaved }));
 
     let saving = false;
     UI.sheet({
