@@ -1211,7 +1211,9 @@ data class GoalPayload(
     val end_date: String? = null,
     val est_total_min: Int? = null,
     val accept_criteria: String? = null,
-    val custom_points: Int? = null,
+    /** 字符串而非 Int?：explicitNulls=false 会省略 null，导致「自定义→自动算」无法清除固定分。
+     *  传 "" 会让后端走 (b.custom_points === '') → null 分支，与 Web 一致。 */
+    val custom_points: String? = null,
 )
 
 // ---------------- 愿望单（wish） ----------------

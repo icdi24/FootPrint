@@ -102,7 +102,7 @@ fun BigGoalsView(
                 Text("还没有大目标", style = PixelType.Title, color = PixelColors.Ink)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "大目标是长期方向，不能打卡，\n只能靠路线上的小目标推进",
+                    "大目标是长期方向（比如「找到 Agent 开发的工作」），不能打卡，\n只能靠路线上的小目标推进",
                     style = PixelType.Small,
                     color = PixelColors.Ink2,
                 )

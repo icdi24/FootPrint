@@ -3,6 +3,8 @@ package me.footprint.app.ui
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
+import android.provider.Browser
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -131,7 +133,15 @@ private fun sizeOf(bytes: Long): String {
 /** 下载 / 全量导出：交给系统浏览器带会话打开（对齐 Web 的 <a href>） */
 private fun openUrl(context: Context, url: String) {
   runCatching {
-    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+    // 外部浏览器默认没有 fp_token；把会话 Cookie 塞进 EXTRA_HEADERS，下载才不会 401
+    val token = Session.token(context)
+    if (token != null) {
+      val headers = Bundle()
+      headers.putString("Cookie", "fp_token=$token")
+      intent.putExtra(Browser.EXTRA_HEADERS, headers)
+    }
+    context.startActivity(intent)
   }
 }
 
@@ -2149,10 +2159,13 @@ private fun parseCfg(
     val win = Window(
       `in` = wIn.toDouble(), none = wNone.toDouble(), out = wOut.toDouble(),
     )
-    val milestones = if (msRows.isEmpty()) {
-      initial.milestones
-    } else {
-      msRows.map { (n, p) -> Milestone(n.trim().toInt(), p.trim().toInt()) }
+    // 关键修复：不再写死 emptyList()。编辑器为空（用户没动里程碑）时原样回传
+    // initial.milestones；万一后端给的也是空表，就退回默认里程碑，保证发出去的是
+    // 1–8 条合法数据，绝不会让 encodeDefaults=true 把 "milestones":[] 发到后端。
+    val milestones = when {
+      msRows.isNotEmpty() -> msRows.map { (n, p) -> Milestone(n.trim().toInt(), p.trim().toInt()) }
+      initial.milestones.isNotEmpty() -> initial.milestones
+      else -> DEFAULT_MILESTONES
     }
     PointsConfig(
       unit = unit.toDouble(),

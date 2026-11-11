@@ -1144,23 +1144,28 @@ private fun GoalEditorDialog(
     }
     val token = Session.token(context) ?: return
     val cp = if (pointsMode == "custom") customPoints.toIntOrNull()?.takeIf { it > 0 } else null
+    // 传给后端的 custom_points 用字符串：自定义传数值串，自动算传 "" 才能真正清掉旧固定分
+    // （Api.json 是 explicitNulls=false，Int? 的 null 会被整个省略、后端当成「不改」）
+    val cpPayload: String? = if (pointsMode == "custom") cp?.toString() else ""
     val payload = GoalPayload(
       title = title.trim(),
       type = type,
       emoji = emoji,
-      description = description.ifBlank { null },
+      // 注意：Api.kt 的 json 是 explicitNulls=false，传 null 会被省略、后端当成「不改」；
+      // 字符串字段用 "" 占位才能真正覆盖/清空（后端 (b.x || null) / String().trim() 会归一化）
+      description = description,
       freq_mode = freqMode,
       freq_n = freqN.toIntOrNull(),
       weekdays = weekdays.ifBlank { null },
-      window_start = windowStart.ifBlank { null },
-      window_end = windowEnd.ifBlank { null },
+      window_start = windowStart.ifBlank { "" },
+      window_end = windowEnd.ifBlank { "" },
       duration_min = durationMin.toIntOrNull(),
       difficulty = difficulty,
       start_date = startDate.ifBlank { null },
-      end_date = endDate.ifBlank { null },
+      end_date = endDate.ifBlank { "" },
       est_total_min = estTotalMin.toIntOrNull(),
       accept_criteria = if (type == "stage") acceptCriteria.ifBlank { null } else null,
-      custom_points = cp,
+      custom_points = cpPayload,
     )
     busy = true
     error = null
