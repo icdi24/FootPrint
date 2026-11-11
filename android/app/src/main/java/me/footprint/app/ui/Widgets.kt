@@ -4,7 +4,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -22,6 +26,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import me.footprint.app.ui.theme.PixelColors
 import me.footprint.app.ui.theme.PixelType
 
@@ -77,27 +82,34 @@ fun PixelSmallButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     filled: Boolean = true,
+    enabled: Boolean = true,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     Box(
         modifier = modifier
-            .pixelHardShadow(if (pressed) 0.dp else 3.dp, PixelColors.Outline)
-            .offset(y = if (pressed) 3.dp else 0.dp)
-            .background(if (filled) PixelColors.Green else PixelColors.Card)
+            .pixelHardShadow(if (pressed || !enabled) 0.dp else 3.dp, PixelColors.Outline)
+            .offset(y = if (pressed && enabled) 3.dp else 0.dp)
+            .background(if (!enabled) PixelColors.LineStrong else if (filled) PixelColors.Green else PixelColors.Card)
             .pixelBorder(2.dp, PixelColors.Outline)
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .clickable(
+                enabled = enabled,
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+            )
             .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
         Text(
             text = text,
             style = PixelType.Body,
-            color = if (filled) PixelColors.White else PixelColors.Ink,
+            color = if (!enabled) PixelColors.Ink3 else if (filled) PixelColors.White else PixelColors.Ink,
         )
     }
 }
 
-/** 像素输入框：2px 描边、无圆角；占位符用弱化色，密码走 PasswordVisualTransformation */
+/** 像素输入框：2px 描边、无圆角；占位符用弱化色，密码走 PasswordVisualTransformation。
+ *  maxLength / singleLine / keyboardOptions 供表单校验与多行文本用，带默认值不破坏旧调用。 */
 @Composable
 fun PixelTextField(
     value: String,
@@ -105,6 +117,9 @@ fun PixelTextField(
     placeholder: String,
     modifier: Modifier = Modifier,
     isPassword: Boolean = false,
+    maxLength: Int? = null,
+    singleLine: Boolean = true,
+    keyboardOptions: androidx.compose.foundation.text.KeyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
 ) {
     Box(
         modifier = modifier
@@ -117,8 +132,9 @@ fun PixelTextField(
         }
         BasicTextField(
             value = value,
-            onValueChange = onValueChange,
-            singleLine = true,
+            onValueChange = { v -> onValueChange(if (maxLength != null) v.take(maxLength) else v) },
+            singleLine = singleLine,
+            keyboardOptions = keyboardOptions,
             textStyle = PixelType.Body.copy(color = PixelColors.Ink),
             cursorBrush = SolidColor(PixelColors.Green),
             visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
@@ -165,5 +181,40 @@ fun PixelChip(
             .padding(horizontal = 8.dp, vertical = 4.dp)
     ) {
         Text(text = text, style = PixelType.Small, color = fg)
+    }
+}
+
+/** 通用二次确认弹窗（对齐 Web UI.confirm）：退出 / 解绑 / 回滚 / 通过验收 / 撤回共用 */
+@Composable
+fun PixelConfirmDialog(
+    title: String,
+    message: String,
+    okLabel: String = "确定",
+    cancelLabel: String = "再想想",
+    onOk: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Dialog(onDismissRequest = onCancel) {
+        PixelPanel(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(text = title, style = PixelType.Title, color = PixelColors.Ink)
+                Spacer(Modifier.height(10.dp))
+                Text(text = message, style = PixelType.Body, color = PixelColors.Ink2)
+                Spacer(Modifier.height(18.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    PixelSmallButton(
+                        text = cancelLabel,
+                        onClick = onCancel,
+                        filled = false,
+                        modifier = Modifier.weight(1f),
+                    )
+                    PixelButton(
+                        text = okLabel,
+                        onClick = onOk,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
     }
 }

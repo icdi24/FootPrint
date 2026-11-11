@@ -11,9 +11,12 @@ import me.footprint.app.net.Api
 import me.footprint.app.net.ApiException
 import me.footprint.app.net.AppUsage
 import me.footprint.app.net.ChatMessage
+import me.footprint.app.net.ChatPartner
 import me.footprint.app.net.ChatWebSocket
 import me.footprint.app.net.HomeResponse
 import me.footprint.app.net.HallState
+import me.footprint.app.net.PairStatus
+import me.footprint.app.net.PairInviteResult
 import me.footprint.app.net.PartnerResponse
 import me.footprint.app.net.Session
 import me.footprint.app.net.UserDto
@@ -99,6 +102,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _loadError = MutableStateFlow<String?>(null)
     val loadError: StateFlow<String?> = _loadError.asStateFlow()
 
+    /** 首页聚合单独的错误态：Web 首页有「😿 + 重试」，不能静默吞掉 */
+    private val _homeError = MutableStateFlow<String?>(null)
+    val homeError: StateFlow<String?> = _homeError.asStateFlow()
+
+    fun retryHome() {
+        _homeError.value = null
+        refreshAll()
+    }
+
     // ---------------- 打卡 / 积分（与 Web 版同一套后端） ----------------
 
     /** 首页聚合数据：余额、连续天数、今日待办、小目标、对方今日打卡 */
@@ -125,8 +137,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _chatUnread = MutableStateFlow(0)
     val chatUnread: StateFlow<Int> = _chatUnread.asStateFlow()
 
-    private val _chatPartner = MutableStateFlow<UserDto?>(null)
-    val chatPartner: StateFlow<UserDto?> = _chatPartner.asStateFlow()
+    private val _chatPartner = MutableStateFlow<ChatPartner?>(null)
+    val chatPartner: StateFlow<ChatPartner?> = _chatPartner.asStateFlow()
 
     /** 聊天数据是否已加载过（ChatScreen 据此区分「加载中」与「真的没消息」） */
     private val _chatLoaded = MutableStateFlow(false)
@@ -172,7 +184,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         chatWs = null
     }
 
-    /** 拉取聊天历史 + 未读数（打开 ChatScreen 时 / 登录后调用） */
+    /** 拉取聊天历史 + 未读数（打开 ChatScreen 时 / 登录后调用）。
+     *  对齐 Web：打开聊天即向服务端标记已读，且不要把未读数写回红点。 */
     fun loadChat() {
         val token = Session.token(getApplication()) ?: return
         viewModelScope.launch {
@@ -180,10 +193,35 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val r = Api.getChat(token)
                 _chatPartner.value = r.partner
                 _chatMessages.value = r.messages
-                _chatUnread.value = r.unread
                 _chatLoaded.value = true
+                if (chatOpen) {
+                    // 聊天页开着：按 Web chat.js:54 清服务端未读 + 本地红点
+                    val maxId = r.messages.maxOfOrNull { it.id }
+                    try { Api.markChatRead(token, maxId) } catch (_: Exception) {}
+                    _chatUnread.value = 0
+                } else {
+                    _chatUnread.value = r.unread
+                }
             } catch (e: Exception) {
                 // 失败不打断已有数据，静默
+            }
+        }
+    }
+
+    /** 滚到顶加载更早的历史（对齐 Web chat.js 的 ?before=&limit=40 分页） */
+    fun loadChatMore(before: Long, onDone: (Int) -> Unit = {}) {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                val older = Api.getChatMessages(token, before)
+                if (older.isNotEmpty()) {
+                    val cur = _chatMessages.value
+                    val known = cur.map { it.id }.toHashSet()
+                    _chatMessages.value = older.filter { it.id !in known } + cur
+                }
+                onDone(older.size)
+            } catch (e: Exception) {
+                onDone(0)
             }
         }
     }
@@ -331,6 +369,63 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---------------- 邀请码配对（对齐 Web「我的 → 我的搭档」） ----------------
+
+    private val _pairStatus = MutableStateFlow<PairStatus?>(null)
+    val pairStatus: StateFlow<PairStatus?> = _pairStatus.asStateFlow()
+
+    fun loadPair() {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                _pairStatus.value = Api.getPairStatus(token)
+            } catch (e: Exception) {
+                // 静默：拿不到就保留旧状态
+            }
+        }
+    }
+
+    private fun refreshPair(onDone: (String?) -> Unit, err: String? = null) {
+        loadPair()
+        refreshAll()
+        onDone(err)
+    }
+
+    fun ensurePairInvite(onDone: (String?) -> Unit) = pairAction(onDone, "取码失败") {
+        Api.ensurePairInvite(token())
+    }
+    fun revokePairInvite(code: String, onDone: (String?) -> Unit) = pairAction(onDone, "换码失败") {
+        Api.revokePairInvite(token(), code)
+    }
+    fun joinPair(code: String, onDone: (String?) -> Unit) = pairAction(onDone, "申请失败") {
+        Api.joinPair(token(), code)
+    }
+    fun approvePairRequest(id: String, onDone: (String?) -> Unit) = pairAction(onDone, "同意失败") {
+        Api.approvePairRequest(token(), id)
+    }
+    fun rejectPairRequest(id: String, onDone: (String?) -> Unit) = pairAction(onDone, "拒绝失败") {
+        Api.rejectPairRequest(token(), id)
+    }
+    fun withdrawPairRequest(id: String, onDone: (String?) -> Unit) = pairAction(onDone, "撤回失败") {
+        Api.withdrawPairRequest(token(), id)
+    }
+    fun unbindPair(onDone: (String?) -> Unit) = pairAction(onDone, "解绑失败") {
+        Api.unbindPair(token())
+    }
+
+    private fun token(): String = Session.token(getApplication()) ?: throw ApiException("请先登录")
+
+    private fun pairAction(onDone: (String?) -> Unit, failMsg: String, block: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                block()
+                refreshPair(onDone)
+            } catch (e: Exception) {
+                onDone(e.message ?: failMsg)
+            }
+        }
+    }
+
     init {
         // 冷启动时若已登录（上次会话留存），也要把 WS 连上并拉一次未读
         if (_loggedIn.value) {
@@ -412,6 +507,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun logout() {
+        // 对齐 Web：先通知服务端销毁会话与 WS（token 要在 clear 前取），失败也不阻塞本地清理
+        val token = Session.token(getApplication())
+        if (token != null) {
+            viewModelScope.launch { Api.logout(token) }
+        }
         Session.clear(getApplication())
         disconnectChatWs()
         _loggedIn.value = false
@@ -419,6 +519,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _mine.value = null
         _partner.value = null
         _syncNote.value = null
+        _home.value = null
+        _homeError.value = null
+        _pairStatus.value = null
         _login.value = LoginState()
         _register.value = RegisterState()
         _authMode.value = null
@@ -427,6 +530,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _chatPartner.value = null
         _chatLoaded.value = false
         _hall.value = null
+    }
+
+    /** 改用户名（对齐 Web me.js changeUsername → PATCH /api/me） */
+    fun updateUsername(name: String, onDone: (String?) -> Unit) {
+        val token = Session.token(getApplication()) ?: return
+        viewModelScope.launch {
+            try {
+                val u = Api.updateUsername(token, name.trim())
+                Session.saveUsername(getApplication(), u.username)
+                _myName.value = u.username
+                refreshAll()
+                onDone(null)
+            } catch (e: Exception) {
+                onDone(e.message ?: "改名失败")
+            }
+        }
     }
 
     // ---------------- 刷新 / 上报 ----------------
@@ -475,16 +594,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     _loadError.value = e.message ?: "加载失败"
                 }
 
-                // 4. 首页聚合（打卡/积分）。失败不影响时长卡片
+                // 4. 首页聚合（打卡/积分）。失败要能重试，不能静默（对齐 Web 首页错误态）
                 try {
                     _home.value = Api.getHome(token)
+                    _homeError.value = null
                 } catch (e: ApiException) {
                     if (e.code == 401) {
                         Session.clear(getApplication())
                         _loggedIn.value = false
+                    } else {
+                        _homeError.value = e.message
                     }
                 } catch (e: Exception) {
-                    // 静默：时长卡片仍然可用
+                    _homeError.value = e.message ?: "加载失败"
                 }
             }
 
@@ -493,15 +615,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 给某个日常目标打卡；成功后自动刷新首页与流水 */
-    fun checkin(goalId: Long, durationMin: Int?, evidenceText: String?) {
+    fun checkin(goalId: Long, durationMin: Int?, evidenceText: String?, evidenceId: Long? = null) {
         val token = Session.token(getApplication()) ?: return
         if (_checkinBusy.value != null) return
         _checkinBusy.value = goalId
         viewModelScope.launch {
             try {
-                val r = Api.checkin(token, goalId, durationMin, evidenceText)
-                val bonus = if (r.bonuses.isNotEmpty()) "（${r.bonuses.joinToString("、")}）" else ""
-                _toast.value = "打卡成功 +${r.points} 分$bonus"
+                val r = Api.checkin(token, goalId, durationMin, evidenceText, evidenceId)
+                val bonus = if (r.bonuses.isNotEmpty()) "（${r.bonusText()}）" else ""
+                _toast.value = "打卡成功，+${r.points} 分已入账$bonus"
                 refreshAll()
             } catch (e: ApiException) {
                 _toast.value = e.message ?: "打卡失败"

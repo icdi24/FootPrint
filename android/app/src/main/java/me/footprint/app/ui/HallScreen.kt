@@ -45,6 +45,9 @@ fun HallScreen(vm: AppViewModel, onClose: () -> Unit) {
     val hall by vm.hall.collectAsStateWithLifecycle()
     var toast by remember { mutableStateOf<String?>(null) }
     var publishing by remember { mutableStateOf(false) }
+    // 撤回 / 接受前的二次确认（对齐 Web hall.js 的 UI.confirm）
+    var confirmWithdraw by remember { mutableStateOf(false) }
+    var confirmAcceptId by remember { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(Unit) { vm.loadHall() }
 
@@ -85,22 +88,11 @@ fun HallScreen(vm: AppViewModel, onClose: () -> Unit) {
                     HallContent(
                         state = state,
                         onPublish = { publishing = true },
-                        onWithdraw = {
-                            vm.withdrawHall { err -> toast = err ?: "已撤回" }
-                        },
+                        onWithdraw = { confirmWithdraw = true },
                         onInvite = { userId ->
                             vm.inviteHall(userId) { err -> toast = err ?: "邀请已发出" }
                         },
-                        onAccept = { id ->
-                            vm.acceptHallInvite(id) { err ->
-                                if (err != null) {
-                                    toast = err
-                                } else {
-                                    toast = "组队成功 🎉"
-                                    onClose()
-                                }
-                            }
-                        },
+                        onAccept = { id -> confirmAcceptId = id },
                         onDecline = { id ->
                             vm.declineHallInvite(id) { err -> toast = err }
                         },
@@ -111,6 +103,40 @@ fun HallScreen(vm: AppViewModel, onClose: () -> Unit) {
                 }
             }
         }
+    }
+
+    // 撤回 / 接受二次确认（对齐 Web hall.js withdraw / accept 的 UI.confirm）
+    if (confirmWithdraw) {
+        PixelConfirmDialog(
+            title = "撤回发布",
+            message = "撤回后别人就看不见你了，确定吗？",
+            okLabel = "撤回",
+            onOk = {
+                confirmWithdraw = false
+                vm.withdrawHall { err -> toast = err ?: "已撤回" }
+            },
+            onCancel = { confirmWithdraw = false },
+        )
+    }
+    val acceptId = confirmAcceptId
+    if (acceptId != null) {
+        PixelConfirmDialog(
+            title = "接受邀请",
+            message = "接受后你们会自动成为搭子，确定吗？",
+            okLabel = "接受",
+            onOk = {
+                confirmAcceptId = null
+                vm.acceptHallInvite(acceptId) { err ->
+                    if (err != null) {
+                        toast = err
+                    } else {
+                        toast = "组队成功 🎉"
+                        onClose()
+                    }
+                }
+            },
+            onCancel = { confirmAcceptId = null },
+        )
     }
 
     // 发布/编辑表单弹层
@@ -217,7 +243,8 @@ private fun InvitesSection(
                 Spacer(Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text("${from?.username ?: "有人"} 邀请你组队", style = PixelType.Body, color = PixelColors.Ink)
-                    Text(AppViewModel.clockOf(inv.createdAt)?.let { "于 $it" } ?: "", style = PixelType.Small, color = PixelColors.Ink3)
+                    val invTime = fmtHallTime(inv.createdAt)
+                    Text(if (invTime.isBlank()) "" else "于 $invTime", style = PixelType.Small, color = PixelColors.Ink3)
                 }
                 Spacer(Modifier.width(8.dp))
                 PixelSmallButton(text = "拒绝", filled = false, onClick = { onDecline(inv.id) })
@@ -238,7 +265,11 @@ private fun InvitesSection(
                 Spacer(Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text("你邀请了 ${to?.username ?: "对方"}", style = PixelType.Body, color = PixelColors.Ink)
-                    Text("待对方确认", style = PixelType.Small, color = PixelColors.Ink3)
+                    val outTime = fmtHallTime(inv.createdAt)
+                    Text(
+                        if (outTime.isBlank()) "待对方确认" else "于 $outTime · 待对方确认",
+                        style = PixelType.Small, color = PixelColors.Ink3,
+                    )
                 }
                 Spacer(Modifier.width(8.dp))
                 PixelSmallButton(text = "取消", filled = false, onClick = { onCancel(inv.id) })
@@ -276,7 +307,8 @@ private fun ListingsSection(
                     Spacer(Modifier.width(8.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(l.username, style = PixelType.Body, color = PixelColors.Ink)
-                        Text(AppViewModel.clockOf(l.createdAt)?.let { "于 $it" } ?: "", style = PixelType.Small, color = PixelColors.Ink3)
+                        val listingTime = fmtHallTime(l.createdAt)
+                        Text(if (listingTime.isBlank()) "" else "于 $listingTime", style = PixelType.Small, color = PixelColors.Ink3)
                     }
                 }
                 if (l.note.isNotBlank()) {
@@ -353,5 +385,16 @@ private fun PublishHallDialog(
                 }
             }
         }
+    }
+}
+
+/** ISO → 上海时间「M月D日 HH:mm」（对齐 Web UI.fmtTimeIso）；非 ISO 兜底用 clockOf 的 HH:mm */
+private fun fmtHallTime(iso: String?): String {
+    if (iso.isNullOrBlank()) return ""
+    return try {
+        val t = java.time.Instant.parse(iso).atZone(java.time.ZoneId.of("Asia/Shanghai"))
+        "${t.monthValue}月${t.dayOfMonth}日 " + String.format(java.util.Locale.US, "%02d:%02d", t.hour, t.minute)
+    } catch (e: Exception) {
+        AppViewModel.clockOf(iso) ?: ""
     }
 }

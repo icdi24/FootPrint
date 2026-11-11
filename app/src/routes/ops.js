@@ -163,12 +163,23 @@ module.exports = function opsRoutes(db, dataDir) {
     } catch (e) { next(e); }
   });
 
-  // 流水
+  // 流水：支持按类型 / 收支方向过滤与分页（供「查看全部」与收支筛选）
   r.get('/ledger', mw.requireUser, async (req, res, next) => {
     try {
+      const type = String(req.query.type || '').trim();
+      const dir = String(req.query.dir || '').trim();
+      const limit = Math.max(1, Math.min(300, Number(req.query.limit) || 300));
+      const before = Number(req.query.before) || 0;
+      const where = ['user_id = ?'];
+      const args = [req.user.id];
+      if (type) { where.push('type = ?'); args.push(type); }
+      if (dir === 'in') where.push('delta > 0');
+      else if (dir === 'out') where.push('delta < 0');
+      if (before > 0) { where.push('id < ?'); args.push(before); }
+      args.push(limit);
       const rows = await db.all(
-        `SELECT * FROM point_ledger WHERE user_id = ? ORDER BY id DESC LIMIT 300`,
-        [req.user.id]
+        `SELECT * FROM point_ledger WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT ?`,
+        args
       );
       res.json({ ledger: rows.map((x) => ({ ...x, typeLabel: LEDGER_TYPES[x.type] || x.type })) });
     } catch (e) { next(e); }

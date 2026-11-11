@@ -191,6 +191,37 @@ object Api {
         }
     }
 
+    /** 原始字节请求：图片证据上传（PUT /api/uploads），后端用 express.raw 接收 */
+    private suspend fun sendRaw(
+        path: String,
+        bytes: ByteArray,
+        contentType: String,
+        token: String,
+    ): String = withContext(Dispatchers.IO) {
+        val builder = Request.Builder()
+            .url(url(path))
+            .header("Cookie", "$COOKIE_NAME=$token")
+            .header("Accept", "application/json")
+            .put(bytes.toRequestBody(contentType.toMediaType()))
+        val response = try {
+            client.newCall(builder.build()).execute()
+        } catch (e: IOException) {
+            throw ApiException("连不上后端：${e.message ?: "网络错误"}")
+        }
+        response.use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) {
+                val err = runCatching { json.decodeFromString(ApiErrorBody.serializer(), text) }.getOrNull()
+                throw ApiException(
+                    err?.error?.takeIf { it.isNotBlank() } ?: "HTTP ${resp.code}",
+                    resp.code,
+                    err?.code,
+                )
+            }
+            text
+        }
+    }
+
     // ---------------- zoowy 常驻问答（第一批：chat / messages / cancel / acceptOffer / confirmDraft） ----------------
 
     /** GET /api/zoowy/messages —— 历史消息（含卡片 / 工具 / 画像改动 / 失败标记） */
@@ -311,10 +342,16 @@ object Api {
     }
 
     /** POST /api/goals/{id}/checkin —— 打卡；duration 不传就用目标的默认时长 */
-    suspend fun checkin(token: String, goalId: Long, durationMin: Int?, evidenceText: String?): CheckinResult {
+    suspend fun checkin(
+        token: String,
+        goalId: Long,
+        durationMin: Int?,
+        evidenceText: String?,
+        evidenceId: Long? = null,
+    ): CheckinResult {
         val body = json.encodeToString(
             CheckinRequest.serializer(),
-            CheckinRequest(durationMin, evidenceText?.takeIf { it.isNotBlank() }),
+            CheckinRequest(durationMin, evidenceText?.takeIf { it.isNotBlank() }, evidenceId),
         )
         val text = send("POST", "api/goals/$goalId/checkin", body, token)
         return json.decodeFromString(CheckinResult.serializer(), text)
@@ -391,12 +428,21 @@ object Api {
         send("POST", "api/goals/$goalId/abandon", "{}", token)
     }
 
-    /** POST /api/goals/{id}/submit —— 小目标提交验收 */
-    suspend fun submitGoal(token: String, goalId: Long, selfStatement: String) {
+    /** POST /api/goals/{id}/submit —— 小目标提交验收（自述必填，可附证据文字/最多 3 张图） */
+    suspend fun submitGoal(
+        token: String,
+        goalId: Long,
+        selfStatement: String,
+        evidenceText: String? = null,
+        evidenceIds: List<Long>? = null,
+    ) {
         send(
             "POST",
             "api/goals/$goalId/submit",
-            json.encodeToString(SubmitRequest.serializer(), SubmitRequest(selfStatement)),
+            json.encodeToString(
+                SubmitRequest.serializer(),
+                SubmitRequest(selfStatement, evidenceText?.takeIf { it.isNotBlank() }, evidenceIds),
+            ),
             token,
         )
     }
@@ -432,14 +478,15 @@ object Api {
         send("PATCH", "api/biggoals/$bigGoalId/goals/$goalId", json.encodeToString(ChainEditPayload.serializer(), body), token)
     }
 
-    /** POST /api/biggoals/{id}/shift —— 整体顺延/提前（只动未启动的） */
-    suspend fun shiftPlan(token: String, bigGoalId: Long, fromDate: String, days: Int) {
-        send(
+    /** POST /api/biggoals/{id}/shift —— 整体顺延/提前（只动未启动的）；返回挪动条数 */
+    suspend fun shiftPlan(token: String, bigGoalId: Long, fromDate: String, days: Int): Int {
+        val text = send(
             "POST",
             "api/biggoals/$bigGoalId/shift",
             json.encodeToString(ShiftPayload.serializer(), ShiftPayload(fromDate, days)),
             token,
         )
+        return runCatching { json.decodeFromString(ShiftResponse.serializer(), text).moved }.getOrDefault(0)
     }
 
     /** DELETE /api/biggoals/{id}/goals/{goalId} —— 解绑（只允许未启动的） */
@@ -676,6 +723,136 @@ object Api {
     suspend fun cancelHallInvite(token: String, id: Long) {
         send("POST", "api/hall/invite/$id/cancel", "{}", token)
     }
+
+    // ==================== 双端对齐新增端点（后端均已存在，只补客户端） ====================
+
+    /** 私有图片 / 全量导出 / 备份下载的完整 URL（二进制下载交给系统浏览器带 Cookie 打开） */
+    fun fileUrl(id: Long): String = url("api/file/$id")
+    fun exportUrl(): String = url("api/export")
+    fun backupUrl(name: String): String = url("api/backups/$name")
+
+    /** PUT /api/uploads?ext=&kind=evidence —— 上传图片证据，返回 {id,url} */
+    suspend fun uploadEvidence(token: String, bytes: ByteArray, ext: String): UploadResult {
+        val safeExt = ext.trim().lowercase().removePrefix(".")
+        val text = sendRaw("api/uploads?ext=$safeExt&kind=evidence", bytes, "image/$safeExt", token)
+        return json.decodeFromString(UploadResult.serializer(), text)
+    }
+
+    /** GET /api/goals/{id} —— 目标详情 + 本月打卡记录（详情弹层 / 撤销定位） */
+    suspend fun getGoal(token: String, goalId: Long): GoalDetailResponse {
+        val text = send("GET", "api/goals/$goalId", null, token)
+        return json.decodeFromString(GoalDetailResponse.serializer(), text)
+    }
+
+    /** POST /api/points/preview —— 与 Web/后端同公式的实时积分预览 */
+    suspend fun previewPoints(token: String, body: PointsPreviewRequest): PointsPreviewResult {
+        val text = send(
+            "POST", "api/points/preview",
+            json.encodeToString(PointsPreviewRequest.serializer(), body), token,
+        )
+        return json.decodeFromString(PointsPreviewResult.serializer(), text)
+    }
+
+    /** GET /api/verifications/{id}/detail —— 验收详情（自述 / 证据 / 历史驳回） */
+    suspend fun verificationDetail(token: String, id: Long): VerificationDetailResponse {
+        val text = send("GET", "api/verifications/$id/detail", null, token)
+        return json.decodeFromString(VerificationDetailResponse.serializer(), text)
+    }
+
+    /** POST /api/biggoals/{id}/goals —— 把小目标挂到路线末尾 */
+    suspend fun bindChainGoal(token: String, bigGoalId: Long, body: ChainBindPayload) {
+        send(
+            "POST", "api/biggoals/$bigGoalId/goals",
+            json.encodeToString(ChainBindPayload.serializer(), body), token,
+        )
+    }
+
+    /** GET /api/usage/range?days=7 —— 7 天手机时长（断点 = 未上报，不补 0） */
+    suspend fun getUsageRange(token: String, days: Int = 7): UsageRangeResponse {
+        val text = send("GET", "api/usage/range?days=$days", null, token)
+        return json.decodeFromString(UsageRangeResponse.serializer(), text)
+    }
+
+    // ---- 邀请码配对（Web「我的 → 我的搭档」整套） ----
+    suspend fun getPairStatus(token: String): PairStatus {
+        val text = send("GET", "api/pair/status", null, token)
+        return json.decodeFromString(PairStatus.serializer(), text)
+    }
+    suspend fun ensurePairInvite(token: String): PairInviteResult {
+        val text = send("POST", "api/pair/invite", "{}", token)
+        return json.decodeFromString(PairInviteResult.serializer(), text)
+    }
+    suspend fun revokePairInvite(token: String, code: String): PairInviteResult {
+        val text = send("POST", "api/pair/invite/$code/revoke", "{}", token)
+        return json.decodeFromString(PairInviteResult.serializer(), text)
+    }
+    suspend fun joinPair(token: String, code: String) {
+        send(
+            "POST", "api/pair/join",
+            json.encodeToString(PairJoinRequest.serializer(), PairJoinRequest(code)), token,
+        )
+    }
+    suspend fun approvePairRequest(token: String, id: String) {
+        send("POST", "api/pair/request/$id/approve", "{}", token)
+    }
+    suspend fun rejectPairRequest(token: String, id: String) {
+        send("POST", "api/pair/request/$id/reject", "{}", token)
+    }
+    suspend fun withdrawPairRequest(token: String, id: String) {
+        send("DELETE", "api/pair/request/$id", null, token)
+    }
+    suspend fun unbindPair(token: String) {
+        send("POST", "api/pair/unbind", "{}", token)
+    }
+
+    // ---- 账号 / 画像 / AI 日报 ----
+    suspend fun updateUsername(token: String, name: String): UserDto {
+        val text = send(
+            "PATCH", "api/me",
+            json.encodeToString(UsernamePatch.serializer(), UsernamePatch(name)), token,
+        )
+        return json.decodeFromString(UsernamePatchResponse.serializer(), text).user
+    }
+    /** 退出登录要通知服务端销毁会话与 WS；失败也不阻塞本地清理 */
+    suspend fun logout(token: String) {
+        runCatching { send("POST", "api/logout", "{}", token) }
+    }
+    suspend fun logoutAll(token: String) {
+        send("POST", "api/me/logout-all", "{}", token)
+    }
+    suspend fun getMyProfile(token: String): ProfileBlocksResponse {
+        val text = send("GET", "api/me/profile", null, token)
+        return json.decodeFromString(ProfileBlocksResponse.serializer(), text)
+    }
+    suspend fun putProfileBlock(token: String, block: String, content: String) {
+        send(
+            "PUT", "api/me/profile/$block",
+            json.encodeToString(ProfileContentPayload.serializer(), ProfileContentPayload(content)), token,
+        )
+    }
+    suspend fun shareProfileBlocks(token: String, blocks: List<String>) {
+        send(
+            "POST", "api/me/profile/share",
+            json.encodeToString(ProfileSharePayload.serializer(), ProfileSharePayload(blocks)), token,
+        )
+    }
+    suspend fun listDiaries(token: String, days: Int = 7): DiaryListResponse {
+        val text = send("GET", "api/diaries?days=$days", null, token)
+        return json.decodeFromString(DiaryListResponse.serializer(), text)
+    }
+    suspend fun editDiary(token: String, date: String, text: String): DiaryEditResponse {
+        val raw = send(
+            "PATCH", "api/diaries/$date",
+            json.encodeToString(DiaryEditPayload.serializer(), DiaryEditPayload(text)), token,
+        )
+        return json.decodeFromString(DiaryEditResponse.serializer(), raw)
+    }
+    suspend fun shareDiary(token: String, date: String, shared: Boolean) {
+        send(
+            "POST", "api/diaries/$date/share",
+            json.encodeToString(DiarySharePayload.serializer(), DiarySharePayload(shared)), token,
+        )
+    }
 }
 
 // ---------------- 打卡 / 积分相关数据类 ----------------
@@ -704,12 +881,16 @@ data class CheckedInfo(
 )
 
 @Serializable
+data class WeeklyInfo(val done: Int = 0, val need: Int = 1)
+
+@Serializable
 data class Todo(
     val goal: GoalRef,
     val dueToday: Boolean = false,
     val checked: CheckedInfo? = null,
     val pointsNow: Int = 0,
     val streak: Int = 0,
+    val weekly: WeeklyInfo? = null,
 )
 
 @Serializable
@@ -738,6 +919,11 @@ data class StageGoal(
     val total_points: Int? = null,
     val accept_criteria: String? = null,
     val est_total_min: Int? = null,
+    val end_date: String? = null,
+    val planned_date: String? = null,
+    val plan_status: String? = null,
+    val big_goal_id: Long? = null,
+    val big_goal_title: String? = null,
 )
 
 @Serializable
@@ -760,6 +946,15 @@ data class HomeResponse(
 data class CheckinRequest(
     val duration_min: Int? = null,
     val evidence_text: String? = null,
+    val evidence_id: Long? = null,
+)
+
+/** 连续里程碑奖励：后端返回 { n, points, balanceAfter } 对象数组（goals.js:84） */
+@Serializable
+data class BonusDto(
+    val n: Int = 0,
+    val points: Int = 0,
+    val balanceAfter: Int = 0,
 )
 
 @Serializable
@@ -767,8 +962,11 @@ data class CheckinResult(
     val points: Int = 0,
     val streak: Int = 0,
     val balance: Int = 0,
-    val bonuses: List<String> = emptyList(),
-)
+    val bonuses: List<BonusDto> = emptyList(),
+) {
+    /** 对齐 Web 的「🔥 连续 n 达成，额外 +X 分」文案 */
+    fun bonusText(): String = bonuses.joinToString("、") { "连续 ${it.n} 天 +${it.points} 分" }
+}
 
 @Serializable
 data class LedgerItem(
@@ -817,6 +1015,7 @@ data class PartnerGoalItem(
     val emoji: String = "🎯",
     val freq_mode: String = "daily",
     val freq_n: Int = 1,
+    val weekdays: String = "",
     val duration_min: Int = 30,
     val status: String = "",
     val streak: Int = 0,
@@ -831,13 +1030,30 @@ data class TodaySummary(
 )
 
 @Serializable
+data class SharedDiary(
+    val diary_date: String = "",
+    val content: String = "",
+    val updated_at: String = "",
+)
+
+@Serializable
+data class SharedProfileBlock(
+    val block: String = "",
+    val content: String = "",
+    val updated_at: String = "",
+)
+
+@Serializable
 data class PartnerPageResponse(
     val partner: UserDto? = null,
     val partnerStats: UserStats? = null,
     val myStats: UserStats? = null,
     val partnerGoals: List<PartnerGoalItem> = emptyList(),
+    val partnerBigGoals: List<BigGoalDto> = emptyList(),
     val partnerToday: List<PartnerCheckin> = emptyList(),
     val pendingVerifications: List<PendingVerification> = emptyList(),
+    val sharedDiaries: List<SharedDiary> = emptyList(),
+    val sharedProfile: List<SharedProfileBlock> = emptyList(),
     val today: TodaySummary? = null,
     val partnerRecentRedemptions: List<Redemption> = emptyList(),
 )
@@ -850,6 +1066,13 @@ data class PendingVerification(
     val total_points: Int = 0,
     val accept_criteria: String? = null,
     val submitter_username: String = "",
+    val submitter_avatar: String? = null,
+    val self_statement: String? = null,
+    val evidence_text: String? = null,
+    val evidence_ids: String? = null,
+    val submit_count: Int = 0,
+    val created_at: String = "",
+    val reason: String? = null,
 )
 
 @Serializable
@@ -859,6 +1082,10 @@ data class RejectRequest(val reason: String)
 
 @Serializable
 data class Milestone(val n: Int = 0, val p: Int = 0)
+
+/** GET /api/goals/:id 的 goalRow 补充字段（后端 goals.js:32-48） */
+@Serializable
+data class MilestoneInfo(val n: Int = 0, val p: Int = 0, val remaining: Int = 0)
 
 @Serializable
 data class GoalDetail(
@@ -884,7 +1111,13 @@ data class GoalDetail(
     val accept_criteria: String? = null,
     val total_points: Int? = null,
     val custom_points: Int? = null,
+    val customPoints: Int? = null,
+    val ratio: Double? = null,
+    val nextMilestone: MilestoneInfo? = null,
     val perCheckinPoints: Int = 0,
+    val big_goal_id: Long? = null,
+    val plan_status: String? = null,
+    val planned_date: String? = null,
 )
 
 @Serializable
@@ -1032,6 +1265,7 @@ data class WishPayload(
     val price_cny: Double,
     val points_cost: Int? = null,
     val cooldown_days: Int? = null,
+    val status: String? = null,
 )
 
 @Serializable
@@ -1110,7 +1344,11 @@ data class BackupEntry(
 data class BackupsResponse(val backups: List<BackupEntry> = emptyList())
 
 @Serializable
-data class SubmitRequest(val self_statement: String)
+data class SubmitRequest(
+    val self_statement: String,
+    val evidence_text: String? = null,
+    val evidence_ids: List<Long>? = null,
+)
 
 // ---------------- 搭子私聊 ----------------
 
@@ -1124,8 +1362,15 @@ data class ChatMessage(
 )
 
 @Serializable
+data class ChatPartner(
+    val id: Long = 0,
+    val nickname: String = "",
+    val avatar: String? = null,
+)
+
+@Serializable
 data class ChatResponse(
-    val partner: UserDto? = null,
+    val partner: ChatPartner? = null,
     val unread: Int = 0,
     val messages: List<ChatMessage> = emptyList(),
 )
@@ -1374,3 +1619,199 @@ data class StatusPayload(
     val text: String = "",
     val group: String = "mood",
 )
+
+// ==================== 双端对齐新增 DTO ====================
+
+@Serializable
+data class UploadResult(val id: Long = 0, val url: String = "")
+
+@Serializable
+data class ShiftResponse(val moved: Int = 0)
+
+@Serializable
+data class GoalCheckin(
+    val id: Long = 0,
+    val check_date: String = "",
+    val duration_min: Int = 0,
+    val points: Int = 0,
+    val evidence_text: String = "",
+    val evidence_id: Long? = null,
+    val status: String = "credited",
+    val created_at: String = "",
+)
+
+@Serializable
+data class GoalDetailResponse(
+    val goal: GoalDetail = GoalDetail(),
+    val monthCheckins: List<GoalCheckin> = emptyList(),
+)
+
+@Serializable
+data class PointsPreviewRequest(
+    val freq_mode: String = "daily",
+    val freq_n: Int = 1,
+    val weekdays: String = "",
+    val duration_min: Int = 30,
+    val difficulty: Int = 3,
+    val window_start: String? = null,
+    val window_end: String? = null,
+    val custom_points: Int? = null,
+)
+
+@Serializable
+data class PointsPreviewResult(
+    val points: Int = 0,
+    val ratio: Double? = null,
+    val inWindow: Boolean = false,
+)
+
+@Serializable
+data class VerificationDetail(
+    val id: Long = 0,
+    val status: String = "",
+    val submitCount: Int = 0,
+    val selfStatement: String? = null,
+    val evidenceText: String? = null,
+    val evidenceUrls: List<String> = emptyList(),
+    val createdAt: String = "",
+    val decidedAt: String? = null,
+    val reason: String? = null,
+)
+
+@Serializable
+data class VerificationGoal(
+    val title: String = "",
+    val emoji: String = "🏁",
+    val description: String? = null,
+    val acceptCriteria: String? = null,
+    val totalPoints: Int = 0,
+    val endDate: String? = null,
+)
+
+@Serializable
+data class VerificationSubmitter(val nickname: String = "", val avatar: String? = null)
+
+@Serializable
+data class VerificationHistoryItem(
+    val status: String = "",
+    val reason: String? = null,
+    val submit_count: Int = 0,
+    val created_at: String = "",
+    val decided_at: String? = null,
+)
+
+@Serializable
+data class VerificationDetailResponse(
+    val verification: VerificationDetail = VerificationDetail(),
+    val goal: VerificationGoal = VerificationGoal(),
+    val submitter: VerificationSubmitter = VerificationSubmitter(),
+    val history: List<VerificationHistoryItem> = emptyList(),
+)
+
+@Serializable
+data class ChainBindPayload(
+    val goal_id: Long,
+    val planned_date: String? = null,
+    val plan_order: Int? = null,
+)
+
+@Serializable
+data class UsageApp(val package_name: String = "", val app_name: String = "", val seconds: Long = 0)
+
+@Serializable
+data class UsageDay(
+    val date: String = "",
+    val totalSeconds: Long? = null,
+    val topApps: List<UsageApp> = emptyList(),
+)
+
+@Serializable
+data class UsageSeries(val series: List<UsageDay> = emptyList())
+
+@Serializable
+data class UsageRangeResponse(
+    val from: String = "",
+    val today: String = "",
+    val days: Int = 7,
+    val me: UsageSeries = UsageSeries(),
+    val partner: UsageSeries? = null,
+)
+
+@Serializable
+data class PairUser(val id: Long = 0, val username: String = "", val avatar: String? = null)
+
+@Serializable
+data class PairCode(val code: String = "", val expiresAt: String = "")
+
+@Serializable
+data class PairRequest(
+    val id: String = "",
+    val requester: PairUser? = null,
+    val owner: PairUser? = null,
+    val requestedAt: String = "",
+)
+
+@Serializable
+data class PairEvent(
+    val id: Long = 0,
+    val action: String = "",
+    val detail: String = "",
+    val username: String = "",
+    val createdAt: String = "",
+)
+
+@Serializable
+data class PairStatus(
+    val paired: Boolean = false,
+    val pairId: Long? = null,
+    val status: String = "",
+    val partner: PairUser? = null,
+    val memberCount: Int = 0,
+    val canInvite: Boolean = true,
+    val myCode: PairCode? = null,
+    val pendingRequest: PairRequest? = null,
+    val myRequest: PairRequest? = null,
+    val events: List<PairEvent> = emptyList(),
+)
+
+@Serializable
+data class PairInviteResult(val ok: Boolean = false, val code: String = "", val expiresAt: String = "")
+
+@Serializable
+data class PairJoinRequest(val code: String)
+
+@Serializable
+data class UsernamePatch(val username: String)
+
+@Serializable
+data class UsernamePatchResponse(val user: UserDto = UserDto(0, ""))
+
+@Serializable
+data class ProfileBlock(
+    val block: String = "",
+    val content: String = "",
+    val source: String = "",
+    val status: String = "",
+    val updated_at: String = "",
+)
+
+@Serializable
+data class ProfileBlocksResponse(val blocks: List<ProfileBlock> = emptyList())
+
+@Serializable
+data class ProfileContentPayload(val content: String)
+
+@Serializable
+data class ProfileSharePayload(val blocks: List<String>)
+
+@Serializable
+data class DiaryListResponse(val diaries: List<DiaryDto> = emptyList())
+
+@Serializable
+data class DiaryEditPayload(val user_edited: String)
+
+@Serializable
+data class DiaryEditResponse(val diary: DiaryDto = DiaryDto())
+
+@Serializable
+data class DiarySharePayload(val shared: Boolean)

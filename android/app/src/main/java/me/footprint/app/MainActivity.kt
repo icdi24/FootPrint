@@ -28,6 +28,7 @@ import me.footprint.app.ui.AppViewModel
 import me.footprint.app.ui.AuthScreen
 import me.footprint.app.ui.HomeScreen
 import me.footprint.app.ui.MainScaffold
+import me.footprint.app.ui.MainTab
 import me.footprint.app.ui.ZoowyFloatButton
 import me.footprint.app.ui.theme.FootprintTheme
 import me.footprint.app.ui.theme.PixelColors
@@ -122,10 +123,14 @@ private fun RootScreen(vm: AppViewModel = viewModel()) {
 
     // 访客可逛：始终显示主脚手架；未登录时各 Tab 显示空态 + 登录/注册入口，
     // 点登录/注册弹认证页（authMode 非空），成功或「返回逛逛」后收起。
+    // 日报通知点进来（DiaryWorker 塞的 open_diary）直接落到「我的」页看日报。
+    val activity = context as? android.app.Activity
+    val openDiary = activity?.intent?.getBooleanExtra("open_diary", false) == true
     Box(modifier = Modifier.fillMaxSize()) {
         MainScaffold(
             vm = vm,
             onOpenUsageSettings = { UsageAccess.openSettings(context) },
+            initialTab = if (openDiary) MainTab.Me else MainTab.Home,
         )
         if (authMode != null) {
             AuthScreen(vm = vm)

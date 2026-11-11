@@ -46,18 +46,27 @@ enum class MainTab(val label: String, val icon: String) {
 fun MainScaffold(
     vm: AppViewModel,
     onOpenUsageSettings: () -> Unit,
+    initialTab: MainTab = MainTab.Home,
 ) {
-    var tab by rememberSaveable { mutableStateOf(MainTab.Home) }
+    var tab by rememberSaveable { mutableStateOf(initialTab) }
     val chatUnread by vm.chatUnread.collectAsStateWithLifecycle()
 
     Box(modifier = Modifier.fillMaxSize().background(PixelColors.Bg)) {
         Column(modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.weight(1f)) {
                 when (tab) {
-                    MainTab.Home -> HomeScreen(vm = vm, onOpenUsageSettings = onOpenUsageSettings)
+                    MainTab.Home -> HomeScreen(
+                        vm = vm,
+                        onOpenUsageSettings = onOpenUsageSettings,
+                        onSelectTab = { tab = it },
+                    )
                     MainTab.Goals -> GoalsScreen(vm = vm)
                     MainTab.Wish -> WishScreen(vm = vm)
-                    MainTab.Partner -> PartnerScreen(vm = vm, onOpenUsageSettings = onOpenUsageSettings)
+                    MainTab.Partner -> PartnerScreen(
+                        vm = vm,
+                        onOpenUsageSettings = onOpenUsageSettings,
+                        onGoMe = { tab = MainTab.Me },
+                    )
                     MainTab.Me -> MeScreen(vm = vm)
                 }
             }

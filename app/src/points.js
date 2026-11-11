@@ -84,18 +84,22 @@ async function setPoints(db, patch) {
       else next.window[k] = v;
     }
   }
-  if (patch.milestones) {
-    if (!Array.isArray(patch.milestones) || patch.milestones.length < 1 || patch.milestones.length > 8) {
-      errors.push('里程碑表需为 1–8 条');
-    } else {
-      for (const m of patch.milestones) {
+  // 客户端只改单个系数时会带空数组（kotlinx encodeDefaults），视为「不改里程碑」；
+  // 显式传空数组也等价于保留原值，避免误 400「里程碑表需为 1–8 条」。
+  const ms = patch.milestones;
+  if (Array.isArray(ms) && ms.length > 0) {
+    if (ms.length > 8) errors.push('里程碑表需为 1–8 条');
+    else {
+      for (const m of ms) {
         if (!Number.isInteger(m.n) || m.n < 1 || !Number.isInteger(m.p) || m.p < 1) {
           errors.push('里程碑条目需为正整数');
           break;
         }
       }
-      if (!errors.length) next.milestones = patch.milestones;
+      if (!errors.length) next.milestones = ms;
     }
+  } else if (ms !== undefined && !Array.isArray(ms)) {
+    errors.push('里程碑表需为 1–8 条');
   }
   if (errors.length) return { ok: false, errors };
   await db.run(

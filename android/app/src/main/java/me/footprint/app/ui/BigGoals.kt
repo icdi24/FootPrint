@@ -35,11 +35,45 @@ import me.footprint.app.net.Api
 import me.footprint.app.net.BigGoalDetailResponse
 import me.footprint.app.net.BigGoalDto
 import me.footprint.app.net.BigGoalPayload
+import me.footprint.app.net.ChainBindPayload
 import me.footprint.app.net.ChainEditPayload
 import me.footprint.app.net.ChainGoalDto
+import me.footprint.app.net.GoalPayload
 import me.footprint.app.net.Session
 import me.footprint.app.ui.theme.PixelColors
 import me.footprint.app.ui.theme.PixelType
+
+/** 上海时区的今天（yyyy-MM-dd） */
+private fun todayShanghai(): String =
+    java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).toString()
+
+/** ISO 时间戳 → 'M月d日 HH:mm'（对齐 Web UI.fmtTimeIso） */
+private fun fmtDateTime(iso: String): String {
+    return try {
+        val t = java.time.Instant.parse(iso).atZone(java.time.ZoneId.of("Asia/Shanghai"))
+        "${t.monthValue}月${t.dayOfMonth}日 ${String.format("%02d", t.hour)}:${String.format("%02d", t.minute)}"
+    } catch (e: Exception) {
+        iso
+    }
+}
+
+/** 大目标状态文案（对齐 Web statusText） */
+private fun bigStatusText(status: String): String = when (status) {
+    "active" -> "推进中"
+    "done" -> "已达成"
+    "archived" -> "已归档"
+    else -> ""
+}
+
+/** '2026-11-02' → '11月2日'（对齐 Web UI.fmtDate；GoalsScreen 的 fmtDate 是 file-private，这里自带一份） */
+private fun fmtDateSh(s: String?): String {
+    if (s.isNullOrBlank()) return ""
+    val p = s.split('-')
+    if (p.size < 3) return s
+    val m = p[1].toIntOrNull() ?: return s
+    val d = p[2].toIntOrNull() ?: return s
+    return "${m}月${d}日"
+}
 
 /** 大目标列表：概览卡（进度条 + 客观计数 + AI 进度说明），点卡开详情 */
 @Composable
@@ -48,6 +82,7 @@ fun BigGoalsView(
     loading: Boolean,
     onNew: () -> Unit,
     onOpen: (Long) -> Unit,
+    onZoovy: (Long) -> Unit = {},
 ) {
     if (loading && goals == null) {
         PixelPanel(modifier = Modifier.fillMaxWidth()) {
@@ -99,6 +134,14 @@ fun BigGoalsView(
                     style = PixelType.Small,
                     color = PixelColors.Ink2,
                 )
+                Spacer(Modifier.height(10.dp))
+                // 对齐 Web bigCard：每张卡直接给一个 zoowy 拆计划入口
+                PixelSmallButton(
+                    text = "🐾 让 zoowy 拆计划",
+                    onClick = { onZoovy(b.id) },
+                    filled = false,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
@@ -114,12 +157,16 @@ fun BigGoalDetailDialog(
     onDismiss: () -> Unit,
     onChanged: () -> Unit,
     onEdit: (BigGoalDto) -> Unit,
+    // 给默认值：Screens.kt 的 5 参数调用不受影响
+    onZoovy: (Long) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var detail by remember { mutableStateOf<BigGoalDetailResponse?>(null) }
     var toast by remember { mutableStateOf<String?>(null) }
     var editTarget by remember { mutableStateOf<ChainGoalDto?>(null) }
     var showShift by remember { mutableStateOf(false) }
+    var showAddChain by remember { mutableStateOf(false) }
+    var unbindTarget by remember { mutableStateOf<ChainGoalDto?>(null) }
 
     fun reload() {
         val token = Session.token(context) ?: return
@@ -153,15 +200,26 @@ fun BigGoalDetailDialog(
                             Spacer(Modifier.width(10.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(bg.title, style = PixelType.Title, color = PixelColors.Ink)
-                                Text("客观 ${d.done}/${d.total} 个小目标达成", style = PixelType.Small, color = PixelColors.Ink2)
+                                Text(
+                                    "${bigStatusText(bg.status)} · 客观 ${d.done}/${d.total} 个小目标达成",
+                                    style = PixelType.Small,
+                                    color = PixelColors.Ink2,
+                                )
                             }
                             PixelChip(text = "${bg.progress}%", bg = PixelColors.GreenSoft, fg = PixelColors.GreenDeep)
                         }
                         Spacer(Modifier.height(8.dp))
                         PixelBar(fraction = bg.progress / 100f)
+                        Spacer(Modifier.height(4.dp))
+                        // 对齐 Web：zoowy 估的进度
+                        Text("zoowy 估的进度 ${bg.progress}%", style = PixelType.Small, color = PixelColors.Ink3)
                         if (bg.progress_note.isNotBlank()) {
                             Spacer(Modifier.height(4.dp))
-                            Text("zoowy：${bg.progress_note}", style = PixelType.Small, color = PixelColors.Ink2)
+                            Text(
+                                "zoowy：${bg.progress_note}" + (bg.progress_at?.let { " · ${fmtDateTime(it)}" } ?: ""),
+                                style = PixelType.Small,
+                                color = PixelColors.Ink2,
+                            )
                         }
                         if (bg.description.isNotBlank()) {
                             Spacer(Modifier.height(6.dp))
@@ -185,7 +243,12 @@ fun BigGoalDetailDialog(
                                     Text("${g.emoji ?: "🎯"} ${g.title}", style = PixelType.Body, color = PixelColors.Ink)
                                     Text(
                                         text = buildString {
-                                            append(g.planned_date?.let { "计划 $it" } ?: "未排日期")
+                                            append(g.planned_date?.let { "计划 ${fmtDateSh(it)}" } ?: "未排日期")
+                                            // 已逾期：有计划日期、未达成、还没做完的
+                                            val pd = g.planned_date
+                                            val overdue = pd != null && g.plan_status != "done" &&
+                                                g.status != "achieved" && pd < todayShanghai()
+                                            if (overdue) append(" 已逾期")
                                             append(" · ")
                                             append(
                                                 when (g.plan_status) {
@@ -195,7 +258,14 @@ fun BigGoalDetailDialog(
                                                     else -> "未绑定"
                                                 },
                                             )
-                                            if (g.status == "achieved") append(" ✓")
+                                            // 对齐 Web stateLabel：待验收 / 已放弃 / 已达成
+                                            val stateLabel = when (g.status) {
+                                                "achieved" -> "已达成 ✓"
+                                                "reviewing" -> "待验收"
+                                                "abandoned" -> "已放弃"
+                                                else -> ""
+                                            }
+                                            if (stateLabel.isNotBlank()) append(" · $stateLabel")
                                         },
                                         style = PixelType.Small,
                                         color = PixelColors.Ink2,
@@ -206,14 +276,25 @@ fun BigGoalDetailDialog(
                                 }
                                 if (g.status != "achieved" && g.status != "abandoned") {
                                     PixelSmallButton(text = "改", onClick = { editTarget = g })
+                                    // 对齐 Web：只有未启动(planned) 才能从路线里移出
+                                    if (g.plan_status == "planned") {
+                                        Spacer(Modifier.width(6.dp))
+                                        PixelSmallButton(text = "移出", onClick = { unbindTarget = g }, filled = false)
+                                    }
                                 }
                             }
                         }
                         Spacer(Modifier.height(12.dp))
                         Row(modifier = Modifier.fillMaxWidth()) {
-                            PixelSmallButton(text = "编辑", onClick = { onEdit(bg) }, filled = false)
+                            PixelSmallButton(text = "和 zoowy 讨论", onClick = { onZoovy(bigGoalId) }, filled = false, modifier = Modifier.weight(1f))
                             Spacer(Modifier.width(8.dp))
-                            PixelSmallButton(text = "顺延 / 提前", onClick = { showShift = true }, filled = false)
+                            PixelSmallButton(text = "加个小目标", onClick = { showAddChain = true }, filled = false, modifier = Modifier.weight(1f))
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            PixelSmallButton(text = "编辑", onClick = { onEdit(bg) }, filled = false, modifier = Modifier.weight(1f))
+                            Spacer(Modifier.width(8.dp))
+                            PixelSmallButton(text = "顺延 / 提前", onClick = { showShift = true }, filled = false, modifier = Modifier.weight(1f))
                             Spacer(Modifier.width(8.dp))
                             PixelButton(text = "关掉", onClick = onDismiss, modifier = Modifier.weight(1f))
                         }
@@ -246,11 +327,58 @@ fun BigGoalDetailDialog(
             context = context,
             bigGoalId = bigGoalId,
             onDismiss = { showShift = false },
-            onSaved = {
+            onSaved = { moved ->
                 showShift = false
+                toast = "挪了 $moved 项"
                 reload()
                 onChanged()
             },
+        )
+    }
+
+    // 往路线末尾加个小目标（先建 stage 目标，再挂链）
+    if (showAddChain) {
+        AddChainGoalDialog(
+            bigGoalId = bigGoalId,
+            chainLen = detail?.chain?.size ?: 0,
+            context = context,
+            onDismiss = { showAddChain = false },
+            onSaved = {
+                showAddChain = false
+                toast = "已挂到路线末尾"
+                reload()
+                onChanged()
+            },
+        )
+    }
+
+    // 移出路线：二次确认（Web 文案）→ unbindChainGoal
+    unbindTarget?.let { target ->
+        PixelConfirmDialog(
+            title = "从路线里移出",
+            message = "把「${target.title}」从路线里移出？目标本身不删，只是不再挂在路线上。",
+            okLabel = "移出",
+            cancelLabel = "再想想",
+            onOk = {
+                val token = Session.token(context)
+                if (token == null) {
+                    unbindTarget = null
+                } else {
+                    scope.launch {
+                        try {
+                            Api.unbindChainGoal(token, bigGoalId, target.id)
+                            toast = "已移出路线"
+                            unbindTarget = null
+                            reload()
+                            onChanged()
+                        } catch (e: Exception) {
+                            toast = e.message ?: "操作失败"
+                            unbindTarget = null
+                        }
+                    }
+                }
+            },
+            onCancel = { unbindTarget = null },
         )
     }
 }
@@ -332,19 +460,24 @@ private fun ShiftDialog(
     context: android.content.Context,
     bigGoalId: Long,
     onDismiss: () -> Unit,
-    onSaved: () -> Unit,
+    onSaved: (Int) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var days by remember { mutableStateOf("7") }
+    // 对齐 Web shiftSheet：起算日期可改，别写死 today
+    var fromDate by remember { mutableStateOf(todayShanghai()) }
     var saving by remember { mutableStateOf(false) }
-    val today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).toString()
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         PixelPanel(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("整体顺延 / 提前", style = PixelType.Title, color = PixelColors.Ink)
                 Spacer(Modifier.height(8.dp))
-                Text("从今天（$today）起，把未启动的小目标整体挪动：", style = PixelType.Small, color = PixelColors.Ink2)
+                Text("从哪天起", style = PixelType.Small, color = PixelColors.Ink3)
+                Spacer(Modifier.height(4.dp))
+                PixelTextField(value = fromDate, onValueChange = { fromDate = it }, placeholder = "YYYY-MM-DD", modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(10.dp))
+                Text("挪几天（负数 = 提前），把未启动的小目标整体挪动：", style = PixelType.Small, color = PixelColors.Ink2)
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     PixelSmallButton(text = "−1", onClick = { days = ((days.toIntOrNull() ?: 0) - 1).toString() })
@@ -354,7 +487,7 @@ private fun ShiftDialog(
                     PixelSmallButton(text = "+1", onClick = { days = ((days.toIntOrNull() ?: 0) + 1).toString() })
                 }
                 Spacer(Modifier.height(6.dp))
-                Text("负数 = 提前。已进行中 / 待验收 / 已达成的不动", style = PixelType.Small, color = PixelColors.Ink3)
+                Text("只挪「未启动」的；已进行中 / 待验收 / 已达成的不动", style = PixelType.Small, color = PixelColors.Ink3)
                 Spacer(Modifier.height(12.dp))
                 Row(modifier = Modifier.fillMaxWidth()) {
                     PixelButton(text = "取消", onClick = onDismiss, modifier = Modifier.weight(1f))
@@ -368,8 +501,8 @@ private fun ShiftDialog(
                             saving = true
                             scope.launch {
                                 try {
-                                    Api.shiftPlan(token, bigGoalId, today, d)
-                                    onSaved()
+                                    val moved = Api.shiftPlan(token, bigGoalId, fromDate, d)
+                                    onSaved(moved)
                                 } catch (e: Exception) {
                                     saving = false
                                 }
@@ -419,9 +552,13 @@ fun BigGoalEditorDialog(
                     }
                 }
                 Spacer(Modifier.height(8.dp))
-                PixelTextField(value = title, onValueChange = { title = it }, placeholder = "比如：找到 Agent 开发工程师的工作")
+                // 对齐 Web BigGoalForm：名称 maxlength 40
+                PixelTextField(value = title, onValueChange = { title = it.take(40) }, placeholder = "比如：找到 Agent 开发工程师的工作", modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
-                PixelTextField(value = desc, onValueChange = { desc = it }, placeholder = "描述（会喂给 zoowy 帮你拆计划）")
+                // 对齐 Web BigGoalForm：label + 描述 maxlength 500
+                Text("描述（这段会作为背景给 zoowy 参考）", style = PixelType.Small, color = PixelColors.Ink3)
+                Spacer(Modifier.height(4.dp))
+                PixelTextField(value = desc, onValueChange = { desc = it.take(500) }, placeholder = "想到哪写到哪：为什么想做、现在什么水平、大概多久想成", modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(12.dp))
                 Row(modifier = Modifier.fillMaxWidth()) {
                     PixelButton(text = "取消", onClick = onDismiss, modifier = Modifier.weight(1f))
@@ -438,6 +575,102 @@ fun BigGoalEditorDialog(
                                     if (editing) Api.updateBigGoal(token, existing!!.id, body) else Api.createBigGoal(token, body)
                                     onSaved()
                                 } catch (e: Exception) {
+                                    saving = false
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 往路线末尾加个小目标：先 createGoal(stage) 再 bindChainGoal（对齐 Web addChainGoal） */
+@Composable
+private fun AddChainGoalDialog(
+    bigGoalId: Long,
+    chainLen: Int,
+    context: android.content.Context,
+    onDismiss: () -> Unit,
+    onSaved: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var title by remember { mutableStateOf("") }
+    var date by remember {
+        mutableStateOf(
+            java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).plusDays(1).toString()
+        )
+    }
+    var criteria by remember { mutableStateOf("") }
+    var saving by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        PixelPanel(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("加个小目标", style = PixelType.Title, color = PixelColors.Ink)
+                Spacer(Modifier.height(10.dp))
+                Text("小目标名称", style = PixelType.Small, color = PixelColors.Ink3)
+                Spacer(Modifier.height(4.dp))
+                PixelTextField(value = title, onValueChange = { title = it.take(30) }, placeholder = "比如：写完简历初稿", modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(8.dp))
+                Text("计划日期", style = PixelType.Small, color = PixelColors.Ink3)
+                Spacer(Modifier.height(4.dp))
+                PixelTextField(value = date, onValueChange = { date = it }, placeholder = "YYYY-MM-DD", modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(8.dp))
+                Text("验收标准（必填）", style = PixelType.Small, color = PixelColors.Ink3)
+                Spacer(Modifier.height(4.dp))
+                PixelTextField(value = criteria, onValueChange = { criteria = it.take(500) }, placeholder = "写成能被「是/否」回答的标准", modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(6.dp))
+                Text("建成即挂到路线末尾，未启动前不进统计、对方看不见", style = PixelType.Small, color = PixelColors.Ink3)
+                error?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(it, style = PixelType.Small, color = PixelColors.RedDeep)
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    PixelButton(text = "取消", onClick = onDismiss, modifier = Modifier.weight(1f))
+                    Spacer(Modifier.width(12.dp))
+                    PixelButton(
+                        text = if (saving) "创建中…" else "创建",
+                        onClick = {
+                            if (saving) return@PixelButton
+                            if (title.isBlank()) {
+                                error = "起个名字"
+                                return@PixelButton
+                            }
+                            if (criteria.isBlank()) {
+                                error = "验收标准必填"
+                                return@PixelButton
+                            }
+                            val token = Session.token(context) ?: return@PixelButton
+                            saving = true
+                            error = null
+                            scope.launch {
+                                try {
+                                    val created = Api.createGoal(
+                                        token,
+                                        GoalPayload(
+                                            type = "stage",
+                                            title = title.trim(),
+                                            accept_criteria = criteria.trim(),
+                                            start_date = date.ifBlank { null },
+                                        ),
+                                    )
+                                    Api.bindChainGoal(
+                                        token,
+                                        bigGoalId,
+                                        ChainBindPayload(
+                                            goal_id = created.id,
+                                            planned_date = date.ifBlank { null },
+                                            plan_order = chainLen + 1,
+                                        ),
+                                    )
+                                    onSaved()
+                                } catch (e: Exception) {
+                                    error = e.message ?: "创建失败"
                                     saving = false
                                 }
                             }

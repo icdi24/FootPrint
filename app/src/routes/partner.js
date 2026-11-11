@@ -107,6 +107,7 @@ module.exports = function partnerRoutes(db) {
           total_points: g.total_points,
           freq_mode: g.freq_mode,
           freq_n: g.freq_n,
+          weekdays: g.weekdays,
           duration_min: g.duration_min,
           difficulty: g.difficulty,
           status: g.status,
