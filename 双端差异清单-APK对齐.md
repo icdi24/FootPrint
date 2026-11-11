@@ -127,10 +127,20 @@
 - [x] **`Api.kt` 基础层**：修 P0 DTO（bonuses→`List<BonusDto>`+`bonusText()`、`Todo.weekly`、`StageGoal.end_date`、`CheckinRequest.evidence_id`、`WishPayload.status`、`SubmitRequest` 证据字段）；补 `PartnerPageResponse`/`PendingVerification`/`GoalDetail` 字段；新增 `sendRaw` 二进制上传与 30+ 个端点封装（uploadEvidence / getGoal / previewPoints / verificationDetail / bindChainGoal / getUsageRange / pair 全套 / updateUsername / logout / profile / diaries / exportUrl…）
 - [x] **骨架层**：`AppViewModel` 加 `homeError`/`retryHome`、`checkin(evidenceId)`、`loadChatMore`、打开聊天自动标已读、`pairStatus` 全套动作、`updateUsername`、`logout` 通知服务端；`MainScaffold` 传 tab 切换回调；`MainActivity` 处理日报通知落地页；`Widgets` 加通用 `PixelConfirmDialog`
 - [x] **后端两处小改**：`points.js` 空数组不再误 400；`ops.js` `/api/ledger` 支持 `?type=` / `?dir=` / `?limit=` / `?before=`
-- [ ] **5 个栏目 P0/P1/P2 补齐**（5 个子代理并行中：今天 / 目标 / 愿望单 / 我们 / 我的）
-- [ ] 统一编译修错 → `assembleDebug` 出 APK
-- [ ] 部署到云端（git archive 部署 + APK 单独 scp 到 `/opt/footprint/public/app-debug.apk`）并验证
-- [ ] 提交推送全部改动
+- [x] **5 个栏目 P0/P1/P2 补齐**（5 个子代理并行：今天 / 目标 / 愿望单 / 我们 / 我的，共 +6746 行 Kotlin）
+- [x] 统一编译修错 → `assembleDebug` 出 APK（14635587 B，2026-11-11 14:05）
+- [x] 部署到云端（git archive 部署 `2ad3823` + APK 单独 scp 到 `/opt/footprint/public/app-debug.apk` 并重建镜像）
+- [x] 提交推送全部改动（`2ad3823` + `26329a0`）
+- [x] **真机验证**：模拟器安装最终版，首页 / 目标 / 我的 三个栏目截图正常，木质皮肤、partner-strip、5 项日历图例、AI 日报、6 色统计徽章全部渲染，无崩溃
 
-> 基线：`android/` gradle 编译 27s BUILD SUCCESSFUL；骨架层 9s BUILD SUCCESSFUL。
-> 云端 APK 当前是 11-09 14:25 的 v1.9（14420052 B），构建产物最终会整体替换。
+> 编译记录：基线 27s、骨架层 9s、全量最终 BUILD SUCCESSFUL。
+> 云端 APK：`http://106.53.188.31:3201/app-debug.apk` → 14635587 B，Last-Modified 2026-11-11 14:06。
+> 云端验证：健康检查 ok、新流水过滤生效（in 85 / out 1 / checkin 79）、积分系数 7 条里程碑完好、栗子 1721 分 / 阿白 180 分数据无损、手机端 Web HTTP 200。
+>
+> **已知剩余差异（非缺陷，需产品决策或机制限制）**：
+> 1. 私聊图片 / 时间戳：两端 + 后端共同缺失，未做。
+> 2. 删除愿望 / experience 分类 / 愿望图片 / 计划版本快照查看：两端 + 后端共同缺失，未做。
+> 3. 数据导出下载：Web 同源 `<a href>` 天然带 Cookie；APK 用系统浏览器 + `Browser.EXTRA_HEADERS` 注入 `fp_token`，个别浏览器可能忽略该头导致 401。
+> 4. 互享画像「分享块」勾选：后端无「查询已分享块」端点，App 保存时以当前勾选覆盖。
+> 5. 一周折线图未画 Y 轴「Xh」数值标签（以图例 + 日期标签代替）；证据图用 OkHttp + Bitmap 自绘无磁盘缓存；状态预设 16 个（Web 30+ 的子集）。
+> 6. 「本周 N/M」的 M 在非 weekly 目标按后端 expected 本地推算（WeekGoal DTO 无 weeklyProgress）。
