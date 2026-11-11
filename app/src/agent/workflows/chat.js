@@ -304,7 +304,11 @@ async function runChat({ db, userId, message, bigGoalId = null, requestId }) {
   } catch (e) {
     // 失败补 assistant 错误记录（v1.3）：对话成对、刷新后看得见；AI 类错误降级成正常响应。
     const kind = e?.kind || 'error';
-    const friendly = kind === 'timeout' ? '这轮想太久断开了，可以再问一次。' : '这轮没答上来，可以再问一次。';
+    const friendly = kind === 'timeout'
+      ? '这轮想太久断开了，可以再问一次。'
+      : kind === 'length'
+        ? '这轮要写的内容太长被截断了，把事情拆成两步说会更稳。'
+        : '这轮没答上来，可以再问一次。';
     try {
       await appendMessage(db, userId, session.id, 'assistant', `🐾 ${friendly}`, { failed: true, kind });
     } catch (_) { /* 落库失败不覆盖原错误 */ }

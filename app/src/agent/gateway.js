@@ -60,7 +60,10 @@ async function runAgentLoop({ db, userId, workflow, action, messages, idempotenc
       idempotencyKey,
       deepThinking,
       signal,
-      maxTokens: deepThinking === true ? 8192 : 1200,
+      // 输出预算：推理 token 与正文/工具调用共用 max_tokens。
+      // 之前非深度思考只给 1200，模型一想多就 finish_reason=length（表现为「这轮没答上来」），
+      // 创建目标 / 大目标 / 计划链这类带工具调用的请求必挂；8192 足够单轮工具调用。
+      maxTokens: deepThinking === true ? 32768 : 8192,
       // 单次模型调用留 45s，给 loop 总超时留余量
       timeoutMs: Math.min(45000, remainingTime()),
     });
