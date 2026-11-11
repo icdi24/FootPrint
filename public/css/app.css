@@ -1013,6 +1013,20 @@ img { max-width: 100%; }
 .ld-delta.pos { color: var(--green-deep); }
 .ld-delta.neg { color: var(--red-deep); }
 .ld-empty, .ld-loading { color: var(--ink-2); font-size: 12px; text-align: center; padding: 18px 0; }
+/* 积分流水折叠：「展开全部 N 条 / 收起」；虚线分隔复用上一条 .ld-row 的 border-bottom */
+.ld-more {
+  display: block;
+  width: 100%;
+  padding: 12px 0 2px;
+  background: none;
+  border: none;
+  color: var(--green-deep);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: center;
+  cursor: pointer;
+}
+.ld-more:hover { color: var(--green); text-decoration: underline; }
 
 .menu-list { background: var(--card); border: 2px solid var(--line-strong); box-shadow: var(--sh-px); padding: 2px 14px; }
 .menu-row {

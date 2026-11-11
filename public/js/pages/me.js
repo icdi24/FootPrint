@@ -655,15 +655,20 @@ const MePage = {
   },
 
   async loadLedger(root) {
+    // 积分流水默认只露最近 5 条，点「展开全部」看完整；展开状态记在 list.dataset 上，
+    // 切换只重渲染、不重复请求接口。
+    const COLLAPSED = 5;
     try {
       const d = await api.get('/api/ledger');
       const list = root.querySelector('#ledger-list');
       if (!list) return;
-      if (!d.ledger.length) {
+      const rows = d.ledger;
+      if (!rows.length) {
         list.innerHTML = '<div class="ld-empty">还没有流水，去打第一张卡吧</div>';
         return;
       }
-      list.innerHTML = d.ledger.map((x) => {
+      let expanded = list.dataset.ledgerExpanded === '1';
+      const rowHtml = (x) => {
         const pos = Number(x.delta) >= 0;
         const sign = Number(x.delta) === 0 ? '—' : pos ? '+' : '−';
         return `
@@ -674,7 +679,23 @@ const MePage = {
           </div>
           <div class="ld-delta ${pos ? 'pos' : 'neg'}">${sign}${UI.fmtNum(Math.abs(x.delta))}</div>
         </div>`;
-      }).join('');
+      };
+      const render = () => {
+        const shown = expanded ? rows : rows.slice(0, COLLAPSED);
+        const more = rows.length > COLLAPSED
+          ? `<button class="ld-more" type="button">${expanded ? '收起 ▴' : `展开全部 ${rows.length} 条 ▾`}</button>`
+          : '';
+        list.innerHTML = shown.map(rowHtml).join('') + more;
+        const btn = list.querySelector('.ld-more');
+        if (btn) {
+          btn.addEventListener('click', () => {
+            expanded = !expanded;
+            list.dataset.ledgerExpanded = expanded ? '1' : '0';
+            render();
+          });
+        }
+      };
+      render();
     } catch (e) {
       const list = root.querySelector('#ledger-list');
       if (list) list.innerHTML = '<div class="ld-empty">流水加载失败</div>';

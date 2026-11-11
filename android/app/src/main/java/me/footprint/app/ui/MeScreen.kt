@@ -1066,9 +1066,14 @@ private fun StatCell(spec: StatSpec) {
   }
 }
 
-/** 积分流水：全量列表（不再 take(30)，对齐 Web loadLedger） */
+/** 积分流水默认只露最近几条，点「展开全部」看完整（与 Web loadLedger 折叠一致） */
+private const val LEDGER_COLLAPSED = 5
+
+/** 积分流水：可折叠列表（默认收起，展开后看全部） */
 @Composable
 private fun LedgerSection(ledger: List<LedgerItem>) {
+  var expanded by remember { mutableStateOf(false) }
+  val shown = if (expanded) ledger else ledger.take(LEDGER_COLLAPSED)
   PixelPanel(Modifier.fillMaxWidth()) {
     Column(Modifier.padding(16.dp)) {
       Text("积分流水", style = PixelType.Title, color = PixelColors.Ink)
@@ -1076,13 +1081,24 @@ private fun LedgerSection(ledger: List<LedgerItem>) {
       if (ledger.isEmpty()) {
         Text("还没有流水，去打第一张卡吧", style = PixelType.Small, color = PixelColors.Ink3)
       } else {
-        ledger.forEachIndexed { i, item ->
+        shown.forEachIndexed { i, item ->
           LedgerRow(item)
-          if (i != ledger.lastIndex) {
+          if (i != shown.lastIndex) {
             Spacer(Modifier.height(10.dp))
             Box(Modifier.fillMaxWidth().height(2.dp).background(PixelColors.Line))
             Spacer(Modifier.height(10.dp))
           }
+        }
+        if (ledger.size > LEDGER_COLLAPSED) {
+          Spacer(Modifier.height(10.dp))
+          Box(Modifier.fillMaxWidth().height(2.dp).background(PixelColors.Line))
+          Spacer(Modifier.height(10.dp))
+          PixelSmallButton(
+            text = if (expanded) "收起 ▴" else "展开全部 ${ledger.size} 条 ▾",
+            onClick = { expanded = !expanded },
+            filled = false,
+            modifier = Modifier.fillMaxWidth(),
+          )
         }
       }
     }
