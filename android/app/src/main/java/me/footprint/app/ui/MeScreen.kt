@@ -33,6 +33,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -1044,22 +1046,40 @@ private data class StatSpec(
   val bg: Color,
 )
 
-/** 单个统计小卡：彩色像素徽章 + 数值 + 标签 */
+/** 单个统计小卡（对齐 Web .stat-cell）：暖白底 + 左侧 5dp 专属色条 + 24sp 等宽大数字 + 标签 */
 @Composable
 private fun StatCell(spec: StatSpec) {
-  PixelPanel(background = spec.bg) {
-    Column(Modifier.padding(12.dp)) {
+  Box(
+    modifier = Modifier
+      .fillMaxWidth()
+      .heightIn(min = 104.dp)
+      .pixelHardShadow(3.dp, PixelColors.WoodDark)
+      .background(PixelColors.Card)
+      .drawBehind {
+        // Web: box-shadow: inset 4px 0 0 var(--sc-tone) —— 左边一条专属色
+        drawRect(spec.tone, size = Size(5.dp.toPx(), size.height))
+      }
+      .pixelBorder(2.dp, PixelColors.LineStrong)
+      .padding(start = 15.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+  ) {
+    Column {
       Box(
         modifier = Modifier
-          .size(28.dp)
+          .size(32.dp)
           .background(spec.tone)
           .pixelBorder(2.dp, PixelColors.Outline),
         contentAlignment = Alignment.Center,
       ) {
-        Text(spec.badge, style = PixelType.Small)
+        Text(spec.badge, style = PixelType.Body)
       }
-      Spacer(Modifier.height(6.dp))
-      Text(spec.value, style = PixelType.Mono, color = PixelColors.Ink)
+      Spacer(Modifier.height(8.dp))
+      Text(
+        text = spec.value,
+        style = PixelType.BigMono,
+        color = PixelColors.Ink,
+        maxLines = 1,
+        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+      )
       Spacer(Modifier.height(2.dp))
       Text(spec.label, style = PixelType.Small, color = PixelColors.Ink3)
     }

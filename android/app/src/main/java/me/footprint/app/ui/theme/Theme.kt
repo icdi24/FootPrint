@@ -62,6 +62,8 @@ object PixelType {
     val Huge: TextStyle = TextStyle(fontSize = 36.sp, lineHeight = 44.sp, fontWeight = FontWeight.Bold, fontFamily = PixelFont)
     /** 数字/计数用的等宽样式（积分、完成数、时间），对应 Web 版的 FusionPixelMono */
     val Mono: TextStyle = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontFamily = PixelFontMono)
+    /** 大号等宽数字：统计卡数值，对齐 Web .sc-val 的 24px 等宽 */
+    val BigMono: TextStyle = TextStyle(fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold, fontFamily = PixelFontMono)
 }
 
 private val colorScheme = lightColorScheme(
