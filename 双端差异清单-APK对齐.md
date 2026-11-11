@@ -132,6 +132,7 @@
 - [x] 部署到云端（git archive 部署 `2ad3823` + APK 单独 scp 到 `/opt/footprint/public/app-debug.apk` 并重建镜像）
 - [x] 提交推送全部改动（`2ad3823` + `26329a0`）
 - [x] **真机验证**：模拟器安装最终版，首页 / 目标 / 我的 三个栏目截图正常，木质皮肤、partner-strip、5 项日历图例、AI 日报、6 色统计徽章全部渲染，无崩溃
+- [x] **积分流水改成可展开**（两端，`76c7e94`）：默认只露最近 5 条，点「展开全部 N 条 / 收起」；Web 用 `list.dataset` 记忆展开态并只重渲染、不重复请求，Android 用 `remember`（切页重置回收起）。实测栗子 93 条：5 → 93（收起 ▴）→ 5
 
 > 编译记录：基线 27s、骨架层 9s、全量最终 BUILD SUCCESSFUL。
 > 云端 APK：`http://106.53.188.31:3201/app-debug.apk` → 14635587 B，Last-Modified 2026-11-11 14:06。
