@@ -4621,8 +4621,8 @@
           <div class="auth-demo">
             <span>演示账号，点一下直接进</span>
             <div class="auth-demo-row">
-              <button class="auth-demo-btn" type="button" data-demo="u1"><span data-icon="avatar" data-icon-kind="badge"></span>栗子</button>
-              <button class="auth-demo-btn" type="button" data-demo="u2"><span data-icon="avatar" data-icon-kind="badge"></span>阿白</button>
+              <button class="auth-demo-btn" type="button" data-demo="lizi"><span data-icon="avatar" data-icon-kind="badge"></span>栗子</button>
+              <button class="auth-demo-btn" type="button" data-demo="abai"><span data-icon="avatar" data-icon-kind="badge"></span>阿白</button>
             </div>
             <p class="auth-demo-note">两个人的数据是通的，换个账号就能看到对方的待办和验收。</p>
           </div>` : `
@@ -4641,7 +4641,7 @@
 
     let avatar = '🐱';
 
-    layer.addEventListener('click', (e) => {
+    layer.addEventListener('click', async (e) => {
       const tab = e.target.closest('[data-mode]');
       if (tab) { renderAuth(tab.dataset.mode); return; }
       const av = e.target.closest('[data-avatar]');
@@ -4651,7 +4651,29 @@
         return;
       }
       const demo = e.target.closest('[data-demo]');
-      if (demo) { loginAs(demo.dataset.demo); return; }
+      if (demo) {
+        if (demo.disabled) return;
+        const label = demo.innerHTML;
+        demo.disabled = true;
+        demo.textContent = '进入中…';
+        try {
+          const res = await API.demoLogin(demo.dataset.demo);
+          const u = (res && res.user) || {};
+          if (!u.id) throw new Error('演示账号尚未初始化');
+          store.me = { id: u.id, username: u.username, avatar: u.avatar || '🐾' };
+          await loginAs(u.id, false);
+        } catch (ex) {
+          demo.disabled = false;
+          demo.innerHTML = label;
+          paintIcons(layer);
+          const errEl = $('#authErr', layer);
+          if (errEl) {
+            errEl.hidden = false;
+            errEl.textContent = ex.message || '演示账号进入失败';
+          }
+        }
+        return;
+      }
     });
 
     const form = $('#authForm', layer);

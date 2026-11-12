@@ -56,6 +56,7 @@
     me: () => api.get('/me'),
     register: (username, password, avatar) => api.post('/register', { username, password, avatar }),
     login: (username, password) => api.post('/login', { username, password }),
+    demoLogin: (slot) => api.post('/demo-login', { slot }),
     logout: () => api.post('/logout'),
     updateMe: (patch) => api.patch('/me', patch),
     changePassword: (oldPassword, newPassword) => api.post('/me/password', { oldPassword, newPassword }),

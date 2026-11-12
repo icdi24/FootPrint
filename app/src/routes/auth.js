@@ -26,6 +26,7 @@ const WEAK = new Set([
   'password', 'password1', 'qwertyui', 'abc12345', 'iloveyou', 'admin123',
   'footprint', 'footprint123', 'letmein', 'welcome1',
 ]);
+const DEMO_ACCOUNTS = Object.freeze({ lizi: '栗子', abai: '阿白' });
 
 module.exports = function authRoutes(db) {
   const r = express.Router();
@@ -165,6 +166,21 @@ module.exports = function authRoutes(db) {
       const s = await createSession(db, user.id);
       setCookie(res, s.token, s.expiresAt);
       log.log('login', `${user.login_name} (${user.id})`);
+      res.json({ user: publicUser(user) });
+    } catch (e) { next(e); }
+  });
+
+  // 演示账号一键登录：只接受两个固定槽位，不接受任意用户名或密码。
+  r.post('/demo-login', async (req, res, next) => {
+    try {
+      const slot = String((req.body && req.body.slot) || '').trim();
+      const username = DEMO_ACCOUNTS[slot];
+      if (!username) return res.status(400).json({ error: '无效的演示账号' });
+      const user = await db.get('SELECT * FROM users WHERE login_name = ?', [username]);
+      if (!user) return res.status(404).json({ error: '演示账号尚未初始化' });
+      const s = await createSession(db, user.id);
+      setCookie(res, s.token, s.expiresAt);
+      log.log('demo_login', `${user.login_name} (${user.id})`);
       res.json({ user: publicUser(user) });
     } catch (e) { next(e); }
   });
