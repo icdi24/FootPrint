@@ -635,14 +635,20 @@
     return true; // weekly：当天都可打，按周统计
   }
   function streakOf(goalId, userId) {
+    const pid = partnerId();
+    const isPartner = pid != null && String(userId) === String(pid);
+    // 对方的目标不在 store.goals 里，得从 partnerGoals 找，否则 dueToday 拿不到、必然中断
+    const pool = isPartner ? (store.partnerGoals || []) : store.goals;
+    const goal = pool.find((g) => String(g.id) === String(goalId));
     let n = 0;
     for (let d = 0; d < 400; d++) {
       const key = shiftDay(-d);
       const c = checkOf(goalId, userId, key);
       if (c) n += 1;
-      else if (d > 0 && dueToday(store.goals.find((g) => g.id === goalId), key)) break;
+      else if (d > 0 && dueToday(goal, key)) break;
     }
-    return n;
+    // 对方的历史打卡前端没有（/api/checkins 只返回自己的），用后端维护的 streak_count 兜底
+    return isPartner ? Math.max(n, Number(goal && goal.streak) || 0) : n;
   }
   function weekProgress(goal, userId) {
     let done = 0;
@@ -745,16 +751,7 @@
       // 大目标：列表接口不带 chain，需要逐个拉详情
       const bgs = (bigRes && (bigRes.bigGoals || bigRes.goals)) || [];
       store.biggoals = bgs.map(AD.adaptBigGoal);
-      // 搭档的目标（/api/goals 只返回自己的，需要单独拉）
-      try {
-        const pRes = await API.partner();
-        if (pRes) {
-          store.partnerGoals = (pRes.goals || pRes.todos || []).map((g) => (g.goal ? AD.adaptGoal(g.goal) : AD.adaptGoal(g)));
-          store.partnerStats = pRes.stats || null;
-        }
-      } catch (e) { store.partnerGoals = []; }
-
-      // 搭档的目标（/api/goals 只返回自己的，需要单独拉）
+      // 搭档的目标 / 今日打卡 / 统计（/api/goals 只返回自己的，需要单独拉）
       try {
         const pRes = await API.partner();
         if (pRes) {
@@ -763,8 +760,10 @@
           store.partnerBigGoals = (pRes.partnerBigGoals || []).map((b) => AD.adaptBigGoal(b));
           store.sharedProfile = pRes.sharedProfile || null;
           store.sharedDiaries = pRes.sharedDiaries || [];
+          // 对方今天的打卡：稍后并入 store.checks（/api/checkins 只返回自己的）
+          store.partnerToday = pRes.partnerToday || [];
         }
-      } catch (e) { store.partnerGoals = []; }
+      } catch (e) { store.partnerGoals = []; store.partnerToday = []; }
 
       // 补 chain（列表接口只给计数，详情才有路线）
       await Promise.all(store.biggoals.map(async (b) => {
@@ -827,6 +826,35 @@
               at: Date.now(),
             });
           }
+        });
+      }
+
+      // 对方今天的打卡并入 store.checks：/api/checkins 只返回自己的，
+      // 不补的话对方栏的「已打卡 / 等对方」判断永远落空
+      const pidToday = store.partnerUser ? store.partnerUser.id : null;
+      const pTodayRows = store.partnerToday || [];
+      if (pidToday && pTodayRows.length) {
+        const tk = todayKey();
+        pTodayRows.forEach((ci) => {
+          const gid = ci.goalId ?? ci.goal_id;
+          const dup = store.checks.some((c) =>
+            String(c.goalId) === String(gid) && String(c.userId) === String(pidToday) && c.date === tk);
+          if (dup) return;
+          store.checks.push({
+            id: ci.id,
+            goalId: gid,
+            userId: pidToday,
+            date: tk,
+            minutes: AD.num(ci.durationMin ?? ci.duration_min, 0),
+            points: AD.num(ci.points, 0),
+            inWindow: false,
+            note: ci.evidenceText || ci.evidence_text || '',
+            evidence: ci.evidenceUrl || ci.evidence_url || '',
+            status: ci.status || 'credited',
+            at: ci.createdAt ? new Date(ci.createdAt).getTime() : Date.now(),
+            isMakeup: false,
+            rejectReason: '',
+          });
         });
       }
 
@@ -1234,7 +1262,13 @@
   function tasksFor(uid) {
     if (isGuest()) return [];   // 访客看到的是干净的空壳，不是演示数据
     const today = todayKey();
-    const list = store.goals.filter((g) => g.ownerId === uid && g.type === 'daily' && g.status === 'active' && dueToday(g, today));
+    const pid = partnerId();
+    // 对方的目标在 /api/partner 的 partnerGoals 里（/api/goals 只返回自己的）
+    const isPartner = pid != null && String(uid) === String(pid);
+    const pool = isPartner ? (store.partnerGoals || []) : store.goals;
+    const list = pool.filter((g) => g && g.type === 'daily' && g.status === 'active'
+      && (isPartner || String(g.ownerId) === String(uid))
+      && dueToday(g, today));
     // 已完成的排后面，保持原有顺序
     return list.sort((a, b) => {
       const ca = checkOf(a.id, uid, today) ? 1 : 0;
