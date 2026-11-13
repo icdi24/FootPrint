@@ -354,8 +354,12 @@ module.exports = function goalsRoutes(db) {
       if (errors.length) return res.status(400).json({ error: errors[0] });
       const b = req.body;
       const cfg = await getPoints(db);
-      const status = b.active === false ? 'draft' : 'active';
       const type = b.type === 'stage' ? 'stage' : 'daily';
+      // 小目标默认是草稿，点「开始」后才进行中；日常目标默认直接进行中。
+      // 保留显式 active 覆盖（active:false 强制草稿，active:true 直接进行中）。
+      const status = b.active === false ? 'draft'
+        : b.active === true ? 'active'
+          : (type === 'stage' ? 'draft' : 'active');
       // 小目标：预估总时长 + 难度算总积分，封顶 1200（需求 5.4）
       const difficulty = Number(b.difficulty) || 3;
       const estTotalMin = type === 'stage' ? (Number(b.est_total_min) || 600) : null;
@@ -790,8 +794,11 @@ module.exports = function goalsRoutes(db) {
 
 // ===== 供 planning 草案链路复用：从创建逻辑抽出的公共函数（zoowy v2）=====
 async function createGoal(db, ownerId, b, cfg) {
-  const status = b.active === false ? 'draft' : 'active';
   const type = b.type === 'stage' ? 'stage' : 'daily';
+  // 与主创建 route 一致：小目标默认草稿，点「开始」才进行中；日常默认进行中。
+  const status = b.active === false ? 'draft'
+    : b.active === true ? 'active'
+      : (type === 'stage' ? 'draft' : 'active');
   const difficulty = Number(b.difficulty) || 3;
   const estTotalMin = type === 'stage' ? (Number(b.est_total_min) || 600) : null;
   const customPoints = (b.custom_points !== undefined && b.custom_points !== null && b.custom_points !== '')

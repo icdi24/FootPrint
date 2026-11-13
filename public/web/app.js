@@ -1901,6 +1901,9 @@
       if (!title) { $('#fgTitle', s.el).focus(); toast('先给目标起个名字'); return; }
       if (st.type === 'weekdays' && !st.weekdays.length) { toast('至少选一天'); return; }
       const emojiEl = $('.fg-emoji.is-on', s.el);
+      const criteriaVal = (($('#fgCriteria', s.el) || {}).value || '').trim();
+      // 小目标必须写验收标准（后端也校验，这里先在前端拦一下，体验更好）
+      if (st.type === 'stage' && !criteriaVal) { const el = $('#fgCriteria', s.el); if (el) el.focus(); toast('小目标要写清验收标准'); return; }
       const payload = {
         type: st.type, title, emoji: emojiEl ? emojiEl.dataset.emoji : '🌱',
         desc: $('#fgDesc', s.el).value.trim(),
@@ -1910,7 +1913,7 @@
         startDate: $('#fgStart', s.el).value || todayKey(),
         endDate: $('#fgEnd', s.el).value,
         estTotalMin: st.estTotalMin,
-        criteria: ($('#fgCriteria', s.el) || {}).value || '',
+        criteria: criteriaVal,
       };
       const apiPayload = {
         type: payload.type,
@@ -1930,18 +1933,20 @@
         start_date: payload.startDate,
         end_date: payload.endDate || '',
       };
+      const okBtn = $('[data-ok]', s.el);
+      if (okBtn) okBtn.disabled = true;
       try {
         if (editing) await API.updateGoal(editing.id, apiPayload);
         else await API.createGoal(apiPayload);
         s.close();
         await loadAll();
-        toast(editing ? '已保存' : `「${payload.title}」已加进来`);
+        renderAll();
+        toast(editing ? `「${title}」已保存` : `「${title}」已加入${payload.type === 'stage' ? '小目标' : '今日待办'}`);
       } catch (e) {
+        // 失败：留着弹层让用户改，只提示错误，不再误报“已加入”
+        if (okBtn) okBtn.disabled = false;
         toast(e.message || '保存失败');
       }
-      s.close();
-      renderAll();
-      toast(editing ? `「${title}」已保存` : `「${title}」已加入${payload.type === 'stage' ? '小目标' : '今日待办'}`);
     });
 
     sync();
@@ -2177,12 +2182,15 @@
     const badge = goal.status === 'achieved' ? ['chip-ok', '已达成', '']
       : goal.status === 'reviewing' ? ['chip-gold', '待审核', 'chip-gold']
         : goal.status === 'abandoned' ? ['chip-muted', '已放弃', 'chip-muted']
-          : ['chip-muted', '进行中', 'chip-muted'];
-    const action = goal.status === 'active'
-      ? (goal.type === 'stage'
-        ? `<button class="chip-btn" type="button" data-submit="${goal.id}">提交审核</button>`
-        : `<button class="chip-btn" type="button" data-check="${goal.id}">打卡</button>`)
-      : '';
+          : goal.status === 'draft' ? ['chip-muted', '草稿', 'chip-muted']
+            : ['chip-muted', '进行中', 'chip-muted'];
+    const action = goal.status === 'draft'
+      ? `<button class="chip-btn" type="button" data-start="${goal.id}">开始</button>`
+      : goal.status === 'active'
+        ? (goal.type === 'stage'
+          ? `<button class="chip-btn" type="button" data-submit="${goal.id}">提交审核</button>`
+          : `<button class="chip-btn" type="button" data-check="${goal.id}">打卡</button>`)
+        : '';
     return `<div class="goal-mini">
       <span class="ge go-emoji">${goal.emoji || '🌱'}</span>
       <span class="gm"><b>${esc(goal.title)}</b><small>${esc(sub)}</small></span>
@@ -2312,10 +2320,12 @@
   function renderStagePanel(uid) {
     const stages = store.goals.filter((g) => g.ownerId === uid && g.type === 'stage' && g.status !== 'abandoned');
     const rows = stages.map((g) => {
-      const st = g.status === 'achieved' ? '已达成' : g.status === 'reviewing' ? '待审核' : '进行中';
+      const st = g.status === 'achieved' ? '已达成' : g.status === 'reviewing' ? '待审核' : g.status === 'draft' ? '草稿' : '进行中';
       const cls = g.status === 'achieved' ? 'is-ok' : g.status === 'reviewing' ? 'is-pend' : '';
-      const act = g.status === 'active'
-        ? `<button class="chip-btn" type="button" data-submit="${g.id}">提交审核</button>` : '';
+      const act = g.status === 'draft'
+        ? `<button class="chip-btn" type="button" data-start="${g.id}">开始</button>`
+        : g.status === 'active'
+          ? `<button class="chip-btn" type="button" data-submit="${g.id}">提交审核</button>` : '';
       return `<div class="day-row">
         <span class="day-emoji">${g.emoji || '🏁'}</span>
         <span class="day-main"><b>${esc(g.title)}</b><small>${(g.estTotalMin / 60).toFixed(0)} 小时 · +${stagePoints(g)} 分</small></span>
@@ -4016,10 +4026,13 @@
      ═══════════════════════════════════════════════════════ */
   const titles = { today: '今日', goals: '目标', wish: '愿望单', us: '我们', data: '我的' };
   const tabs = $$('.tab');
+  const tabsEl = $('#tabs');
   const ink = $('#tabInk');
   const mount = $('#viewMount');
 
-  /* 滑块用 transform 位移；几何缓存一次，切换时不再反复读 offsetLeft 触发强制重排 */
+  /* 滑块用 transform 位移。几何每次实时读取活动 tab 的真实盒子：
+     tab 上角标数字（如「今日」待办数）出现/消失或位数变化时宽度会变，
+     一次性缓存会过期导致滑块框对不齐，所以活动 tab 不再用缓存。 */
   const tabMetrics = new Map();
   function measureTabs() {
     tabMetrics.clear();
@@ -4027,14 +4040,34 @@
   }
   function positionInk(tab, animate = true) {
     if (!tab) return;
-    if (!tabMetrics.size) measureTabs();
-    const m = tabMetrics.get(tab) || { left: tab.offsetLeft, width: tab.offsetWidth };
+    // tabs 是按钮数组，容器用 #tabs 元素自身
+    const bar = ink.parentElement || tabsEl;
+    const tRect = bar.getBoundingClientRect();
+    const aRect = tab.getBoundingClientRect();
+    // 绝对定位以 padding box 为基准，扣掉容器上/左边框，避免移动端 border-top 造成偏移
+    const m = {
+      top: aRect.top - tRect.top - bar.clientTop,
+      left: aRect.left - tRect.left - bar.clientLeft,
+      width: aRect.width,
+      height: aRect.height,
+    };
     if (!animate) ink.classList.add('no-anim');
     ink.style.width = `${m.width}px`;
-    ink.style.transform = `translateX(${m.left}px)`;
+    ink.style.height = `${m.height}px`;
+    ink.style.transform = `translate(${m.left}px, ${m.top}px)`;
     if (!animate) { void ink.offsetWidth; ink.classList.remove('no-anim'); }
   }
   const activeTab = () => $('.tab.is-active');
+  // 实时跟随：活动 tab 宽度/高度变化（角标数字增删、字体加载、窗口缩放、断点切换）时同步滑块框
+  function syncActiveInk(animate = true) { const on = activeTab(); if (on) positionInk(on, animate); }
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => syncActiveInk(true));
+    tabs.forEach((b) => ro.observe(b));
+  }
+  if (typeof MutationObserver !== 'undefined') {
+    const mo = new MutationObserver(() => syncActiveInk(true));
+    tabs.forEach((b) => mo.observe(b, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] }));
+  }
 
   function switchView(name) {
     if (!titles[name]) return;
@@ -4249,6 +4282,18 @@
     if (t.closest('[data-new-goal]')) { openGoalForm(null, t.closest('[data-new-goal]').dataset.newGoal); return; }
     if (t.closest('[data-edit]')) { openGoalForm(t.closest('[data-edit]').dataset.edit); return; }
     if (t.closest('[data-check]')) { openCheckin(t.closest('[data-check]').dataset.check); return; }
+    const startBtn = t.closest('[data-start]');
+    if (startBtn) {
+      const gid = startBtn.dataset.start;
+      if (!guard('开始要做的事要先登录。')) return;
+      startBtn.disabled = true;
+      API.startGoal(gid).then(async () => {
+        await loadAll();
+        renderAll();
+        toast('已开始，加油 🌱');
+      }).catch((e) => { startBtn.disabled = false; toast(e.message || '开始失败'); });
+      return;
+    }
     if (t.closest('[data-submit]')) { openSubmitVerify(t.closest('[data-submit]').dataset.submit); return; }
     if (t.closest('[data-verify]')) { openVerifyDecision(t.closest('[data-verify]').dataset.verify); return; }
     const reviewBtn = t.closest('[data-review]');
