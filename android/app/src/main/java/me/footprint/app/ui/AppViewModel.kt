@@ -506,6 +506,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** 演示账号一键登录（对齐 Web 的演示账号按钮）：slot = "lizi" / "abai" */
+    fun demoLogin(slot: String) {
+        viewModelScope.launch {
+            try {
+                val resp = Api.demoLogin(slot) { token ->
+                    Session.saveToken(getApplication(), token)
+                }
+                val name = resp.user?.username.orEmpty()
+                if (name.isNotEmpty()) Session.saveUsername(getApplication(), name)
+                _myName.value = name
+                _loggedIn.value = true
+                _login.value = LoginState()
+                _register.value = RegisterState()
+                _authMode.value = null
+                refreshAll()
+                connectChatWs()
+                loadChat()
+                loadPair()
+            } catch (e: Exception) {
+                _login.value = _login.value.copy(busy = false, error = e.message ?: "演示登录失败")
+            }
+        }
+    }
+
     fun logout() {
         // 对齐 Web：先通知服务端销毁会话与 WS（token 要在 clear 前取），失败也不阻塞本地清理
         val token = Session.token(getApplication())
