@@ -1,5 +1,8 @@
 // 愿望单页：商品卡 + 兑换 + 兑换记录（V0.1 商品类）。
 const WishPage = {
+  // 当前查看谁的愿望单：'mine' | 'partner'（切换页面不重置，回到愿望单页仍保留）
+  view: 'mine',
+
   async render(root) {
     if (App.isGuest()) {
       this.renderGuest(root);
@@ -24,6 +27,10 @@ const WishPage = {
         </div>
         <button class="ghost-btn" id="add-wish">${window.icon('plus')} 新建</button>
       </header>
+      <div class="wish-tabs freq-seg">
+        <button type="button" class="on">🎁 我的</button>
+        <button type="button">🤝 ta 的</button>
+      </div>
       <section class="wish-balance">
         <div>
           <div class="wb-label">可用积分</div>
@@ -44,8 +51,12 @@ const WishPage = {
   },
 
   async draw(root) {
-    const data = await api.get('/api/wish');
+    WishPage._openSwipe = null;
+    const isPartner = this.view === 'partner';
+    const data = isPartner ? await api.get('/api/wish/partner') : await api.get('/api/wish');
     const active = data.items.filter((i) => i.status === 'active');
+    const noPartner = isPartner && !data.partner;
+    const who = data.partner ? UI.esc(data.partner.username || '搭档') : '搭档';
 
     root.innerHTML = `
       <header class="page-head wish-head">
@@ -53,35 +64,62 @@ const WishPage = {
           <div class="hello">愿望单</div>
           <div class="date-line">攒够分，换点真的</div>
         </div>
-        <button class="ghost-btn" id="add-wish">${window.icon('plus')} 新建</button>
+        ${isPartner ? '' : `<button class="ghost-btn" id="add-wish">${window.icon('plus')} 新建</button>`}
       </header>
 
+      <div class="wish-tabs freq-seg" role="tablist">
+        <button type="button" data-view="mine" class="${isPartner ? '' : 'on'}" role="tab" aria-selected="${!isPartner}">🎁 我的</button>
+        <button type="button" data-view="partner" class="${isPartner ? 'on' : ''}" role="tab" aria-selected="${isPartner}">🤝 ta 的</button>
+      </div>
+
+      ${noPartner ? `
+      <section class="sec">
+        <div class="empty">
+          <div class="empty-emoji">🤝</div>
+          <div class="empty-title">还没有搭档</div>
+          <div class="empty-sub">到「我的 → 我的搭档」用邀请码配对，就能看到 ta 的愿望单</div>
+        </div>
+      </section>` : `
       <section class="wish-balance">
         <div>
-          <div class="wb-label">可用积分</div>
+          <div class="wb-label">${isPartner ? 'ta 的可用积分' : '可用积分'}</div>
           <div class="wb-val">${UI.fmtNum(data.balance)}</div>
         </div>
         <div class="wb-yuan">≈ ¥${UI.fmtYuan(data.balance)}<span> · 1 元 = 10 分</span></div>
       </section>
 
+      ${isPartner ? `<div class="wish-partner-note">只读查看 · ${who} 的愿望，帮 ta 攒分或挑一件当惊喜</div>` : ''}
+
       <section class="sec">
-        <div class="sec-head"><h2>想要的东西</h2>${active.length ? `<span class="sec-count">${active.length} 件</span>` : ''}</div>
-        ${active.length ? `<div class="wish-list">${active.map((i) => this.itemCard(i, data.balance)).join('')}</div>` : `
+        <div class="sec-head"><h2>${isPartner ? 'ta 想要的东西' : '想要的东西'}</h2>${active.length ? `<span class="sec-count">${active.length} 件</span>` : ''}</div>
+        ${!isPartner && active.length ? '<div class="ws-tip">← 左划卡片，可修改 / 删除</div>' : ''}
+        ${active.length ? `<div class="wish-list">${active.map((i) => this.itemCard(i, data.balance, isPartner)).join('')}</div>` : `
         <div class="empty">
           <div class="empty-emoji">🎁</div>
-          <div class="empty-title">愿望单还是空的</div>
-          <div class="empty-sub">把想买的东西放进来，填上真实价格，系统按 1 元 = 10 分换算</div>
+          <div class="empty-title">${isPartner ? 'ta 的愿望单还是空的' : '愿望单还是空的'}</div>
+          <div class="empty-sub">${isPartner ? '等 ta 放上第一件想要的东西' : '把想买的东西放进来，填上真实价格，系统按 1 元 = 10 分换算'}</div>
         </div>`}
       </section>
 
       ${data.redemptions.length ? `
       <section class="sec">
-        <div class="sec-head"><h2>兑换记录</h2></div>
+        <div class="sec-head"><h2>${isPartner ? 'ta 的兑换记录' : '兑换记录'}</h2></div>
         <div class="red-list">
-          ${data.redemptions.map((r) => this.redRow(r)).join('')}
+          ${data.redemptions.map((r) => this.redRow(r, isPartner)).join('')}
         </div>
-      </section>` : ''}
+      </section>` : ''}`}
     `;
+
+    root.querySelectorAll('.wish-tabs button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (btn.dataset.view === WishPage.view) return;
+        WishPage.view = btn.dataset.view;
+        WishPage.render(root);
+      });
+    });
+
+    // 对方视图是只读的：不挂新建、兑换、编辑、撤回/已收到 等写操作
+    if (isPartner || noPartner) return;
 
     root.querySelector('#add-wish').addEventListener('click', () => {
       WishForm.open({ onSaved: () => this.draw(root) });
@@ -93,10 +131,16 @@ const WishPage = {
       });
     });
     root.querySelectorAll('.wish-card').forEach((card) => {
+      const wrap = card.closest('.ws-wrap');
       const open = (e) => {
         if (e.target.closest('.btn-redeem')) return;
+        if (wrap && wrap._suppressClick) return;                  // 刚拖完，别误开编辑
+        if (wrap && wrap.classList.contains('is-open')) {         // 展开时点卡片 = 收起
+          WishPage.closeSwipe(wrap);
+          return;
+        }
         const item = data.items.find((x) => x.id === Number(card.dataset.id));
-        if (item) WishForm.open({ item, onSaved: () => this.draw(root) });
+        if (item) WishForm.open({ item, onSaved: () => WishPage.draw(root) });
       };
       card.setAttribute('role', 'button');
       card.setAttribute('tabindex', '0');
@@ -107,6 +151,7 @@ const WishPage = {
         }
       });
     });
+    WishPage.bindSwipe(root, data);
     root.querySelectorAll('[data-red-act]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const r = data.redemptions.find((x) => x.id === Number(btn.dataset.red));
@@ -117,15 +162,116 @@ const WishPage = {
     });
   },
 
-  itemCard(i, balance) {
+  // ===== 左划操作（仅自己的愿望）=====
+  // ta 的视图不渲染 .ws-actions、也不绑手势，前端物理上没有修改/删除入口；
+  // 后端 PUT / DELETE 还各有一道 owner_id 校验，双保险。
+  closeSwipe(wrap) {
+    if (!wrap) return;
+    wrap.classList.remove('is-open');
+    wrap.style.setProperty('--sw', '0px');
+    if (WishPage._openSwipe === wrap) WishPage._openSwipe = null;
+  },
+
+  openSwipe(wrap) {
+    if (WishPage._openSwipe && WishPage._openSwipe !== wrap) WishPage.closeSwipe(WishPage._openSwipe);
+    const a = wrap.querySelector('.ws-actions');
+    wrap.style.setProperty('--sw', `-${(a && a.offsetWidth) || 148}px`);
+    wrap.classList.add('is-open');
+    WishPage._openSwipe = wrap;
+  },
+
+  bindSwipe(root, data) {
+    root.querySelectorAll('.ws-wrap').forEach((wrap) => {
+      const card = wrap.querySelector('.wish-card');
+      const actions = wrap.querySelector('.ws-actions');
+      const width = () => (actions && actions.offsetWidth) || 148;
+      let pid = null, sx = 0, sy = 0, start = 0;
+      let active = false, horizontal = false, moved = false;
+
+      card.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('.btn-redeem')) return;
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        pid = e.pointerId;
+        sx = e.clientX; sy = e.clientY;
+        start = wrap.classList.contains('is-open') ? -width() : 0;
+        active = true; horizontal = false; moved = false;
+        wrap.classList.add('is-dragging');
+      });
+
+      card.addEventListener('pointermove', (e) => {
+        if (!active || e.pointerId !== pid) return;
+        const dx = e.clientX - sx, dy = e.clientY - sy;
+        if (!horizontal) {
+          if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+          if (Math.abs(dx) <= Math.abs(dy)) {   // 纵向：交还页面滚动
+            active = false; wrap.classList.remove('is-dragging'); return;
+          }
+          horizontal = true;
+          try { card.setPointerCapture(pid); } catch (_) { /* 忽略 */ }
+        }
+        if (e.cancelable) e.preventDefault();
+        moved = true;
+        wrap.style.setProperty('--sw', `${Math.max(-width(), Math.min(0, start + dx))}px`);
+      });
+
+      const finish = (e) => {
+        if (!active || (e && e.pointerId !== pid)) return;
+        active = false;
+        wrap.classList.remove('is-dragging');
+        if (horizontal && moved) {
+          wrap._suppressClick = true;
+          setTimeout(() => { wrap._suppressClick = false; }, 80);
+          const cur = parseFloat(wrap.style.getPropertyValue('--sw')) || 0;
+          if (cur < -width() * 0.32) WishPage.openSwipe(wrap);
+          else WishPage.closeSwipe(wrap);
+        }
+      };
+      card.addEventListener('pointerup', finish);
+      card.addEventListener('pointercancel', finish);
+      card.addEventListener('lostpointercapture', () => {
+        wrap.classList.remove('is-dragging');
+        if (active) finish({ pointerId: pid });   // 捕获意外丢失时也别让卡片停在半路
+      });
+
+      actions.querySelectorAll('[data-act]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const item = data.items.find((x) => x.id === Number(wrap.dataset.id));
+          WishPage.closeSwipe(wrap);
+          if (!item) return;
+          if (btn.dataset.act === 'edit') WishForm.open({ item, onSaved: () => WishPage.draw(root) });
+          if (btn.dataset.act === 'del') WishPage.deleteWish(item, root);
+        });
+      });
+    });
+  },
+
+  async deleteWish(item, root) {
+    const yes = await UI.confirm(
+      `删除「${UI.esc(item.title)}」？<br><span class="ws-confirm-sub">已有的兑换记录会保留。</span>`,
+      { danger: true, okLabel: '删除' }
+    );
+    if (!yes) return;
+    try {
+      await api.delete(`/api/wish/${item.id}`);
+      UI.toast('已从愿望单移除', 'warn');
+      WishPage.draw(root);
+    } catch (e) { UI.toast(e.message, 'err'); }
+  },
+
+  itemCard(i, balance, readonly = false) {
     const lack = Number(i.points_cost) - balance;
-    const btn = i.redeemable
-      ? `<button class="btn-redeem" data-id="${i.id}">兑换</button>`
-      : i.cooldownMsg
-        ? `<button class="btn-redeem disabled" disabled>冷却中</button>`
-        : `<button class="btn-redeem disabled" disabled>差 ${UI.fmtNum(lack)} 分</button>`;
-    return `
-      <div class="wish-card" data-id="${i.id}">
+    const btn = readonly
+      ? (lack > 0
+          ? `<span class="wc-status">还差 ${UI.fmtNum(lack)} 分</span>`
+          : `<span class="wc-status ok">攒够了 🎉</span>`)
+      : i.redeemable
+        ? `<button class="btn-redeem" data-id="${i.id}">兑换</button>`
+        : i.cooldownMsg
+          ? `<button class="btn-redeem disabled" disabled>冷却中</button>`
+          : `<button class="btn-redeem disabled" disabled>差 ${UI.fmtNum(lack)} 分</button>`;
+    const card = `
+      <div class="wish-card${readonly ? ' readonly' : ''}" data-id="${i.id}"${readonly ? '' : ' title="左划可修改或删除"'}>
         <div class="wc-emoji">${i.emoji}</div>
         <div class="wc-main">
           <div class="wc-title">${UI.esc(i.title)}</div>
@@ -135,9 +281,19 @@ const WishPage = {
         </div>
         <div class="wc-side">${btn}</div>
       </div>`;
+    if (readonly) return card;   // 对方的愿望：普通卡片，没有可滑出的动作层
+    const ico = (n, fallback) => (window.pixelIcon ? window.pixelIcon(n, 'ws-ico') : fallback);
+    return `
+      <div class="ws-wrap" data-id="${i.id}">
+        <div class="ws-actions">
+          <button type="button" class="ws-act ws-edit" data-act="edit" aria-label="修改 ${UI.esc(i.title)}">${ico('pencil', '✏️')}<span>修改</span></button>
+          <button type="button" class="ws-act ws-del" data-act="del" aria-label="删除 ${UI.esc(i.title)}">${ico('trash', '🗑️')}<span>删除</span></button>
+        </div>
+        ${card}
+      </div>`;
   },
 
-  redRow(r) {
+  redRow(r, readonly = false) {
     const statusMap = {
       applied: ['待确认', 'st'],
       confirmed: ['已扣分', 'st ok'],
@@ -146,8 +302,8 @@ const WishPage = {
       expired: ['已过期', 'st gray'],
     };
     const [label, cls] = statusMap[r.status] || [r.status, 'st'];
-    const canCancel = r.status === 'confirmed' && (Date.now() - new Date(r.applied_at).getTime()) <= 2 * 3600000;
-    const canDone = r.status === 'confirmed';
+    const canCancel = !readonly && r.status === 'confirmed' && (Date.now() - new Date(r.applied_at).getTime()) <= 2 * 3600000;
+    const canDone = !readonly && r.status === 'confirmed';
     return `
       <div class="red-row">
         <span class="rr-emoji">${r.item_emoji}</span>

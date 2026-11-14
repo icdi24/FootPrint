@@ -38,6 +38,14 @@ const AuthPage = (() => {
       ${field('用户名', 'lg-name', 'text', '你的用户名')}
       ${field('密码', 'login-pw', 'password', '密码')}
       <button class="btn primary block" id="login-btn">进入脚印</button>
+      <div class="auth-demo-m">
+        <span>演示账号，点一下直接进</span>
+        <div class="auth-demo-row-m">
+          <button type="button" class="auth-demo-btn-m" data-demo="lizi">🐱 栗子</button>
+          <button type="button" class="auth-demo-btn-m" data-demo="abai">🐻 阿白</button>
+        </div>
+        <p class="auth-demo-note-m">两个人的数据是通的，换个账号就能看到对方的待办和验收。<br/>手动登录：栗子 / lizi123 · 阿白 / abai123</p>
+      </div>
       <button class="link-btn" id="to-register">还没有账号？注册</button>
       <button class="link-btn" id="back-browse">← 返回逛逛</button>
       <p class="auth-hint" id="auth-err"></p>`;
@@ -57,6 +65,26 @@ const AuthPage = (() => {
     };
     card.querySelector('#login-btn').addEventListener('click', doLogin);
     card.querySelector('#login-pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+    // 演示账号：复用后端 /api/demo-login（与桌面工作台同一套一键登录）
+    card.querySelectorAll('[data-demo]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (btn.disabled) return;
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '进入中…';
+        err.textContent = '';
+        try {
+          const data = await api.post('/api/demo-login', { slot: btn.dataset.demo });
+          App.state.me = data.user;
+          UI.toast(`欢迎回来，${data.user.username} 🐾`, 'ok');
+          App.onAuthed();
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = label;
+          err.textContent = e.message;
+        }
+      });
+    });
     card.querySelector('#to-register').addEventListener('click', () => renderRegister(card));
     card.querySelector('#back-browse').addEventListener('click', () => App.showShell());
   }

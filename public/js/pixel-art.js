@@ -295,6 +295,36 @@ const PX_ART = {
     '...o.oo.o...',
     '............',
   ],
+  // 铅笔：愿望单左划「修改」
+  pencil: [
+    '...oooooo...',
+    '...okkkko...',
+    '...oWWWWo...',
+    '...oyyyyo...',
+    '...oyYyYo...',
+    '...oYYYYo...',
+    '...oYYYYo...',
+    '...oyyyyo...',
+    '...oWWWWo...',
+    '...owwwwo...',
+    '....okko....',
+    '.....oo.....',
+  ],
+  // 垃圾桶：愿望单左划「删除」
+  trash: [
+    '....oooo....',
+    '...oWWWWo...',
+    '..oooooooo..',
+    '..oMMMMMMo..',
+    '..oMmMMmMo..',
+    '..oMmMMmMo..',
+    '..oMmMMmMo..',
+    '..oMmMMmMo..',
+    '..oMmMMmMo..',
+    '..oMMMMMMo..',
+    '...oooooo...',
+    '............',
+  ],
 };
 
 // 字符网格 → 多色 SVG。水平连续同色像素合并成一段 path，按颜色分组减少节点。

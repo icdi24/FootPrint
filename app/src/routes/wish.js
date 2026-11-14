@@ -75,6 +75,29 @@ module.exports = function wishRoutes(db) {
     } catch (e) { next(e); }
   });
 
+  // 搭档的愿望单（只读）：供愿望单页「我的 / ta 的」切换查看。
+  // 只返回已配对搭档的在架商品与兑换记录，不提供任何写操作。
+  r.get('/wish/partner', mw.requireUser, async (req, res, next) => {
+    try {
+      const partner = await mw.partnerOf(req.user.id);
+      if (!partner) {
+        return res.json({ partner: null, items: [], redemptions: [], balance: 0 });
+      }
+      const allItems = await db.all('SELECT * FROM wish_items WHERE owner_id = ? ORDER BY id DESC', [partner.id]);
+      const reds = await db.all('SELECT * FROM redemptions WHERE user_id = ? ORDER BY id DESC LIMIT 100', [partner.id]);
+      const itemMap = new Map(allItems.map((i) => [i.id, i]));
+      const balance = await balanceOf(db, partner.id);
+      res.json({
+        partner: { id: partner.id, username: partner.login_name || '搭档', avatar: partner.avatar },
+        items: allItems
+          .filter((i) => i.status === 'active')
+          .map((i) => ({ ...i, redeemable: false, cooldownMsg: null })),
+        redemptions: reds.map((x) => redemptionRow(x, itemMap.get(x.wish_item_id))),
+        balance,
+      });
+    } catch (e) { next(e); }
+  });
+
   // 新建愿望
   r.post('/wish', mw.requireUser, async (req, res, next) => {
     try {
@@ -147,6 +170,21 @@ module.exports = function wishRoutes(db) {
         ]
       );
       res.json({ item: await db.get('SELECT * FROM wish_items WHERE id = ?', [g.id]) });
+    } catch (e) { next(e); }
+  });
+
+  // 删除愿望（只能删自己的；有进行中的兑换时先拦住，避免积分已扣却查不到商品）
+  // 注：redemptions.wish_item_id 无外键，删除后兑换记录仍保留，前端会显示「（已删除）」。
+  r.delete('/wish/:id', mw.requireUser, loadOwnWish, async (req, res, next) => {
+    try {
+      const pending = await db.get(
+        `SELECT id FROM redemptions WHERE wish_item_id = ? AND status IN ('applied', 'confirmed') LIMIT 1`,
+        [req.wish.id]
+      );
+      if (pending) return res.status(400).json({ error: '这件愿望还有未完成的兑换，先处理再删除' });
+      await db.run('DELETE FROM wish_items WHERE id = ? AND owner_id = ?', [req.wish.id, req.user.id]);
+      log.log('wish_delete', `${req.user.nickname} 删除愿望「${req.wish.title}」`);
+      res.json({ ok: true });
     } catch (e) { next(e); }
   });
 

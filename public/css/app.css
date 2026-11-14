@@ -761,7 +761,13 @@ img { max-width: 100%; }
 .goal-form, .wish-form, .pw-form { padding: 0 2px; }
 .gf-row { margin-bottom: 14px; }
 .gf-label { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: 7px; }
-.gf-row input[type="text"], .gf-row input[type="number"], .gf-row input[type="date"], .gf-row input[type="time"],
+/* 没写 type 的 input 浏览器按 text 渲染，但属性选择器匹配不到 —— 标题类输入框
+   曾因此退回原生小框（宽高、边框都和下面字段不一致）。这里显式补齐，
+   顺带覆盖常见文本类 type，避免以后新增字段再漏。range / checkbox 不在列表内。 */
+.gf-row input:not([type]),
+.gf-row input[type="text"], .gf-row input[type="password"], .gf-row input[type="email"],
+.gf-row input[type="search"], .gf-row input[type="tel"], .gf-row input[type="url"],
+.gf-row input[type="number"], .gf-row input[type="date"], .gf-row input[type="time"],
 .gf-row textarea {
   width: 100%; height: 44px; padding: 0 14px;
   border: 2px solid var(--line-strong);
@@ -2565,3 +2571,172 @@ button.zf-fab:not(:disabled):hover:not(:active):not(.longpressing) { z-index: 60
 @media (max-width: 600px) {
   .zf-panel.is-left { left: 0; right: 0; }   /* 窄屏仍是全宽贴底 */
 }
+
+/* ===== 愿望单：我的 / ta 的 切换（增量层，整段删可回退） ===== */
+.wish-tabs {
+  margin: 12px 4px 14px;
+  border-color: var(--sv-wood-dark);
+  background: var(--sv-paper);
+}
+.wish-tabs button {
+  font-family: var(--font-px-mono);
+  font-size: 13px;
+  letter-spacing: .5px;
+  padding: 9px 4px;
+}
+.wish-tabs button.on {
+  background: var(--green);
+  color: #FFFDF6;
+  box-shadow: inset 0 0 0 2px var(--outline);
+}
+.wish-partner-note {
+  margin: 0 4px 12px;
+  font-family: var(--font-px-mono);
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.wish-card.readonly { cursor: default; }
+.wish-card.readonly:active { transform: none; box-shadow: var(--sh-px); }
+.wc-status {
+  display: inline-block;
+  padding: 7px 10px;
+  font-family: var(--font-px-mono);
+  font-size: 11px;
+  color: var(--ink-2);
+  background: var(--bg-2);
+  border: 2px solid var(--line-strong);
+  white-space: nowrap;
+}
+.wc-status.ok { color: var(--green-deep); border-color: var(--green); }
+
+/* ===== 手机端登录：演示账号一键进入（增量层，整段删可回退） ===== */
+.auth-demo-m {
+  margin: 16px 0 6px;
+  padding-top: 12px;
+  border-top: 2px dashed var(--line-strong);
+  text-align: center;
+}
+.auth-demo-m > span {
+  display: block;
+  margin-bottom: 9px;
+  font-family: var(--font-px-mono);
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.auth-demo-row-m { display: flex; gap: 10px; }
+.auth-demo-btn-m {
+  flex: 1;
+  padding: 9px 6px;
+  font-family: var(--font-px-mono);
+  font-size: 13px;
+  color: var(--ink, #4A3A28);
+  background: var(--sv-paper);
+  border: 2px solid var(--sv-wood-dark);
+  box-shadow: 0 3px 0 rgba(78, 50, 32, .25);
+  cursor: pointer;
+}
+.auth-demo-btn-m:active { transform: translateY(2px); box-shadow: none; }
+.auth-demo-btn-m:disabled { opacity: .6; cursor: wait; }
+.auth-demo-note-m {
+  margin: 9px 0 0;
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+
+/* ===== 愿望单：左划显示「修改 / 删除」（仅自己的愿望，增量层，整段删可回退） ===== */
+.ws-tip {
+  margin: -2px 4px 9px;
+  font-family: var(--font-px-mono);
+  font-size: 10px;
+  letter-spacing: .5px;
+  color: var(--ink-2);
+  text-align: right;
+  opacity: .85;
+}
+.ws-wrap {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 10px;
+  box-shadow: var(--sh-px);   /* 卡片阴影被 overflow 裁掉，由外层补回 */
+  --sw: 0px;
+}
+.ws-actions {
+  position: absolute; top: 0; right: 0; bottom: 0;
+  display: flex; align-items: stretch;
+  z-index: 0;
+}
+.ws-act {
+  width: 74px;
+  padding: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  font-family: var(--font-px-mono);
+  font-size: 11px;
+  letter-spacing: .5px;
+  color: var(--sv-paper);
+  background: var(--sv-wood-mid);
+  border: 0;
+  border-left: 2px solid rgba(78, 50, 32, .4);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, .22);
+  cursor: pointer;
+}
+.ws-edit {
+  background: linear-gradient(180deg, #C4915C, var(--sv-wood-mid) 55%, #8B5A32);
+  text-shadow: 1px 1px 0 var(--sv-wood-deep);
+}
+.ws-del {
+  background: linear-gradient(180deg, #C96A5C, #A83531 55%, #8A2A26);
+  text-shadow: 1px 1px 0 #5E1D1A;
+}
+.ws-act .ws-ico { display: inline-flex; flex: none; }
+.ws-act .ws-ico svg { width: 22px; height: 22px; }
+.ws-act > span:last-child { line-height: 1.1; }
+/* 全局按钮 hover 会浮起并提到 z-index:2，这里压回去，否则动作按钮会盖住卡片 */
+.ws-wrap .ws-actions button:hover:not(:active) {
+  animation: none !important;
+  transform: none !important;
+  filter: none !important;
+  z-index: 0 !important;
+}
+.ws-wrap > .wish-card {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 0;
+  transform: translateX(var(--sw));
+  transition: transform .26s cubic-bezier(.2, .8, .3, 1), box-shadow .06s linear;
+  touch-action: pan-y;   /* 纵向照常滚动，横向交给 JS */
+  user-select: none;
+}
+/* 原 .wish-card:active 的 translateY 会顶掉滑动位移，显式压回 */
+.ws-wrap > .wish-card:active,
+.ws-wrap.is-open > .wish-card:active { transform: translateX(var(--sw)); box-shadow: var(--sh-px); }
+.ws-wrap.is-dragging > .wish-card { transition: none; }
+.ws-wrap.is-open > .wish-card { border-right-color: var(--sv-wood-dark); }
+.ws-confirm-sub { font-size: 11px; color: var(--ink-2); }
+@media (prefers-reduced-motion: reduce) {
+  .ws-wrap > .wish-card { transition: none; }
+}
+
+/* ===== 弹层 / 浮窗里散落的输入框统一（增量层，整段删可回退） =====
+   这些 textarea 不在 .gf-row / .field / .cfg-row 等容器内，此前只有零碎规则
+   或完全没有（.zc-input-row 只有 flex/resize、.diary-full 只有 width、
+   .hall-form 一条都没有），于是退回浏览器原生小框：又扁又小、没有边框。
+   :where() 特异性为 0，已有专门规则（.gf-row / .ci-evidence /
+   .reject-body / .submit-body / .st-input 等）全部优先，不会被覆盖。 */
+:where(.sheet-body textarea, .zf-panel textarea) {
+  width: 100%;
+  padding: 10px 14px;
+  border: 2px solid var(--line-strong);
+  background: var(--card);
+  box-sizing: border-box;
+  line-height: 1.6;
+}
+:where(.sheet-body textarea, .zf-panel textarea)::placeholder { color: #7F6F57; }
+:where(.sheet-body textarea:focus, .zf-panel textarea:focus) {
+  border-color: var(--green);
+  box-shadow: 0 0 0 2px var(--green-soft);
+  background: #FFFEFA;
+}
+/* 聊天输入（私聊弹层 / zoowy 浮窗）：与表单字段同高，发送按钮对齐 */
+.zc-input-row textarea { min-height: 44px; }
+.zc-input-row > .btn { height: 44px; flex: none; }

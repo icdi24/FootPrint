@@ -152,6 +152,11 @@ const App = (() => {
   }
 
   async function boot() {
+    // 支持 ?tab=xxx 直接落到指定栏目（调试/路演用）；不传仍是「今天」
+    try {
+      const wanted = new URLSearchParams(location.search).get('tab');
+      if (wanted && TABS.some((t) => t.key === wanted)) state.tab = wanted;
+    } catch (_) { /* 忽略 */ }
     // 先探测登录态，但无论是否登录都进壳：未登录即「访客可逛」模式
     try {
       const me = await api.get('/api/me');
