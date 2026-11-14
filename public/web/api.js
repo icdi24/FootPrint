@@ -107,6 +107,7 @@
 
     /* ── 愿望单 ── */
     wishes: () => api.get('/wish'),
+    partnerWishes: (uid) => api.get(`/wish?user=${encodeURIComponent(uid)}`),
     createWish: (payload) => api.post('/wish', payload),
     updateWish: (id, payload) => api.put(`/wish/${id}`, payload),
     redeem: (id) => api.post(`/wish/${id}/redeem`),
@@ -118,6 +119,7 @@
     bigGoal: (id) => api.get(`/biggoals/${id}`),
     createBigGoal: (payload) => api.post('/biggoals', payload),
     updateBigGoal: (id, payload) => api.patch(`/biggoals/${id}`, payload),
+    deleteBigGoal: (id) => api.del(`/biggoals/${id}`),
     addChainGoal: (id, payload) => api.post(`/biggoals/${id}/goals`, payload),
     updateChainGoal: (id, goalId, payload) => api.patch(`/biggoals/${id}/goals/${goalId}`, payload),
     removeChainGoal: (id, goalId) => api.del(`/biggoals/${id}/goals/${goalId}`),

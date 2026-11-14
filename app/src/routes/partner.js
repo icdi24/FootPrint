@@ -99,6 +99,7 @@ module.exports = function partnerRoutes(db) {
         sharedProfile,
         partnerGoals: goals.map((g) => ({
           id: g.id,
+          owner_id: g.owner_id,
           type: g.type,
           title: g.title,
           emoji: g.emoji,
@@ -108,6 +109,8 @@ module.exports = function partnerRoutes(db) {
           freq_mode: g.freq_mode,
           freq_n: g.freq_n,
           weekdays: g.weekdays,
+          start_date: g.start_date,
+          end_date: g.end_date,
           duration_min: g.duration_min,
           difficulty: g.difficulty,
           status: g.status,

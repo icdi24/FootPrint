@@ -49,8 +49,33 @@ module.exports = function wishRoutes(db) {
   }
 
   // 我的愿望单 + 兑换记录 + 余额
+  // ?user=<搭档id>：只读查看对方的愿望单（仅 items，不含余额/兑换记录/可兑换状态）
   r.get('/wish', mw.requireUser, async (req, res, next) => {
     try {
+      const wantUser = req.query.user !== undefined && req.query.user !== '';
+      if (wantUser) {
+        const targetId = Number(req.query.user) || 0;
+        const me = Number(req.user.id);
+        if (targetId && targetId !== me) {
+          // 只允许看自己的搭档
+          const partner = await mw.partnerOf(me);
+          if (!partner || Number(partner.id) !== targetId) {
+            return res.status(403).json({ error: '只能看搭档的愿望单' });
+          }
+        }
+        const target = targetId === me ? me : targetId;
+        const items = await db.all(
+          `SELECT * FROM wish_items WHERE owner_id = ? ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, id DESC`,
+          [target]
+        );
+        // 只读视角：不带余额、兑换记录，也不能替对方兑换
+        return res.json({
+          items: items.map((i) => ({ ...i, redeemable: false, cooldownMsg: null, readonly: true })),
+          readonly: true,
+          ownerId: target,
+        });
+      }
+
       const items = await db.all(
         `SELECT * FROM wish_items WHERE owner_id = ? ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, id DESC`,
         [req.user.id]

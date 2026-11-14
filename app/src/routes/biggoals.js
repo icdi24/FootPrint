@@ -131,6 +131,22 @@ function bigGoalsRoutes(db) {
     } catch (e) { next(e); }
   });
 
+  // 删除大目标（软删除：状态置 archived，保留记录；链上小目标一并归档）
+  r.delete('/biggoals/:id', mw.requireUser, OWN, async (req, res, next) => {
+    try {
+      const now = nowIso();
+      await db.run('UPDATE big_goals SET status = ?, updated_at = ? WHERE id = ?', ['archived', now, req.bigGoal.id]);
+      // 链上还没达成的小目标一起归档，避免它们留在列表里没有归属
+      await db.run(
+        `UPDATE goals SET status = 'archived', updated_at = ?
+         WHERE big_goal_id = ? AND owner_id = ? AND status != 'achieved'`,
+        [now, req.bigGoal.id, req.user.id]
+      );
+      log.log('biggoal_delete', `${req.user.nickname} 删除大目标「${req.bigGoal.title}」`);
+      res.json({ ok: true });
+    } catch (e) { next(e); }
+  });
+
   // 绑已有小目标到链上（goal 必须是自己的 stage 目标）
   r.post('/biggoals/:id/goals', mw.requireUser, OWN, async (req, res, next) => {
     try {

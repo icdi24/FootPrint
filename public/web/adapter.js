@@ -17,7 +17,10 @@
       desc: g.description || g.desc || '',
       freqMode: g.freq_mode || 'daily',
       freqN: num(g.freq_n, 3),
-      weekdays: Array.isArray(g.weekdays) ? g.weekdays : [],
+      // 后端存的是 "1,3,5" 这种逗号串；这里统一成数字数组，否则 dueToday 的 includes 永远不命中
+      weekdays: Array.isArray(g.weekdays)
+        ? g.weekdays.map(Number).filter((n) => n >= 1 && n <= 7)
+        : String(g.weekdays || '').split(',').map((s) => Number(s.trim())).filter((n) => n >= 1 && n <= 7),
       durationMin: num(g.duration_min, 30),
       difficulty: num(g.difficulty, 3),
       windowStart: g.window_start || '',
