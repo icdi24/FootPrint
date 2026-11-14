@@ -7,6 +7,16 @@
 const { nowIso, todayStr, addDaysStr } = require('../tz');
 const { getPoints } = require('../points');
 const { recordChange } = require('../profileChanges');
+const { tx } = require('../db');
+const { isDeepStrictEqual } = require('node:util');
+
+async function readProfileBaseline(db, userId) {
+  return db.all('SELECT block, content, source, status, updated_at FROM user_profiles WHERE user_id = ? ORDER BY block', [userId]);
+}
+
+function profileState(row) {
+  return row ? { content: row.content, source: row.source, status: row.status, updated_at: row.updated_at } : null;
+}
 
 // ---------- 小工具 ----------
 function clampInt(v, min, max, dft) {
@@ -19,7 +29,9 @@ function ok(data) { return { ok: true, ...data }; }
 function fail(msg) { return { ok: false, error: String(msg) }; }
 
 function isValidDate(s) {
-  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(new Date(s + 'T00:00:00Z').getTime());
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const date = new Date(`${s}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === s;
 }
 
 // 计划链快照：手改与 AI 重排共用同一套链路（1.2），每次写库后存一份
@@ -28,8 +40,8 @@ async function snapshotPlan(db, bigGoalId, source, reason) {
   if (!bg) return;
   const chain = await db.all(
     `SELECT id, title, emoji, description, accept_criteria, planned_date, plan_order, plan_status, status
-     FROM goals WHERE big_goal_id = ? ORDER BY COALESCE(plan_order, 999999), id`,
-    [bigGoalId]
+     FROM goals WHERE big_goal_id = ? AND owner_id = ? ORDER BY COALESCE(plan_order, 999999), id`,
+    [bigGoalId, bg.owner_id]
   );
   await db.run(
     'INSERT INTO plan_versions (big_goal_id, owner_id, snapshot, source, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)',
@@ -41,14 +53,27 @@ async function snapshotPlan(db, bigGoalId, source, reason) {
 // 服务端裁决（不盲信模型）：内容没变就跳过；只有真的产生变更才写版本快照 + 变更留痕。
 // 返回 { applied, changes, summary, reported, changeId, versionId }，供「改完告诉用户改了什么」。
 async function applyProfilePatch(db, userId, patches, source, meta = {}) {
+  if (!db.inTransaction) return tx(db, (c) => applyProfilePatch(c, userId, patches, source, meta));
   if (!Array.isArray(patches) || !patches.length) return fail('patches 需为非空数组');
   if (patches.length > 8) return fail('一次最多 8 条补丁');
+  if (source === 'ai' && !Array.isArray(meta.expected)) return fail('画像提议缺少原始版本，请重新预览');
+  await db.get('SELECT pg_advisory_xact_lock(7395, ?)', [userId]);
   const results = [];
   const changes = [];
-  const current = await db.all(
-    "SELECT block, content, source, status FROM user_profiles WHERE user_id = ? ORDER BY block", [userId]
-  );
+  const current = await readProfileBaseline(db, userId);
   const before = new Map(current.map((r) => [r.block, r]));
+  const expected = new Map((meta.expected || []).map((r) => [r.block, r]));
+  const blocks = patches.map((p) => p?.block);
+  if (new Set(blocks).size !== blocks.length) return fail('一次不能重复修改同一个画像块');
+  if (patches.some((p) => !p || !['add', 'update', 'delete'].includes(p.op)
+    || !/^[a-z][a-z0-9_]{0,31}$/.test(String(p.block || '')) || typeof p.reason !== 'string' || !p.reason.trim()
+    || (p.op !== 'delete' && (typeof p.content !== 'string' || !p.content.trim() || p.content.length > 4000
+      || !p.content.isWellFormed() || p.content.includes('\0'))))) return fail('画像补丁的块名、内容或依据无效');
+  const conflicts = source === 'ai' ? patches.filter((p) => !isDeepStrictEqual(profileState(before.get(p.block)), profileState(expected.get(p.block))))
+    .map((p) => p.block) : [];
+  if (conflicts.length && !['daily', 'progress'].includes(meta.workflow)) {
+    return { ok: false, code: 'profile_conflict', error: '画像已更新，请重新预览', conflicts };
+  }
   let versionId = null;
 
   // 懒写快照：只有第一条真实变更才落 profile_versions，避免「模型说要改、其实没变」的版本噪音
@@ -64,6 +89,7 @@ async function applyProfilePatch(db, userId, patches, source, meta = {}) {
 
   for (const p of patches) {
     const block = String(p && p.block || '').trim();
+    if (conflicts.includes(block)) { results.push({ block, skipped: '画像在生成期间已更新，保留新版本' }); continue; }
     if (!/^[a-z][a-z0-9_]{0,31}$/.test(block)) { results.push({ block, skipped: '块名不合法' }); continue; }
     if (!p.reason || !String(p.reason).trim()) { results.push({ block, skipped: '缺 reason，拒绝执行' }); continue; }
     const reason = String(p.reason).slice(0, 120);
@@ -100,7 +126,7 @@ async function applyProfilePatch(db, userId, patches, source, meta = {}) {
     changes.push({ op, block, reason, evidence, before: existing ? existing.content : '', after: content });
   }
 
-  const out = { applied: results, changes };
+  const out = { applied: results, changes, ...(conflicts.length ? { conflicts } : {}) };
   if (!changes.length) {
     out.summary = '';
     out.note = '无实质变化，已跳过（未写库、未存快照、未记变更）';
@@ -127,7 +153,7 @@ const IMPLEMENTATIONS = {
     params: { type: 'object', properties: {}, required: [] },
     async run(ctx) {
       const rows = await ctx.db.all(
-        "SELECT block, content, source, status, updated_at FROM user_profiles WHERE user_id = ? ORDER BY block",
+        "SELECT block, content, source, status, updated_at FROM user_profiles WHERE user_id = ? AND status = 'active' ORDER BY block",
         [ctx.userId]
       );
       return ok({ blocks: rows });
@@ -170,8 +196,8 @@ const IMPLEMENTATIONS = {
       if (!bg) return fail('大目标不存在或不是你的');
       const chain = await ctx.db.all(
         `SELECT id, title, emoji, description, accept_criteria, planned_date, plan_order, plan_status, status
-         FROM goals WHERE big_goal_id = ? ORDER BY COALESCE(plan_order, 999999), id`,
-        [bg.id]
+         FROM goals WHERE big_goal_id = ? AND owner_id = ? ORDER BY COALESCE(plan_order, 999999), id`,
+        [bg.id, ctx.userId]
       );
       const done = chain.filter((g) => g.status === 'achieved').length;
       return ok({ big_goal: bg, chain, done, total: chain.length });
@@ -277,6 +303,8 @@ const IMPLEMENTATIONS = {
       required: ['title'],
     },
     async run(ctx, args) {
+      if (!ctx.db.inTransaction) return tx(ctx.db, (c) => IMPLEMENTATIONS.create_big_goal.run({ ...ctx, db: c }, args));
+      await ctx.db.get('SELECT pg_advisory_xact_lock(7394, ?)', [ctx.userId]);
       const b = args || {};
       const title = String(b.title || '').trim();
       if (!title || title.length > 40) return fail('名称需为 1–40 字');
@@ -295,7 +323,7 @@ const IMPLEMENTATIONS = {
         "SELECT id, title FROM big_goals WHERE owner_id = ? AND title = ? AND status != 'archived' LIMIT 1",
         [ctx.userId, title]
       );
-      if (dup) return ok({ big_goal_id: Number(dup.id), duplicate: true, note: '已存在同名大目标，未重复创建' });
+      if (dup && ctx.workflow !== 'confirmation') return ok({ big_goal_id: Number(dup.id), duplicate: true, note: '已存在同名大目标，未重复创建' });
       const info = await ctx.db.run(
         `INSERT INTO big_goals (owner_id, title, emoji, description, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
@@ -327,6 +355,8 @@ const IMPLEMENTATIONS = {
       required: ['big_goal_id', 'title', 'planned_date', 'accept_criteria'],
     },
     async run(ctx, args) {
+      if (!ctx.db.inTransaction) return tx(ctx.db, (c) => IMPLEMENTATIONS.create_plan_goal.run({ ...ctx, db: c }, args));
+      await ctx.db.get('SELECT pg_advisory_xact_lock(7394, ?)', [ctx.userId]);
       const b = args || {};
       const bg = await ctx.db.get('SELECT * FROM big_goals WHERE id = ? AND owner_id = ?', [Number(b.big_goal_id), ctx.userId]);
       if (!bg) return fail('大目标不存在或不是你的');
@@ -342,7 +372,7 @@ const IMPLEMENTATIONS = {
         "SELECT id FROM goals WHERE big_goal_id = ? AND owner_id = ? AND title = ? AND planned_date = ? AND status != 'archived'",
         [bg.id, ctx.userId, title, planned]
       );
-      if (dup) return ok({ goal_id: dup.id, duplicate: true, note: '已存在，未重复创建' });
+      if (dup && ctx.workflow !== 'confirmation') return ok({ goal_id: dup.id, duplicate: true, note: '已存在，未重复创建' });
 
       const difficulty = clampInt(b.difficulty, 1, 5, 3);
       const estTotalMin = clampInt(b.est_total_min, 1, 100000, 600);
@@ -375,6 +405,8 @@ const IMPLEMENTATIONS = {
       required: ['big_goal_id', 'from_date', 'days'],
     },
     async run(ctx, args) {
+      if (!ctx.db.inTransaction) return tx(ctx.db, (c) => IMPLEMENTATIONS.shift_plan_dates.run({ ...ctx, db: c }, args));
+      await ctx.db.get('SELECT pg_advisory_xact_lock(7394, ?)', [ctx.userId]);
       const b = args || {};
       const bg = await ctx.db.get('SELECT * FROM big_goals WHERE id = ? AND owner_id = ?', [Number(b.big_goal_id), ctx.userId]);
       if (!bg) return fail('大目标不存在或不是你的');
@@ -382,12 +414,12 @@ const IMPLEMENTATIONS = {
       const days = clampInt(b.days, -365, 365, null);
       if (days === null || days === 0) return fail('days 需为非零整数（-365 到 365）');
       const rows = await ctx.db.all(
-        "SELECT id, planned_date FROM goals WHERE big_goal_id = ? AND owner_id = ? AND plan_status = 'planned' AND planned_date >= ?",
+        "SELECT id, planned_date FROM goals WHERE big_goal_id = ? AND owner_id = ? AND status='draft' AND plan_status = 'planned' AND planned_date >= ? ORDER BY id FOR UPDATE",
         [bg.id, ctx.userId, String(b.from_date)]
       );
       for (const g of rows) {
-        await ctx.db.run('UPDATE goals SET planned_date = ?, updated_at = ? WHERE id = ?',
-          [addDaysStr(g.planned_date, days), nowIso(), g.id]);
+        await ctx.db.run("UPDATE goals SET planned_date = ?, updated_at = ? WHERE id = ? AND owner_id=? AND status='draft' AND plan_status='planned'",
+          [addDaysStr(g.planned_date, days), nowIso(), g.id, ctx.userId]);
       }
       await snapshotPlan(ctx.db, bg.id, 'ai', `shift:${b.from_date}:${days}d`);
       return ok({ moved: rows.length, days });
@@ -485,16 +517,15 @@ const WHITELIST = {
   plan: ['read_my_profile', 'read_big_goal', 'read_my_goals', 'create_plan_goal', 'shift_plan_dates'],
   progress: ['read_my_goals', 'read_big_goal', 'read_checkins', 'write_big_goal_progress', 'patch_my_profile'],
   daily: ['read_my_goals', 'read_big_goal', 'read_checkins', 'read_my_profile', 'read_my_usage', 'read_my_diaries', 'write_my_diary', 'patch_my_profile'],
-  // chat 按授权来源分级（v2）：读工具 + 用户明确请求的单条直写；
-  // patch_my_profile 从 chat 收口成「提议 → 确认卡片 → applyProfilePatch」，只保留在 progress/daily 后台工作流。
-  chat: ['read_my_profile', 'read_my_goals', 'read_big_goal', 'list_big_goals', 'read_checkins', 'read_my_usage', 'read_my_diaries', 'create_big_goal', 'create_plan_goal', 'shift_plan_dates'],
+  // 聊天只能读取和提出变更，正式目标写入仅由本人确认服务调用。
+  chat: ['read_my_profile', 'read_my_goals', 'read_big_goal', 'list_big_goals', 'read_checkins', 'read_my_usage', 'read_my_diaries'],
 };
 
 // 工具名 → OpenAI tools 格式
 function toolsFor(workflow) {
   const names = WHITELIST[workflow] || [];
   return names
-    .filter((n) => IMPLEMENTATIONS[n])
+    .filter((n) => IMPLEMENTATIONS[n] && (workflow !== 'chat' || IMPLEMENTATIONS[n].readOnly))
     .map((n) => ({
       type: 'function',
       function: { name: n, description: IMPLEMENTATIONS[n].desc, parameters: IMPLEMENTATIONS[n].params },
@@ -502,16 +533,22 @@ function toolsFor(workflow) {
 }
 
 // 执行一个工具调用：白名单外的一律拒绝（注册表里压根没有验收/删目标/改积分这类工具）
-async function executeTool(db, workflow, userId, name, args) {
+async function executeTool(db, workflow, userId, name, args, context = {}) {
   const names = WHITELIST[workflow] || [];
   if (!names.includes(name) || !IMPLEMENTATIONS[name]) {
     return fail(`无权调用「${name}」：不在 ${workflow} 工作流白名单内`);
   }
+  if (workflow === 'chat' && !IMPLEMENTATIONS[name].readOnly) return fail('聊天写操作必须通过本人确认的提议执行');
   try {
+    if (!IMPLEMENTATIONS[name].readOnly && !db.inTransaction) {
+      return await tx(db, (c) => executeTool(c, workflow, userId, name, args, context));
+    }
+    if (name === 'patch_my_profile') return applyProfilePatch(db, userId, args?.patches, 'ai', { workflow, expected: context.profileBaseline });
     return await IMPLEMENTATIONS[name].run({ db, userId, workflow }, args || {});
   } catch (e) {
-    return fail(`工具执行出错：${e.message}`);
+    if (e.status || e.kind === 'cancelled' || e.name === 'AbortError') throw e;
+    return fail('工具执行失败，请稍后重试');
   }
 }
 
-module.exports = { IMPLEMENTATIONS, WHITELIST, toolsFor, executeTool, applyProfilePatch, snapshotPlan };
+module.exports = { IMPLEMENTATIONS, WHITELIST, toolsFor, executeTool, applyProfilePatch, snapshotPlan, readProfileBaseline };

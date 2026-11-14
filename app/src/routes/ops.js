@@ -8,6 +8,7 @@ const { balanceOf } = require('../db');
 const { statsFor } = require('../stats');
 const backup = require('../backup');
 const { buildExportZip } = require('../export');
+const { personalDownload } = require('../personal-export');
 const log = require('../log');
 
 const ALLOWED_EXT = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
@@ -254,11 +255,15 @@ module.exports = function opsRoutes(db, dataDir) {
   });
 
   // 备份
-  r.get('/backups', mw.requireUser, (req, res) => {
+  r.use(['/backups', '/export', '/admin/export'], (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
+  r.get('/backups', mw.requireUser, mw.requireAdmin, (req, res) => {
     res.json({ backups: backup.listBackups(dataDir) });
   });
 
-  r.post('/backups', mw.requireUser, async (req, res, next) => {
+  r.post('/backups', mw.requireUser, mw.requireAdmin, async (req, res, next) => {
     try {
       const info = await backup.backupNow(db, dataDir);
       log.log('backup_manual', `${req.user.nickname} 手动快照 ${info.name}`);
@@ -266,21 +271,32 @@ module.exports = function opsRoutes(db, dataDir) {
     } catch (e) { next(e); }
   });
 
-  r.get('/backups/:name', mw.requireUser, (req, res) => {
+  r.get('/backups/:name', mw.requireUser, mw.requireAdmin, (req, res) => {
     const name = String(req.params.name);
     if (!/^app-\d{4}-\d{2}-\d{2}\.json$/.test(name)) return res.status(400).json({ error: '文件名不对' });
+    backup.listBackups(dataDir); // Prune expired files before direct-name downloads as well.
     const p = path.join(backup.backupsDir(dataDir), name);
     if (!fs.existsSync(p)) return res.status(404).json({ error: '快照不存在' });
     res.download(p, name);
   });
 
-  // 全量导出（JSON + CSV 打包 zip）
+  // Every account, including administrators, gets only its own data from this URL.
   r.get('/export', mw.requireUser, async (req, res, next) => {
+    try {
+      await personalDownload(db, req.user.id, res);
+    } catch (e) {
+      if (e.status && !res.headersSent) return res.status(e.status).json({ error: e.message, code: e.code });
+      next(e);
+    }
+  });
+
+  // Full recovery backups are explicitly separated from personal downloads.
+  r.get('/admin/export', mw.requireUser, mw.requireAdmin, async (req, res, next) => {
     try {
       const zip = await buildExportZip(db);
       const date = todayStr();
       res.setHeader('Content-Type', 'application/zip');
-      res.setHeader('Content-Disposition', `attachment; filename="footprint-export-${date}.zip"`);
+      res.setHeader('Content-Disposition', `attachment; filename="footprint-backup-${date}.zip"`);
       res.send(zip.toBuffer());
     } catch (e) { next(e); }
   });

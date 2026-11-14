@@ -32,9 +32,11 @@ const DATABASE_URL = process.env.DATABASE_URL || 'postgres://postgres:footprint_
 
 async function main() {
   const db = await openDb(DATABASE_URL);
+  await require('./agent/history-privacy').reapplyHistoryDeletions(db, DATA_DIR);
   await ensureSettings(db);
   logMod.init(path.join(DATA_DIR, 'logs'));
   logMod.log('boot', `服务启动 dataDir=${DATA_DIR}`);
+  require('./agent/retention').scheduleRetention(db, logMod);
 
   // 启动时补当天快照（保证每天至少一份基线）
   try {

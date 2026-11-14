@@ -1,5 +1,7 @@
 // 数据库：PostgreSQL（pg 连接池）。从 SQLite 迁移而来，统一异步 API。
 const { Pool } = require('pg');
+const { currentRun, checkRun } = require('./agent/runtime-context');
+const { scopedQuery, configureTransaction } = require('./agent/database-runtime');
 
 // 把 SQLite 的 `?` 占位符转成 PG 的 `$1 $2 ...`。
 // 本项目 SQL 中没有字符串字面量里的 `?`，可安全替换。
@@ -417,7 +419,7 @@ CREATE TABLE IF NOT EXISTS zoowy_offers (
 
 // 打开连接池并建表（异步）。
 async function openDb(connString) {
-  const pool = new Pool({ connectionString: connString, max: 10 });
+  const pool = new Pool({ connectionString: connString, max: 10, connectionTimeoutMillis: 3000 });
   // 建表
   await pool.query(SCHEMA);
   // 迁移：老库补 custom_points 字段（幂等）
@@ -448,6 +450,21 @@ async function openDb(connString) {
   await pool.query('ALTER TABLE pair_invites ADD COLUMN IF NOT EXISTS requested_at TEXT');
   // 迁移：zoowy v2 —— 草案支持复用已有大目标（幂等，与 SCHEMA 的列定义重复无害）
   await pool.query('ALTER TABLE planning_drafts ADD COLUMN IF NOT EXISTS big_goal_id INTEGER REFERENCES big_goals(id)');
+  await pool.query('ALTER TABLE zoowy_sessions ADD COLUMN IF NOT EXISTS generation INTEGER NOT NULL DEFAULT 0');
+  await pool.query("ALTER TABLE zoowy_turns ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'foreground' CHECK (kind IN ('foreground','background'))");
+  await pool.query("ALTER TABLE zoowy_turns ADD COLUMN IF NOT EXISTS deadline_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '60 seconds')");
+  await pool.query('ALTER TABLE zoowy_turns ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ');
+  await pool.query('ALTER TABLE zoowy_turns ADD COLUMN IF NOT EXISTS session_id INTEGER');
+  await pool.query('ALTER TABLE zoowy_turns ADD COLUMN IF NOT EXISTS session_generation INTEGER');
+  await pool.query("ALTER TABLE zoowy_turns ADD COLUMN IF NOT EXISTS report JSONB NOT NULL DEFAULT '{}'");
+  await pool.query('ALTER TABLE zoowy_turns ADD COLUMN IF NOT EXISTS input_hash TEXT');
+  await pool.query('ALTER TABLE zoowy_turns ADD COLUMN IF NOT EXISTS cleared BOOLEAN NOT NULL DEFAULT FALSE');
+  // Expired legacy rows cannot retain the foreground slot forever. New workers
+  // fence every commit against this row and deadline, including after restart.
+  await pool.query("UPDATE zoowy_turns SET state='failed',finished_at=NOW() WHERE state IN ('running','cancelling') AND deadline_at <= NOW()");
+  const duplicate = await pool.query("SELECT user_id FROM zoowy_turns WHERE kind='foreground' AND state IN ('running','cancelling') GROUP BY user_id HAVING COUNT(*)>1");
+  if (duplicate.rowCount) throw new Error('存在重复的活动 Agent 任务，请停止旧实例并等待任务过期后重启');
+  await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS uq_zoowy_active_foreground ON zoowy_turns(user_id) WHERE kind='foreground' AND state IN ('running','cancelling')");
   const pairTables = [
     'goals', 'check_ins', 'point_ledger', 'goal_milestones', 'verifications',
     'wish_items', 'wish_history', 'redemptions', 'uploads', 'usage_daily',
@@ -486,13 +503,20 @@ async function openDb(connString) {
 }
 
 // 统一异步 API，对齐原有 prepare().get()/.all()/.run() 语义。
-function makeDb(pool) {
+function makeDb(pool, rootPool = pool, inTransaction = false) {
   async function query(sql, params) {
+    if (currentRun()) {
+      checkRun();
+      if (inTransaction) return scopedQuery(pool, q(sql), params || [], rootPool);
+      return tx(makeDb(pool), (c) => c.query(sql, params), { timeoutMs: 5000 });
+    }
     const r = await pool.query(q(sql), params || []);
     return r;
   }
   return {
     pool,
+    rootPool,
+    inTransaction,
     // 单行或 undefined
     async get(sql, params) {
       const r = await query(sql, params);
@@ -509,7 +533,7 @@ function makeDb(pool) {
       return { changes: r.rowCount, id: r.rows && r.rows[0] ? r.rows[0].id : undefined };
     },
     async exec(sql) {
-      await pool.query(sql);
+      await query(sql);
     },
     query,
   };
@@ -533,19 +557,31 @@ async function balanceOf(db, userId) {
 }
 
 // 事务：fn 拿到一个专用 client，其上有与 db 相同的 get/all/run/exec/query 方法。
-async function tx(db, fn) {
+async function tx(db, fn, options = {}) {
+  if (db.inTransaction) return fn(db);
+  checkRun();
   const client = await db.pool.connect();
-  const c = makeDb(client);
+  const c = makeDb(client, db.rootPool || db.pool, true);
+  let committing = false;
   try {
     await client.query('BEGIN');
+    if (options.readOnly) await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    await configureTransaction(client, options.timeoutMs || (currentRun() ? 5000 : 30000));
     const r = await fn(c);
+    checkRun();
+    committing = true;
     await client.query('COMMIT');
     return r;
   } catch (e) {
-    await client.query('ROLLBACK');
+    if (committing && (!e.code || e.code.startsWith('08'))) {
+      e.code = 'commit_unknown'; e.status = 503;
+      e.message = '提交结果待确认，请查询原操作状态后再试';
+    }
+    try { await client.query('ROLLBACK'); }
+    catch (_) { client._securityBroken = true; }
     throw e;
   } finally {
-    client.release();
+    client.release(Boolean(client._securityBroken));
   }
 }
 

@@ -1,5 +1,6 @@
 // 全量导出 / 导入：JSON（恢复用）+ 各表 CSV，打包成一个 zip。
 const AdmZip = require('adm-zip');
+const { tx } = require('./db');
 
 const TABLES = [
   'users',
@@ -21,6 +22,7 @@ const TABLES = [
   'big_goals',
   'user_profiles',
   'profile_versions',
+  'profile_changes',
   'plan_versions',
   'diaries',
   'zoowy_sessions',
@@ -56,6 +58,7 @@ const ORDER_BY = {
 };
 
 async function dumpAll(db) {
+  if (db.pool && !db.inTransaction) return tx(db, dumpAll, { readOnly: true, timeoutMs: 30000 });
   const tables = {};
   for (const t of TABLES) {
     const order = ORDER_BY[t] || 'id';
@@ -66,7 +69,10 @@ async function dumpAll(db) {
 
 function csvEscape(v) {
   if (v === null || v === undefined) return '';
-  const s = String(v);
+  const value = typeof v === 'object' ? JSON.stringify(v) : String(v);
+  // Spreadsheet readers treat leading whitespace/control characters and =,+,-,@ as formula prefixes.
+  const formula = typeof v === 'string' && (/^[\s\u0000-\u001f]*[=+\-@]/u.test(value) || /^[\t\r\n]/u.test(value));
+  const s = formula ? "'" + value : value;
   if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
   return s;
 }
@@ -84,7 +90,7 @@ function toCsv(rows) {
 async function buildExportZip(db) {
   const tables = await dumpAll(db);
   const json = JSON.stringify(
-    { app: 'footprint', version: 1, exportedAt: new Date().toISOString(), tables },
+    { app: 'footprint', version: 1, scope: 'full', exportedAt: new Date().toISOString(), tables },
     null,
     2
   );
@@ -99,12 +105,16 @@ async function buildExportZip(db) {
 // 从导出 JSON 恢复：先备份当前库，再整表替换（事务内完成）。
 async function restoreFromJson(db, jsonText, dataDir) {
   const data = JSON.parse(jsonText);
+  if (data?.scope === 'personal' || data?.app === 'footprint-personal') {
+    throw new Error('个人导出不能用于全库恢复，请选择管理员的完整备份');
+  }
   if (!data || data.app !== 'footprint' || !data.tables || typeof data.tables !== 'object') {
     throw new Error('不是脚印的导出文件（缺少 app/tables 标记）');
   }
+  const { readDeletionJournal, applyHistoryDeletion } = require('./agent/history-privacy');
+  const deletions = readDeletionJournal(dataDir);
   const { backupNow } = require('./backup');
   await backupNow(db, dataDir);
-  const { tx } = require('./db');
   await tx(db, async (c) => {
     // 先清空 sessions / login_attempts：它们不在导出清单（登录态/限流状态不随恢复迁移），
     // 但 sessions 有 FK 指向 users，必须先删掉，否则下面的 DELETE FROM users 会撞外键。
@@ -118,11 +128,17 @@ async function restoreFromJson(db, jsonText, dataDir) {
       const rows = data.tables[t];
       if (!Array.isArray(rows) || !rows.length) continue;
       const cols = Object.keys(rows[0]);
+      if (cols.some((column) => !/^[a-z_][a-z0-9_]*$/.test(column))) throw new Error('备份包含无效字段名');
       const sql = `INSERT INTO ${t} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`;
       for (const r of rows) {
-        await c.run(sql, cols.map((k) => r[k]));
+        // A backup cannot resume work that belonged to a previous process.
+        const restored = t === 'zoowy_turns' && ['running', 'cancelling'].includes(r.state)
+          ? { ...r, state: 'failed' } : r;
+        await c.run(sql, cols.map((k) => restored[k]));
       }
     }
+    // The journal is independent of the backup and must survive database replacement.
+    for (const entry of deletions) await applyHistoryDeletion(c, entry);
     // 显式 id 插入不会推进 SERIAL 序列，恢复后首次新建目标/兑换/注册会撞主键，这里逐表对齐。
     // 只处理带 id 列的表：pg_get_serial_sequence 对无 id 列的表（pair_members/settings 等）会直接报错，
     // 故先经 information_schema 确认存在 id 列。
@@ -145,4 +161,4 @@ async function restoreFromJson(db, jsonText, dataDir) {
   return true;
 }
 
-module.exports = { dumpAll, buildExportZip, restoreFromJson, TABLES };
+module.exports = { dumpAll, buildExportZip, restoreFromJson, TABLES, toCsv };

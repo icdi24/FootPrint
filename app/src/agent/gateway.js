@@ -7,6 +7,8 @@ const ai = require('../ai');
 const { toolsFor, executeTool } = require('./tools');
 const { recordCall } = require('../ai');
 const { runWithSignal } = require('./turn-cancel');
+const { currentRun, remainingMs, checkRun } = require('./runtime-context');
+const { addToolReport } = require('./runtime-report');
 
 const MAX_TOOL_ROUNDS = 6;
 const MAX_TOOL_CALLS = 12;
@@ -18,7 +20,7 @@ const HINT_TIMEOUT = '这轮想得太久，先说到这儿。';
 // 跑一轮 agent loop。返回 { content, toolRounds, toolLog, messages, degraded?, reason? }
 async function runAgentLoop({ db, userId, workflow, action, messages, idempotencyKey = null, tools: scopedTools, runTool, deepThinking = false, signal }) {
   const started = Date.now();
-  const remainingTime = () => TOTAL_TIMEOUT_MS - (Date.now() - started);
+  const remainingTime = () => Math.min(TOTAL_TIMEOUT_MS - (Date.now() - started), remainingMs(5000));
   const deadline = AbortSignal.timeout(TOTAL_TIMEOUT_MS);
   const toolSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
   const tools = scopedTools ?? toolsFor(workflow);
@@ -51,7 +53,8 @@ async function runAgentLoop({ db, userId, workflow, action, messages, idempotenc
       return done('total_timeout', HINT_TIMEOUT);
     }
 
-    const resp = await ai.chat(db, {
+    let resp;
+    try { resp = await ai.chat(db, {
       messages: convo,
       tools,
       workflow,
@@ -66,7 +69,10 @@ async function runAgentLoop({ db, userId, workflow, action, messages, idempotenc
       maxTokens: deepThinking === true ? 32768 : 8192,
       // 单次模型调用留 45s，给 loop 总超时留余量
       timeoutMs: Math.min(45000, remainingTime()),
-    });
+    }); } catch (error) {
+      if (error.code === 'context_budget' && toolRounds) return done('context_budget', '本轮资料已达到上下文预算，请缩小问题范围。');
+      throw error;
+    }
     ai.throwIfCancelled(signal);
 
     const calls = resp.toolCalls || [];
@@ -101,6 +107,8 @@ async function runAgentLoop({ db, userId, workflow, action, messages, idempotenc
       return done('max_tool_calls', HINT_LIMIT, resp.content);
     }
     for (const call of calls) {
+      checkRun();
+      const toolStarted = Date.now();
       const remainingMs = remainingTime();
       if (remainingMs <= 0) {
         await recordCall(db, {
@@ -136,12 +144,19 @@ async function runAgentLoop({ db, userId, workflow, action, messages, idempotenc
         }
       }
       ai.throwIfCancelled(signal);
-      toolLog.push({ name: fn.name, args: parsedArgs, result });
-      const serialized = JSON.stringify(result);
+      let serialized = JSON.stringify(result);
+      if (!serialized || serialized.length > 4000) {
+        result = { ok: false, error: '工具结果超出大小限制，请缩小查询范围' };
+        serialized = JSON.stringify(result);
+      }
+      // Full arguments/results never enter the persistent user-facing report.
+      toolLog.push({ name: String(fn.name || '').slice(0, 80), result });
+      addToolReport({ name: String(fn.name || '').slice(0, 80), status: result.ok ? 'ok' : 'rejected',
+        reason: result.ok ? undefined : String(result.error || '').slice(0, 200), authorization: 'chat_read_or_proposal', durationMs: Date.now() - toolStarted });
       convo.push({
         role: 'tool',
         tool_call_id: call.id,
-        content: serialized && serialized.length <= 4000 ? serialized : JSON.stringify({ ok: false, error: '工具结果超出大小限制' }),
+        content: serialized,
       });
     }
   }

@@ -5,6 +5,21 @@
    ═══════════════════════════════════════════════════════ */
 (() => {
   const BASE = '/api';
+  let generation = 0;
+  let historyGeneration = 0;
+  const pending = new Set();
+  function invalidateSession(broadcast = true) {
+    generation += 1;
+    for (const controller of pending) controller.abort();
+    pending.clear();
+    if (broadcast) try { localStorage.setItem('footprint.auth-change', crypto.randomUUID()); } catch (_) { /* 页面内隔离仍生效 */ }
+    window.dispatchEvent(new CustomEvent('footprint:auth-change', { detail: { remote: !broadcast } }));
+  }
+  function clearHistoryViews(broadcast = true) {
+    historyGeneration += 1;
+    if (broadcast) try { localStorage.setItem('footprint.history-cleared', crypto.randomUUID()); } catch (_) { /* 页面内隔离仍生效 */ }
+    window.dispatchEvent(new Event('footprint:history-cleared'));
+  }
 
   class ApiError extends Error {
     constructor(status, message, payload) {
@@ -16,10 +31,16 @@
   }
 
   async function request(method, path, body, opts = {}) {
+    if (/^\/(?:login|register|demo-login|logout|me\/logout-all)$/.test(path)) invalidateSession();
+    const startedGeneration = generation;
+    const startedHistoryGeneration = historyGeneration;
+    const controller = new AbortController();
+    pending.add(controller);
     const init = {
       method,
       credentials: 'same-origin',
       headers: {},
+      signal: controller.signal,
     };
     if (body !== undefined) {
       init.headers['Content-Type'] = 'application/json';
@@ -29,6 +50,8 @@
     try {
       res = await fetch(BASE + path, init);
     } catch (e) {
+      pending.delete(controller);
+      if (startedGeneration !== generation) throw new ApiError(0, '登录状态已变化', { code: 'session_changed' });
       throw new ApiError(0, '网络不通，检查后端是否在运行', e);
     }
     let data = null;
@@ -36,6 +59,9 @@
     if (ct.includes('application/json')) {
       data = await res.json().catch(() => null);
     }
+    pending.delete(controller);
+    if (startedGeneration !== generation) throw new ApiError(0, '登录状态已变化', { code: 'session_changed' });
+    if (path.startsWith('/zoowy/') && startedHistoryGeneration !== historyGeneration) throw new ApiError(0, '聊天已清空', { code: 'history_cleared' });
     if (!res.ok) {
       const msg = (data && (data.error || data.message)) || `请求失败（${res.status}）`;
       throw new ApiError(res.status, msg, data);
@@ -44,6 +70,9 @@
   }
 
   const api = {
+    get generation() { return generation; },
+    invalidateSession,
+    clearHistoryViews,
     ApiError,
     get: (p) => request('GET', p),
     post: (p, b) => request('POST', p, b === undefined ? {} : b),
@@ -156,4 +185,8 @@
   };
 
   window.FP_API = api;
+  window.addEventListener('storage', (event) => {
+    if (event.key === 'footprint.auth-change') invalidateSession(false);
+    if (event.key === 'footprint.history-cleared') clearHistoryViews(false);
+  });
 })();

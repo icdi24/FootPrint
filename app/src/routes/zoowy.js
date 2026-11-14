@@ -6,7 +6,9 @@ const ai = require('../ai');
 const { runChat, acceptOffer, confirmChatDraft } = require('../agent/workflows/chat');
 const { recentMessages } = require('../agent/session');
 const { getDraft } = require('../agent/workflows/planning');
-const { cancelTurn, validRequestId, turnError } = require('../agent/zoowy-turns');
+const { cancelTurn, getTurn, validRequestId } = require('../agent/zoowy-turns');
+const { clearHistory } = require('../agent/history-privacy');
+const path = require('node:path');
 const { AiError } = require('../ai');
 
 module.exports = function zoowyRoutes(db) {
@@ -56,6 +58,7 @@ module.exports = function zoowyRoutes(db) {
     const drafts = new Map();
     return {
       sessionId: session.id,
+      generation: session.generation,
       messages: await Promise.all(messages.map(async (m) => {
         let meta;
         try { meta = JSON.parse(m.meta); } catch (_) { meta = {}; }
@@ -66,6 +69,9 @@ module.exports = function zoowyRoutes(db) {
           tools: meta?.tools || null,
           profileChanges: meta?.profileChanges || null,
           failed: meta?.failed || null,
+          report: meta?.report || null,
+          degraded: meta?.degraded || false,
+          reason: meta?.reason || null,
           createdAt: m.created_at,
           cards: await Promise.all(cards.map(async (card) => {
             if (card?.type !== 'plan_draft' || !card.draft?.id) return card;
@@ -79,12 +85,13 @@ module.exports = function zoowyRoutes(db) {
     };
   }));
 
-  r.post('/zoowy/turns/:requestId/cancel', mw.requireUser, requireJson, handle(async (req, userId) => ({
-    cancelled: await cancelTurn(db, userId, req.params.requestId),
-  })));
+  r.get('/zoowy/turns/:requestId', mw.requireUser, handle((req, userId) => getTurn(db, userId, req.params.requestId)));
+  r.post('/zoowy/turns/:requestId/cancel', mw.requireUser, requireJson, handle((req, userId) => cancelTurn(db, userId, req.params.requestId)));
+  r.delete('/zoowy/history', mw.requireUser, requireJson, handle((req, userId) => clearHistory(db, userId,
+    process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, '..', '..', 'data'))));
 
   r.post('/zoowy/offers/:id/accept', mw.requireUser, requireJson, handle(async (req, userId) => ({
-    card: await acceptOffer(db, userId, Number(req.params.id), req.body?.requestId),
+    card: await acceptOffer(db, userId, Number(req.params.id), req.body?.requestId, req.body?.revision),
   })));
 
   r.post('/zoowy/drafts/:id/confirm', mw.requireUser, requireJson, handle(async (req, userId) => ({

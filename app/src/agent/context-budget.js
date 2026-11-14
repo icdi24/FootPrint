@@ -16,8 +16,10 @@ function estimateContext(messages, tools) {
 }
 
 function assertContextBudget({ messages, tools, outputTokens = 8192 }) {
-  if (estimateContext(messages, tools) + outputTokens + PROTOCOL_RESERVE > CONTEXT_LIMIT) {
-    throw Object.assign(new Error('本轮上下文超过 30 万 token 的预算，请先摘要上下文或缩小资料范围'), {
+  const configured = Number(process.env.AI_CONTEXT_LIMIT || CONTEXT_LIMIT);
+  const limit = Number.isInteger(configured) && configured > 0 ? Math.min(CONTEXT_LIMIT, configured) : CONTEXT_LIMIT;
+  if (estimateContext(messages, tools) + outputTokens + PROTOCOL_RESERVE > limit) {
+    throw Object.assign(new Error('本轮上下文超过保守估算预算，请缩小资料范围'), {
       status: 413, code: 'context_budget',
     });
   }

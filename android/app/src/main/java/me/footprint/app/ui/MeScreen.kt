@@ -5,6 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Browser
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -199,6 +201,8 @@ fun MeScreen(vm: AppViewModel) {
   var ledger by remember { mutableStateOf<List<LedgerItem>>(emptyList()) }
   var settings by remember { mutableStateOf<PointsConfig?>(null) }
   var backups by remember { mutableStateOf<List<BackupEntry>>(emptyList()) }
+  var isAdmin by remember { mutableStateOf(false) }
+  var downloadUrl by remember { mutableStateOf<String?>(null) }
   var profileChanges by remember { mutableStateOf<ProfileChangesResponse?>(null) }
   var profileVersions by remember { mutableStateOf<ProfileVersionsResponse?>(null) }
   var aiSettings by remember { mutableStateOf<UserSettings?>(null) }
@@ -285,7 +289,8 @@ fun MeScreen(vm: AppViewModel) {
       // 系数失败不阻塞其它模块
     }
     try {
-      backups = Api.listBackups(token).backups
+      isAdmin = Api.myUser(token)?.isAdmin == 1
+      backups = if (isAdmin) Api.listBackups(token).backups else emptyList()
     } catch (e: Exception) {
       // 备份失败不阻塞其它模块
     }
@@ -325,7 +330,25 @@ fun MeScreen(vm: AppViewModel) {
       }
     }
   }
-  val doOpen: (String) -> Unit = { url -> openUrl(context, url) }
+  val saveDocument = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+    val url = downloadUrl
+    downloadUrl = null
+    if (uri != null && url != null) scope.launch {
+      try {
+        val token = Session.token(context) ?: throw ApiException("请先登录")
+        context.contentResolver.openOutputStream(uri)?.use { Api.downloadData(token, url, it) }
+          ?: throw ApiException("无法写入选定文件")
+        toast = "数据文件已保存"
+      } catch (e: Exception) {
+        runCatching { context.contentResolver.delete(uri, null, null) }
+        toast = e.message ?: "下载失败"
+      }
+    }
+  }
+  val doOpen: (String) -> Unit = { url ->
+    downloadUrl = url
+    saveDocument.launch(if (url.endsWith(".json")) url.substringAfterLast('/') else "footprint-personal.zip")
+  }
 
   Screen {
     Column(
@@ -441,7 +464,7 @@ fun MeScreen(vm: AppViewModel) {
       Spacer(Modifier.height(16.dp))
 
       // ===== 数据与备份 =====
-      BackupSection(backups = backups, onBackup = doBackup, onOpen = doOpen)
+      BackupSection(backups = backups, onBackup = doBackup, onOpen = doOpen, isAdmin = isAdmin)
 
       Spacer(Modifier.height(16.dp))
 
@@ -532,6 +555,7 @@ fun MeScreen(vm: AppViewModel) {
   if (showData) {
     DataBackupDialog(
       backups = backups,
+      isAdmin = isAdmin,
       onBackup = doBackup,
       onOpen = doOpen,
       onDismiss = { showData = false },
@@ -1188,8 +1212,13 @@ private fun DataBackupBody(
   backups: List<BackupEntry>,
   onBackup: () -> Unit,
   onOpen: (String) -> Unit,
+  isAdmin: Boolean,
 ) {
   Column {
+    Text("我的数据（JSON + CSV，附件为元数据）", style = PixelType.Small, color = PixelColors.Ink2)
+    PixelSmallButton("导出本人数据", onClick = { onOpen(Api.exportUrl()) }, filled = false)
+    Text("个人导出不能用于全库恢复。", style = PixelType.Small, color = PixelColors.Ink3)
+    if (isAdmin) {
     Text("每日自动快照（凌晨 3 点，保留 30 天）", style = PixelType.Small, color = PixelColors.Ink2)
     Spacer(Modifier.height(8.dp))
     PixelSmallButton("立即快照一份", onClick = onBackup, filled = false)
@@ -1221,7 +1250,7 @@ private fun DataBackupBody(
     Spacer(Modifier.height(14.dp))
     Text("全量导出（JSON + 各表 CSV，一个 zip）", style = PixelType.Small, color = PixelColors.Ink2)
     Spacer(Modifier.height(8.dp))
-    PixelSmallButton("导出数据", onClick = { onOpen(Api.exportUrl()) }, filled = false)
+    PixelSmallButton("管理员全库导出", onClick = { onOpen(Api.baseUrl() + "api/admin/export") }, filled = false)
     Spacer(Modifier.height(14.dp))
     Text("灾难恢复（三步）", style = PixelType.Small, color = PixelColors.Ink2)
     Spacer(Modifier.height(6.dp))
@@ -1234,6 +1263,7 @@ private fun DataBackupBody(
       style = PixelType.Small,
       color = PixelColors.Ink3,
     )
+    }
   }
 }
 
@@ -1243,12 +1273,13 @@ private fun BackupSection(
   backups: List<BackupEntry>,
   onBackup: () -> Unit,
   onOpen: (String) -> Unit,
+  isAdmin: Boolean,
 ) {
   PixelPanel(Modifier.fillMaxWidth()) {
     Column(Modifier.padding(16.dp)) {
       Text("数据与备份", style = PixelType.Title, color = PixelColors.Ink)
       Spacer(Modifier.height(12.dp))
-      DataBackupBody(backups = backups, onBackup = onBackup, onOpen = onOpen)
+      DataBackupBody(backups = backups, onBackup = onBackup, onOpen = onOpen, isAdmin = isAdmin)
     }
   }
 }
@@ -1259,6 +1290,7 @@ private fun DataBackupDialog(
   backups: List<BackupEntry>,
   onBackup: () -> Unit,
   onOpen: (String) -> Unit,
+  isAdmin: Boolean,
   onDismiss: () -> Unit,
 ) {
   Overlay {
@@ -1271,7 +1303,7 @@ private fun DataBackupDialog(
       ) {
         Text("数据与备份", style = PixelType.Title, color = PixelColors.Ink)
         Spacer(Modifier.height(12.dp))
-        DataBackupBody(backups = backups, onBackup = onBackup, onOpen = onOpen)
+        DataBackupBody(backups = backups, onBackup = onBackup, onOpen = onOpen, isAdmin = isAdmin)
         Spacer(Modifier.height(16.dp))
         PixelButton(text = "关闭", onClick = onDismiss, modifier = Modifier.fillMaxWidth())
       }

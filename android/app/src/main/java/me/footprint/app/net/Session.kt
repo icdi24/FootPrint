@@ -2,12 +2,15 @@ package me.footprint.app.net
 
 import android.content.Context
 import me.footprint.app.BuildConfig
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 本地一点点持久化：只存会话 token 和"最后一次成功上报时间"。
  * 文档 16.2 明确说不引数据库，一个 SharedPreferences 就够。
  */
 object Session {
+    private val sessionGeneration = AtomicLong(0)
+    val generation: Long get() = sessionGeneration.get()
 
     private const val PREFS = "footprint_session"
     private const val K_TOKEN = "fp_token"
@@ -27,6 +30,7 @@ object Session {
         prefs(context).getString(K_TOKEN, null)?.takeIf { it.isNotBlank() }
 
     fun saveToken(context: Context, token: String) {
+        sessionGeneration.incrementAndGet()
         prefs(context).edit().putString(K_TOKEN, token).apply()
     }
 
@@ -68,6 +72,7 @@ object Session {
 
     /** 退出登录：清 token 与上报状态（节流时间留着也无所谓，一起清掉更干净） */
     fun clear(context: Context) {
+        sessionGeneration.incrementAndGet()
         prefs(context).edit().clear().apply()
     }
 

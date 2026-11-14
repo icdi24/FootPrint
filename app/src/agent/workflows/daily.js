@@ -3,7 +3,9 @@
 // 有重要信息顺带更新画像（补丁带 reason）。次日生成新日报不回改昨日。
 const ai = require('../../ai');
 const { PERSONA } = require('../persona');
-const { executeTool } = require('../tools');
+const { executeTool, readProfileBaseline } = require('../tools');
+const { runTurn } = require('../zoowy-turns');
+const { currentRun } = require('../runtime-context');
 const { todayStr, addDaysStr, nowIso } = require('../../tz');
 
 async function runDaily({ db, userId, date }) {
@@ -14,6 +16,11 @@ async function runDaily({ db, userId, date }) {
     await ai.recordSkip(db, { userId, workflow: 'daily', action: 'daily_dup', detail: JSON.stringify({ date: day }) });
     return { duplicate: true, diary: exist };
   }
+  return runTurn(db, { userId, kind: 'background', requestId: `daily_${day}`,
+    input: { action: 'daily', date: day } }, ({ signal, commit }) => prepareDaily(db, userId, day, signal, commit));
+}
+
+async function prepareDaily(db, userId, day, signal, commit) {
 
   // 拼当日数据：打卡、目标达成、大目标、最近画像、最近使用时长
   const checkins = await db.all(
@@ -30,9 +37,8 @@ async function runDaily({ db, userId, date }) {
     "SELECT title, progress, progress_note, progress_at FROM big_goals WHERE owner_id = ? AND status = 'active' ORDER BY id",
     [userId]
   );
-  const profileRows = await db.all(
-    "SELECT block, content FROM user_profiles WHERE user_id = ? AND status = 'active' ORDER BY block", [userId]
-  );
+  const profileBaseline = await readProfileBaseline(db, userId);
+  const profileRows = profileBaseline.filter((p) => p.status === 'active');
   const usage = await db.all(
     'SELECT usage_date, ROUND(SUM(seconds)/60.0) AS minutes FROM usage_daily WHERE user_id = ? AND usage_date >= ? GROUP BY usage_date ORDER BY usage_date',
     [userId, addDaysStr(day, -6)]
@@ -69,6 +75,7 @@ async function runDaily({ db, userId, date }) {
     workflow: 'daily',
     action: 'daily_generate',
     userId,
+    signal,
     idempotencyKey: `daily:${userId}:${day}`,
   });
 
@@ -83,12 +90,20 @@ async function runDaily({ db, userId, date }) {
     throw new ai.AiError('AI 没给出日报正文，本次不写库', { kind: 'bad_json' });
   }
 
-  const writeResult = await executeTool(db, 'daily', userId, 'write_my_diary', { content: diaryText });
-  const results = { diary: writeResult };
-  if (Array.isArray(out.profile_patches) && out.profile_patches.length) {
-    results.profile = await executeTool(db, 'daily', userId, 'patch_my_profile', { patches: out.profile_patches });
-  }
-  return results;
+  return commit(async (c) => {
+    const exist = await c.get('SELECT id FROM diaries WHERE user_id=? AND diary_date=?', [userId, day]);
+    if (exist) return { duplicate: true, diary: exist };
+    const writeResult = await executeTool(c, 'daily', userId, 'write_my_diary', { content: diaryText });
+    if (!writeResult.ok) throw new Error(writeResult.error);
+    const results = { diary: writeResult };
+    if (Array.isArray(out.profile_patches) && out.profile_patches.length) {
+      results.profile = await executeTool(c, 'daily', userId, 'patch_my_profile', { patches: out.profile_patches }, { profileBaseline });
+    }
+    currentRun().report.committedChanges.push({ operation: 'write_my_diary', recordIds: [writeResult.diary_id], authorization: 'daily_enabled' });
+    if (results.profile?.changes?.length) currentRun().report.committedChanges.push({ operation: 'patch_my_profile',
+      recordIds: [results.profile.changeId], authorization: 'daily_enabled' });
+    return { ...results, profileConflict: Boolean(results.profile?.conflicts?.length) };
+  });
 }
 
 // 23:30 定时（照抄 backup.js 的 setInterval 轮询模式，不引 cron）。

@@ -1,5 +1,9 @@
 // DeepSeek 官方客户端。密钥和模型由服务端环境或账号配置提供。
 const { nowIso } = require('./tz');
+const { assertContextBudget } = require('./agent/context-budget');
+const { acquireModelPermit } = require('./agent/model-permits');
+const { currentRun, checkRun, remainingMs, withoutRun } = require('./agent/runtime-context');
+const { tx } = require('./db');
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
 // 可选覆盖：本地/私有部署设 AI_BASE_URL 指向自己的网关或黑洞地址，不设则走官方。
@@ -40,6 +44,7 @@ class AiError extends Error {
 }
 
 function throwIfCancelled(signal) {
+  checkRun();
   if (signal?.aborted) throw new AiError('本轮已停止', { kind: 'cancelled', status: 409 });
 }
 
@@ -59,13 +64,13 @@ function aiAvailable() {
 async function recordCall(db, rec) {
   if (!db) return;
   try {
-    await db.run(
+    await withoutRun(() => tx(db, (c) => c.run(
       `INSERT INTO ai_calls (user_id, workflow, action, status, model, prompt_tokens, completion_tokens, total_tokens, duration_ms, detail, idempotency_key, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [rec.userId ?? null, rec.workflow || '', rec.action || '', rec.status || 'ok', rec.model || '',
         rec.promptTokens || 0, rec.completionTokens || 0, rec.totalTokens || 0, rec.durationMs || 0,
         rec.detail || '', rec.idempotencyKey ?? null, nowIso()]
-    );
+    ), { timeoutMs: 5000 }));
   } catch (e) { /* 记账失败不影响主流程 */ }
 }
 
@@ -87,6 +92,7 @@ async function chat(db, opts = {}) {
   if (!cfg?.apiKey) throw new AiError('请先配置 DeepSeek API Key', { kind: 'no_key' });
   if (!allowedModels().includes(cfg.model)) throw new AiError('模型「' + cfg.model + '」不在允许列表里', { kind: 'invalid_model' });
   if (!Number.isInteger(maxTokens) || maxTokens < 1) throw new AiError('输出 token 预算无效', { kind: 'invalid_budget' });
+  assertContextBudget({ messages, tools, outputTokens: maxTokens });
 
   const thinking = deepThinking === true;
   const body = { model: cfg.model, messages, thinking: { type: thinking ? 'enabled' : 'disabled' } };
@@ -97,7 +103,7 @@ async function chat(db, opts = {}) {
   if (json) body.response_format = { type: 'json_object' };
 
   const started = Date.now();
-  const deadline = started + timeoutMs;
+  const deadline = started + Math.min(timeoutMs, remainingMs(5000));
   let result = null;
   let lastErr = null;
   const attempts = json ? 2 : 1;
@@ -106,7 +112,27 @@ async function chat(db, opts = {}) {
       throwIfCancelled(signal);
       const remainingMs = deadline - Date.now();
       if (remainingMs <= 0) throw new AiError('DeepSeek 请求超时', { kind: 'timeout' });
-      result = await requestOnce(cfg, body, remainingMs, signal);
+      const permit = await acquireModelPermit(db, signal);
+      const attemptStart = Date.now();
+      const run = currentRun();
+      if (run) run.report.modelCalls++;
+      try {
+        result = await requestOnce(cfg, body, Math.max(1, deadline - Date.now()), signal ? AbortSignal.any([signal, permit.signal]) : permit.signal);
+        const usage = result.usage;
+        if (run && result.usageReported) {
+          run.report.usageReported = true;
+          for (const [field, key] of [['promptTokens','prompt_tokens'],['completionTokens','completion_tokens'],['totalTokens','total_tokens']]) {
+            run.report[field] += Number(usage[key]) || 0;
+          }
+        }
+        await recordCall(db, { userId, workflow, action, status: 'ok', model: cfg.model,
+          durationMs: Date.now() - attemptStart, promptTokens: usage.prompt_tokens,
+          completionTokens: usage.completion_tokens, totalTokens: usage.total_tokens, detail, idempotencyKey });
+      } catch (error) {
+        await recordCall(db, { userId, workflow, action, status: 'fail', model: cfg.model,
+          durationMs: Date.now() - attemptStart, detail: JSON.stringify({ kind: error.kind || 'error', attempt: i + 1 }), idempotencyKey });
+        throw error;
+      } finally { await permit.release(); }
       break;
     } catch (e) {
       lastErr = e;
@@ -117,19 +143,9 @@ async function chat(db, opts = {}) {
   const durationMs = Date.now() - started;
 
   if (!result) {
-    await recordCall(db, {
-      userId, workflow, action, status: 'fail', model: cfg.model, durationMs,
-      detail: JSON.stringify({ error: String(lastErr && lastErr.message), kind: lastErr && lastErr.kind }),
-      idempotencyKey,
-    });
     throw lastErr;
   }
 
-  await recordCall(db, {
-    userId, workflow, action, status: 'ok', model: cfg.model, durationMs,
-    promptTokens: result.usage.prompt_tokens, completionTokens: result.usage.completion_tokens,
-    totalTokens: result.usage.total_tokens, detail, idempotencyKey,
-  });
   throwIfCancelled(signal);
   return result;
 }
@@ -151,7 +167,22 @@ async function requestOnce(cfg, body, timeoutMs, callerSignal) {
       throw new AiError(`DeepSeek 接口返回 ${res.status}`, { kind: 'http', status: res.status });
     }
 
-    const data = await res.json();
+    const reader = res.body.getReader();
+    const chunks = [];
+    let bytes = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > 2 * 1024 * 1024) {
+          ac.abort();
+          throw new AiError('模型响应超过 2 MiB 限制', { kind: 'output_limit' });
+        }
+        chunks.push(Buffer.from(value));
+      }
+    } finally { reader.releaseLock(); }
+    const data = JSON.parse(Buffer.concat(chunks, bytes).toString('utf8'));
     throwIfCancelled(callerSignal);
     if (ac.signal.aborted) throw new AiError('DeepSeek 请求超时', { kind: 'timeout' });
     const choice = data?.choices?.[0];
@@ -180,6 +211,7 @@ async function requestOnce(cfg, body, timeoutMs, callerSignal) {
       content: typeof msg.content === 'string' ? msg.content : '',
       toolCalls,
       usage: data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      usageReported: Boolean(data.usage),
     };
 
     if (body.thinking.type === 'enabled' && toolCalls.length) {
@@ -196,6 +228,7 @@ async function requestOnce(cfg, body, timeoutMs, callerSignal) {
     }
     return out;
   } catch (error) {
+    if (error.kind === 'output_limit') throw error;
     throwIfCancelled(callerSignal);
     if (ac.signal.aborted) throw new AiError('DeepSeek 请求超时', { kind: 'timeout' });
     if (error instanceof AiError) throw error;

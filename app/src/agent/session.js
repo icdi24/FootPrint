@@ -1,6 +1,7 @@
 // agent/session.js —— zoowy 会话（存服务端，Web 和 Android 拉同一份，按 user_id 隔离）
 const { nowIso } = require('../tz');
 const { tx } = require('../db');
+const { currentRun } = require('./runtime-context');
 
 // 每人一个主会话：两处入口（「我」页常驻 + 大目标页按钮）进同一个会话
 async function ensureSession(db, userId) {
@@ -27,6 +28,12 @@ async function recentMessages(db, userId, limit = 40) {
 }
 
 async function appendMessage(db, userId, sessionId, role, content, meta) {
+  const run = currentRun();
+  if (run?.sessionId === sessionId) {
+    const session = await db.get('SELECT generation FROM zoowy_sessions WHERE id=? AND user_id=?', [sessionId, userId]);
+    if (session?.generation !== run.sessionGeneration) throw Object.assign(new Error('对话已清空'), { status: 409, code: 'history_cleared' });
+    if (role === 'assistant') meta = { ...meta, report: run.report };
+  }
   const row = await db.get(
     'INSERT INTO zoowy_messages (session_id, user_id, role, content, meta, created_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
     [sessionId, userId, role, content || '', meta ? JSON.stringify(meta) : '', nowIso()]

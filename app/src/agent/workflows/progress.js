@@ -3,14 +3,24 @@
 // 动则写进度 + 画像局部补丁（add/update/delete 带 reason，其余块原样留）。
 const ai = require('../../ai');
 const { PERSONA } = require('../persona');
-const { executeTool } = require('../tools');
+const { executeTool, readProfileBaseline } = require('../tools');
+const { runTurn } = require('../zoowy-turns');
+const { createHash } = require('node:crypto');
+const { currentRun } = require('../runtime-context');
 
 async function runProgress({ db, userId, goalId }) {
   const goal = await db.get('SELECT * FROM goals WHERE id = ? AND owner_id = ?', [Number(goalId), userId]);
   if (!goal) throw new Error('目标不存在或不是你的');
+  if (goal.status !== 'achieved') return { skipped: true, reason: 'not_achieved' };
   if (!goal.big_goal_id) return { skipped: true, reason: 'no_big_goal' };
+  const event = createHash('sha256').update(String(goal.updated_at)).digest('hex').slice(0, 16);
+  return runTurn(db, { userId, kind: 'background', requestId: `progress_${goal.id}_${event}`,
+    input: { action: 'progress', goalId: goal.id } }, ({ signal, commit }) => prepareProgress(db, userId, goal, signal, commit));
+}
+
+async function prepareProgress(db, userId, goal, signal, commit) {
   const bg = await db.get('SELECT * FROM big_goals WHERE id = ? AND owner_id = ?', [goal.big_goal_id, userId]);
-  if (!bg) return { skipped: true, reason: 'no_big_goal' };
+  if (!bg) return commit(async () => ({ skipped: true, reason: 'no_big_goal' }));
 
   const chain = await db.all(
     `SELECT title, plan_status, status, planned_date FROM goals
@@ -22,9 +32,9 @@ async function runProgress({ db, userId, goalId }) {
     "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'achieved') AS done FROM goals WHERE big_goal_id = ? AND owner_id = ? AND status != 'archived'",
     [bg.id, userId]
   );
-  const profileBrief = (await db.all(
-    "SELECT block, content FROM user_profiles WHERE user_id = ? AND status = 'active' ORDER BY block", [userId]
-  )).map((p) => `[${p.block}] ${p.content}`).join('\n') || '（暂无画像）';
+  const profileBaseline = await readProfileBaseline(db, userId);
+  const profileBrief = profileBaseline.filter((p) => p.status === 'active')
+    .map((p) => `[${p.block}] ${p.content}`).join('\n') || '（暂无画像）';
 
   const system = `${PERSONA}
 
@@ -58,23 +68,32 @@ async function runProgress({ db, userId, goalId }) {
     workflow: 'progress',
     action: 'progress_check',
     userId,
+    signal,
   });
 
   const out = resp.parsed || {};
   if (!out.need_change) {
     // 整轮跳过：不写库，但要留痕（上线总验收：ai_calls 里看得到跳过记录）
     await ai.recordSkip(db, { userId, workflow: 'progress', action: 'progress_noop', detail: JSON.stringify({ goal_id: goal.id, big_goal_id: bg.id }) });
-    return { skipped: true, reason: 'ai_noop' };
+    return commit(async () => ({ skipped: true, reason: 'ai_noop' }));
   }
 
-  const results = {};
-  results.progress = await executeTool(db, 'progress', userId, 'write_big_goal_progress', {
-    id: bg.id, progress: out.progress, note: out.note,
+  return commit(async (c) => {
+    const current = await c.get('SELECT updated_at FROM big_goals WHERE id=? AND owner_id=? FOR UPDATE', [bg.id, userId]);
+    if (!current || current.updated_at !== bg.updated_at) return { skipped: true, reason: 'goal_changed' };
+    const results = {};
+    results.progress = await executeTool(c, 'progress', userId, 'write_big_goal_progress', {
+      id: bg.id, progress: out.progress, note: out.note,
+    });
+    if (!results.progress.ok) throw new Error(results.progress.error);
+    if (Array.isArray(out.profile_patches) && out.profile_patches.length) {
+      results.profile = await executeTool(c, 'progress', userId, 'patch_my_profile', { patches: out.profile_patches }, { profileBaseline });
+    }
+    currentRun().report.committedChanges.push({ operation: 'write_big_goal_progress', recordIds: [bg.id], authorization: 'goal_approved' });
+    if (results.profile?.changes?.length) currentRun().report.committedChanges.push({ operation: 'patch_my_profile',
+      recordIds: [results.profile.changeId], authorization: 'goal_approved' });
+    return { skipped: false, results, profileConflict: Boolean(results.profile?.conflicts?.length) };
   });
-  if (Array.isArray(out.profile_patches) && out.profile_patches.length) {
-    results.profile = await executeTool(db, 'progress', userId, 'patch_my_profile', { patches: out.profile_patches });
-  }
-  return { skipped: false, results };
 }
 
 module.exports = { runProgress };

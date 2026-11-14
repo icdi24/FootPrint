@@ -15,6 +15,7 @@ const {
 const { nowIso } = require('../tz');
 const log = require('../log');
 const { getUserSettings } = require('../settings');
+const { tx } = require('../db');
 const { listChanges, markRead, listVersions, rollback } = require('../profileChanges');
 
 const PW_MIN = 8;
@@ -61,7 +62,7 @@ module.exports = function authRoutes(db) {
 
   // 对外只暴露 username，不再带 loginName / nickname（一次性切干净）
   function publicUser(u) {
-    return { id: u.id, username: u.login_name, avatar: u.avatar };
+    return { id: u.id, username: u.login_name, avatar: u.avatar, is_admin: Number(u.is_admin) || 0 };
   }
 
   // 注册限流：复用 login_attempts，按小时桶 / 日桶各计一次，键与登录限流隔离
@@ -281,26 +282,31 @@ module.exports = function authRoutes(db) {
     try {
       const block = String(req.params.block || '').trim();
       if (!/^[a-z][a-z0-9_]{0,31}$/.test(block)) return res.status(400).json({ error: '块名不合法' });
-      const content = String((req.body && req.body.content) || '').trim();
-      if (content.length > 4000) return res.status(400).json({ error: '单块最多 4000 字' });
-      const current = await db.all(
-        'SELECT block, content, source, status FROM user_profiles WHERE user_id = ? ORDER BY block', [req.user.id]
-      );
-      await db.run(
-        'INSERT INTO profile_versions (user_id, snapshot, changed_by, reason, created_at) VALUES (?, ?, ?, ?, ?)',
-        [req.user.id, JSON.stringify(current), 'user', `手改 ${block}`, new Date().toISOString()]
-      );
-      if (!content) {
-        await db.run("UPDATE user_profiles SET status = 'void', updated_at = ? WHERE user_id = ? AND block = ?",
-          [new Date().toISOString(), req.user.id, block]);
-        return res.json({ ok: true, deleted: true });
-      }
-      await db.run(
-        `INSERT INTO user_profiles (user_id, block, content, source, status, updated_at) VALUES (?, ?, ?, 'user', 'active', ?)
-         ON CONFLICT (user_id, block) DO UPDATE SET content = EXCLUDED.content, source = 'user', status = 'active', updated_at = EXCLUDED.updated_at`,
-        [req.user.id, block, content, new Date().toISOString()]
-      );
-      res.json({ ok: true });
+      if (typeof req.body?.content !== 'string') return res.status(400).json({ error: 'content 必须是文本' });
+      const content = req.body.content.trim();
+      if (content.length > 4000 || !content.isWellFormed() || content.includes('\0')) return res.status(400).json({ error: '画像内容无效或超过 4000 字' });
+      const result = await tx(db, async (c) => {
+        await c.get('SELECT pg_advisory_xact_lock(7395, ?)', [req.user.id]);
+        const current = await c.all(
+          'SELECT block, content, source, status FROM user_profiles WHERE user_id = ? ORDER BY block', [req.user.id]
+        );
+        await c.run(
+          'INSERT INTO profile_versions (user_id, snapshot, changed_by, reason, created_at) VALUES (?, ?, ?, ?, ?)',
+          [req.user.id, JSON.stringify(current), 'user', `手改 ${block}`, new Date().toISOString()]
+        );
+        if (!content) {
+          await c.run("UPDATE user_profiles SET status = 'void', updated_at = ? WHERE user_id = ? AND block = ?",
+            [new Date().toISOString(), req.user.id, block]);
+          return { ok: true, deleted: true };
+        }
+        await c.run(
+          `INSERT INTO user_profiles (user_id, block, content, source, status, updated_at) VALUES (?, ?, ?, 'user', 'active', ?)
+           ON CONFLICT (user_id, block) DO UPDATE SET content = EXCLUDED.content, source = 'user', status = 'active', updated_at = EXCLUDED.updated_at`,
+          [req.user.id, block, content, new Date().toISOString()]
+        );
+        return { ok: true };
+      });
+      res.json(result);
     } catch (e) { next(e); }
   });
 

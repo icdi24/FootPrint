@@ -1,6 +1,7 @@
 // 自动快照：每日 03:00（上海）做一次全量逻辑导出（JSON），保留 30 天；启动时补当天。
 const fs = require('fs');
 const path = require('path');
+const { randomUUID } = require('crypto');
 
 const KEEP_DAYS = 30;
 
@@ -16,19 +17,26 @@ async function backupNow(db, dataDir) {
   const tables = await dumpAll(db);
   const d = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
   const name = `app-${d}.json`;
-  const payload = JSON.stringify({ app: 'footprint', version: 1, exportedAt: new Date().toISOString(), tables }, null, 2);
-  fs.writeFileSync(path.join(dir, name), payload, 'utf8');
+  const payload = JSON.stringify({ app: 'footprint', version: 1, scope: 'full', exportedAt: new Date().toISOString(), tables }, null, 2);
+  const temporary = path.join(dir, `${name}.${randomUUID()}.tmp`);
+  try {
+    fs.writeFileSync(temporary, payload, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    fs.renameSync(temporary, path.join(dir, name));
+  } finally {
+    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+  }
   prune(dir);
   return { name, size: Buffer.byteLength(payload) };
 }
 
 function prune(dir) {
-  const cutoff = new Date(Date.now() - KEEP_DAYS * 86400000);
+  const cutoff = Date.now() - KEEP_DAYS * 86400000;
   for (const f of fs.readdirSync(dir)) {
     if (!/^app-\d{4}-\d{2}-\d{2}\.json$/.test(f)) continue;
     const p = path.join(dir, f);
     try {
-      if (fs.statSync(p).mtimeMs < cutoff.getTime()) fs.unlinkSync(p);
+      const date = Date.parse(f.slice(4, 14) + 'T00:00:00+08:00');
+      if (date < cutoff) fs.unlinkSync(p);
     } catch (e) { /* 忽略 */ }
   }
 }
@@ -36,6 +44,7 @@ function prune(dir) {
 function listBackups(dataDir) {
   const dir = backupsDir(dataDir);
   if (!fs.existsSync(dir)) return [];
+  prune(dir);
   return fs
     .readdirSync(dir)
     .filter((f) => /^app-\d{4}-\d{2}-\d{2}\.json$/.test(f))
@@ -55,6 +64,8 @@ function hasBackupToday(dataDir) {
 function scheduleBackup(db, dataDir) {
   const tick = async () => {
     try {
+      const dir = backupsDir(dataDir);
+      if (fs.existsSync(dir)) prune(dir);
       const now = new Date(Date.now() + 8 * 3600 * 1000);
       const h = now.getUTCHours();
       const m = now.getUTCMinutes();

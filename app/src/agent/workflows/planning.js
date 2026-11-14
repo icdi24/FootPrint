@@ -1,4 +1,5 @@
 const { tx } = require('../../db');
+const { createHash } = require('node:crypto');
 const { getPoints } = require('../../points');
 const { todayStr, nowIso, addDaysStr } = require('../../tz');
 const { createGoal, validateGoalBody } = require('../../routes/goals');
@@ -11,6 +12,16 @@ class PlanningError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+async function chainSignature(db, ownerId, bigGoalId, lock = false) {
+  const bigGoal = await db.get(`SELECT id,title,description,status,updated_at FROM big_goals
+    WHERE id=? AND owner_id=?${lock ? ' FOR UPDATE' : ''}`, [bigGoalId, ownerId]);
+  if (!bigGoal || bigGoal.status !== 'active') throw new PlanningError(409, '大目标已变更，请重新预览');
+  const chain = await db.all(`SELECT id,title,description,accept_criteria,planned_date,plan_order,plan_status,status,
+    est_total_min,difficulty,prerequisite_goal_id,updated_at FROM goals
+    WHERE big_goal_id=? AND owner_id=? AND status != 'archived' ORDER BY id${lock ? ' FOR UPDATE' : ''}`, [bigGoalId, ownerId]);
+  return createHash('sha256').update(JSON.stringify({ bigGoal, chain })).digest('hex');
 }
 
 function draftView(row) {
@@ -38,7 +49,10 @@ async function generateChatProposal(db, options) {
   if (typeof options.goal !== 'string' || !options.goal.trim() || options.goal.length > 200
     || !options.goal.isWellFormed() || options.goal.includes('\0')) throw new PlanningError(400, '目标需要 1–200 字');
   try {
-    return await generateProposal(db, { ...options, goal: options.goal.trim(), weeklyMinutes });
+    const bigGoalId = options.bigGoalId ?? options.previousDraft?.bigGoalId;
+    const chainSig = bigGoalId ? await chainSignature(db, options.userId, bigGoalId) : null;
+    const proposal = await generateProposal(db, { ...options, goal: options.goal.trim(), weeklyMinutes });
+    return chainSig ? { ...proposal, chainSig } : proposal;
   } catch (error) {
     if (error instanceof ProposalValidationError) throw new PlanningError(422, error.message);
     throw error;
@@ -86,13 +100,10 @@ async function startDraft(db, ownerId, input, proposal) {
     bigGoalId = bg.id;
   }
   // 记下生成时的链状态指纹，确认时重读比对（防用户在大目标页手改过链）
-  let chainSig = null;
+  let chainSig = proposal.chainSig ?? null;
   if (bigGoalId != null) {
-    const cur = await db.get(
-      `SELECT COUNT(*) AS n, COALESCE(MAX(plan_order), 0) AS m FROM goals
-       WHERE big_goal_id = ? AND owner_id = ? AND status != 'archived'`, [bigGoalId, ownerId]
-    );
-    chainSig = `${Number(cur.n)}:${Number(cur.m)}`;
+    const current = await chainSignature(db, ownerId, bigGoalId);
+    if (!chainSig || chainSig !== current) throw new PlanningError(409, '生成期间目标链已变化，请重新预览');
   }
   const stored = chainSig ? { ...proposal, chainSig } : proposal;
   const row = await db.get(
@@ -132,16 +143,17 @@ async function reviseChatDraft(db, ownerId, id, { revision, goal, weeklyMinutes 
   return draftView(updated);
 }
 
-async function startReplanDraft(db, ownerId, { bigGoalId, days }) {
+async function startReplanDraft(db, ownerId, { bigGoalId, days, fromDate }) {
   const bg = await db.get("SELECT id,title FROM big_goals WHERE id=? AND owner_id=? AND status='active'", [bigGoalId, ownerId]);
   if (!bg) throw new PlanningError(404, '找不到可重排的大目标');
-  if (!Number.isInteger(days) || !days || Math.abs(days) > 30) throw new PlanningError(400, '移动天数应为 ±1–30 天');
+  if (!Number.isInteger(days) || !days || Math.abs(days) > 365) throw new PlanningError(400, '移动天数应为 ±1–365 天');
   const rows = await db.all(
     `SELECT id,title,planned_date,updated_at FROM goals
      WHERE big_goal_id=? AND owner_id=? AND status='draft' AND plan_status='planned' AND planned_date IS NOT NULL
-     ORDER BY plan_order,id LIMIT 20`, [bigGoalId, ownerId]
+     ${fromDate ? 'AND planned_date >= ?' : ''} ORDER BY plan_order,id LIMIT 101`, fromDate ? [bigGoalId, ownerId, fromDate] : [bigGoalId, ownerId]
   );
   if (!rows.length) throw new PlanningError(409, '没有可以重排的未开始小目标');
+  if (rows.length > 100) throw new PlanningError(422, '一次最多调整 100 个小目标，请缩小日期范围');
   const changes = rows.map((row) => ({ id: row.id, title: row.title, from: row.planned_date,
     to: addDaysStr(row.planned_date, days), updatedAt: row.updated_at }));
   const proposal = { question: null, replan: { bigGoalId, changes }, steps: changes.map((item) => ({
@@ -232,7 +244,8 @@ async function applyProposal(db, row) {
 }
 
 async function confirmDraft(db, ownerId, id, { revision }) {
-  return tx(db, async (c) => {
+  const apply = async (c) => {
+    await c.get('SELECT pg_advisory_xact_lock(7394, ?)', [ownerId]);
     const row = await lockDraft(c, ownerId, id, revision);
     if (row.status === 'applied') return draftView(row);
     if (row.status !== 'ready') throw new PlanningError(409, '请先回答问题并查看草案');
@@ -244,18 +257,16 @@ async function confirmDraft(db, ownerId, id, { revision }) {
       }
     }
     // 确认时重读链状态：与草案生成时不一致就拒绝，避免覆盖用户手改
-    if (row.big_goal_id != null && row.proposal.chainSig) {
-      const cur = await c.get(
-        `SELECT COUNT(*) AS n, COALESCE(MAX(plan_order), 0) AS m FROM goals
-         WHERE big_goal_id = ? AND owner_id = ? AND status != 'archived'`, [row.big_goal_id, ownerId]
-      );
-      const sig = `${Number(cur.n)}:${Number(cur.m)}`;
+    if (row.big_goal_id != null && !row.proposal.replan) {
+      const sig = await chainSignature(c, ownerId, row.big_goal_id, true);
+      if (!row.proposal.chainSig || !/^[a-f0-9]{64}$/.test(row.proposal.chainSig)) throw new PlanningError(409, '旧草案缺少版本依据，请重新预览');
       if (sig !== row.proposal.chainSig) throw new PlanningError(409, '大目标链已变化，请重新预览');
     }
     const result = row.proposal.replan ? await applyReplan(c, row) : await applyProposal(c, row);
     const updated = await c.get("UPDATE planning_drafts SET status = 'applied', result = ? WHERE id = ? RETURNING *", [result, id]);
     return draftView(updated);
-  });
+  };
+  return db.inTransaction ? apply(db) : tx(db, apply);
 }
 
-module.exports = { PlanningError, latestDraft, getDraft, generateChatProposal, startDraft, reviseChatDraft, startReplanDraft, confirmDraft };
+module.exports = { PlanningError, latestDraft, getDraft, generateChatProposal, startDraft, reviseChatDraft, startReplanDraft, confirmDraft, chainSignature };

@@ -4,6 +4,7 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.json.Json
 import okhttp3.Cookie
 import okhttp3.CookieJar
@@ -14,6 +15,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import java.io.OutputStream
 
 // ---------------- 请求 / 响应数据类 ----------------
 
@@ -27,7 +29,7 @@ data class RegisterRequest(val username: String, val password: String, val avata
 data class LoginResponse(val user: UserDto? = null)
 
 @Serializable
-data class UserDto(val id: Long, val username: String, val avatar: String? = null)
+data class UserDto(val id: Long, val username: String, val avatar: String? = null, @SerialName("is_admin") val isAdmin: Int = 0)
 
 @Serializable
 data class AppUsage(
@@ -148,6 +150,7 @@ object Api {
         requestClient: OkHttpClient = client,
         onSetCookie: ((Map<String, String>) -> Unit)? = null,
     ): String = withContext(Dispatchers.IO) {
+        val generation = Session.generation
         val builder = Request.Builder().url(url(path))
         if (token != null) {
             // 显式带上会话 Cookie（文档 16.5：不要指望 OkHttp 自动跨进程持久化）
@@ -166,6 +169,8 @@ object Api {
         }
 
         response.use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (generation != Session.generation) throw ApiException("登录状态已变化", serverCode = "session_changed")
             // 直接从响应头解析 Set-Cookie，不依赖 CookieJar 回调是否触发
             if (onSetCookie != null) {
                 val pairs = mutableMapOf<String, String>()
@@ -176,7 +181,6 @@ object Api {
                 }
                 onSetCookie(pairs)
             }
-            val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {
                 val err = runCatching {
                     json.decodeFromString(ApiErrorBody.serializer(), text)
@@ -236,16 +240,24 @@ object Api {
         ))
 
     /** POST /api/zoowy/turns/{requestId}/cancel —— 停止本轮 */
-    suspend fun cancelZoovyTurn(token: String, requestId: String): Boolean =
+    suspend fun cancelZoovyTurn(token: String, requestId: String): ZoovyCancellation =
         json.decodeFromString(ZoovyCancellation.serializer(), send(
             "POST", "api/zoowy/turns/$requestId/cancel", "{}", token, requestClient = zoovyPrivateClient,
-        )).cancelled
+        ))
+
+    suspend fun zoovyTurn(token: String, requestId: String): ZoovyTurnStatus =
+        json.decodeFromString(ZoovyTurnStatus.serializer(), send("GET", "api/zoowy/turns/$requestId", null, token, requestClient = zoovyPrivateClient))
+
+    suspend fun clearZoovyHistory(token: String) { send("DELETE", "api/zoowy/history", null, token, requestClient = zoovyPrivateClient) }
+
+    suspend fun myUser(token: String): UserDto? =
+        json.decodeFromString(LoginResponse.serializer(), send("GET", "api/me", null, token)).user
 
     /** POST /api/zoowy/offers/{id}/accept —— 同意提议；返回 plan_draft 或 profile_applied 卡片 */
-    suspend fun acceptZoovyOffer(token: String, id: Long, requestId: String): ZoovyCard =
+    suspend fun acceptZoovyOffer(token: String, id: Long, requestId: String, revision: Int): ZoovyCard =
         json.decodeFromString(ZoovyCardResponse.serializer(), send(
             "POST", "api/zoowy/offers/$id/accept",
-            json.encodeToString(ZoovyOperationRequest.serializer(), ZoovyOperationRequest(requestId)), token,
+            json.encodeToString(ZoovyOperationRequest.serializer(), ZoovyOperationRequest(requestId, revision)), token,
             requestClient = zoovyChatClient,
         )).card
 
@@ -730,6 +742,30 @@ object Api {
     fun fileUrl(id: Long): String = url("api/file/$id")
     fun exportUrl(): String = url("api/export")
     fun backupUrl(name: String): String = url("api/backups/$name")
+
+    /** 已登录下载写入用户选择的文档；会话只放请求头，不传给外部浏览器。 */
+    suspend fun downloadData(token: String, requestedUrl: String, output: OutputStream) = withContext(Dispatchers.IO) {
+        val path = requestedUrl.removePrefix(baseUrl())
+        if (!requestedUrl.startsWith(baseUrl()) || !Regex("api/(export|admin/export|backups/app-[0-9]{4}-[0-9]{2}-[0-9]{2}\\.json)").matches(path)) {
+            throw ApiException("下载地址无效")
+        }
+        val generation = Session.generation
+        val request = Request.Builder().url(url(path)).header("Cookie", "$COOKIE_NAME=$token").get().build()
+        zoovyPrivateClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw ApiException("下载失败（${response.code}）", response.code)
+            val input = response.body?.byteStream() ?: throw ApiException("下载内容为空")
+            val buffer = ByteArray(8192)
+            var total = 0L
+            while (true) {
+                if (generation != Session.generation) throw ApiException("登录状态已变化")
+                val count = input.read(buffer)
+                if (count < 0) break
+                total += count
+                if (total > 100L * 1024 * 1024) throw ApiException("下载文件超过 100 MiB，请使用管理端处理")
+                output.write(buffer, 0, count)
+            }
+        }
+    }
 
     /** PUT /api/uploads?ext=&kind=evidence —— 上传图片证据，返回 {id,url} */
     suspend fun uploadEvidence(token: String, bytes: ByteArray, ext: String): UploadResult {

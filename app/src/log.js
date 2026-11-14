@@ -7,11 +7,16 @@ let logsDir = '';
 function init(dir) {
   logsDir = dir;
   fs.mkdirSync(dir, { recursive: true });
+  prune();
+}
+
+function prune() {
+  if (!logsDir) return;
   // 清理超过 90 天的日志文件
   const cutoff = Date.now() - 90 * 86400000;
-  for (const f of fs.readdirSync(dir)) {
+  for (const f of fs.readdirSync(logsDir)) {
     if (!/^app-\d{8}\.log$/.test(f)) continue;
-    const p = path.join(dir, f);
+    const p = path.join(logsDir, f);
     try {
       if (fs.statSync(p).mtimeMs < cutoff) fs.unlinkSync(p);
     } catch (e) { /* 忽略 */ }
@@ -27,4 +32,4 @@ function log(event, detail) {
   } catch (e) { /* 日志失败不影响业务 */ }
 }
 
-module.exports = { init, log };
+module.exports = { init, log, prune };

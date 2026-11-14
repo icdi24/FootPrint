@@ -8,10 +8,7 @@ module.exports = function adminRoutes(db) {
   const r = express.Router();
   const mw = require('../middleware').makeMiddleware(db);
 
-  function requireAdmin(req, res, next) {
-    if (!req.user || !Number(req.user.is_admin)) return res.status(403).json({ error: '需要管理员权限' });
-    next();
-  }
+  const { requireAdmin } = mw;
 
   r.get('/admin/overview', mw.requireUser, requireAdmin, async (req, res, next) => {
     try {

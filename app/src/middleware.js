@@ -30,6 +30,11 @@ function makeMiddleware(db) {
     next();
   }
 
+  function requireAdmin(req, res, next) {
+    if (!req.user || !Number(req.user.is_admin)) return res.status(403).json({ error: '需要管理员权限' });
+    next();
+  }
+
   // 同 pair_id 的另一个成员；无组返回 null（老 partner_id / count==2 回退已废弃）
   async function partnerOf(userId) {
     return pairOf(db, userId);
@@ -59,7 +64,7 @@ function makeMiddleware(db) {
   }
 
   return {
-    attachUser, requireUser, partnerOf, loadGoal, requireGoalOwner,
+    attachUser, requireUser, requireAdmin, partnerOf, loadGoal, requireGoalOwner,
     canAccess: (meId, targetId) => canAccess(db, meId, targetId),
     currentPairId: (userId) => currentPairId(db, userId),
   };

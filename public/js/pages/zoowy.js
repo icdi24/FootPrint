@@ -2,12 +2,20 @@
 // 会话、任务编号与提议/草案确认全部走 /api/zoowy/*；Key 录入、图片、
 // 摘要上下文 / 深度思考 / 智能搜索均不提供（第二批）。
 const ZoowyChat = {
+  views: new Set(),
+  reset() {
+    for (const body of this.views) body.remove();
+    this.views.clear();
+    window.ZoowyFloat?.close();
+  },
   open({ bigGoalId = null, title = 'zoowy', onApplied, surface } = {}) {
+    const generation = api.generation;
     const body = UI.el(`
       <div class="zc-body">
         <div class="zc-toolbar">
           ${bigGoalId ? '<span>正在围绕这个大目标聊</span>' : '<span>目标、进展与计划都可以聊</span>'}
           <button class="btn outline" type="button" data-stop disabled>停止本轮</button>
+          <button class="btn outline" type="button" data-clear>清空聊天</button>
         </div>
         <div class="zc-list" role="log" aria-label="聊天记录"><div class="zc-empty">加载中…</div></div>
         <div class="zc-error" role="alert" hidden></div>
@@ -25,6 +33,9 @@ const ZoowyChat = {
     const stopButton = body.querySelector('[data-stop]');
     const error = body.querySelector('.zc-error');
     const operationStatus = body.querySelector('.zc-operation-status');
+    for (const view of ZoowyChat.views) if (!view.isConnected) ZoowyChat.views.delete(view);
+    ZoowyChat.views.add(body);
+    const current = () => generation === api.generation && body.isConnected;
 
     let messages = [];
     let busy = false;
@@ -52,17 +63,19 @@ const ZoowyChat = {
         degraded: !!r.degraded,
         reason: r.reason || '',
         cards: Array.isArray(r.cards) ? r.cards : [],
+        report: r.report || null,
       };
     }
 
     function render(pending = '') {
+      if (!current()) return;
       // 已被同意的提议：结果卡片（plan_draft / profile_applied）带 offerId。
       const offers = new Set();
       // 同一草案只展示最新版本，避免旧版本的「应用这版」还能点。
       const drafts = new Map();
       for (const m of messages) {
         for (const card of m.cards || []) {
-          if (card.offerId != null && (card.type === 'plan_draft' || card.type === 'profile_applied')) {
+          if (card.offerId != null && ['plan_draft', 'profile_applied', 'goal_applied'].includes(card.type)) {
             offers.add(String(card.offerId));
           }
           if (card.type !== 'plan_draft' || !card.draft) continue;
@@ -82,20 +95,25 @@ const ZoowyChat = {
       }
 
       function cardView(card) {
-        if ((card.type === 'plan_offer' || card.type === 'profile_offer') && card.id != null) {
+        if (['plan_offer', 'profile_offer', 'goal_offer'].includes(card.type) && card.id != null) {
           const accepted = offers.has(String(card.id)) || card.status === 'accepted';
           const profile = card.type === 'profile_offer';
-          const label = profile ? '画像提议' : '规划提议';
-          const button = profile ? '同意更新画像' : '同意出草案';
+          const goal = card.type === 'goal_offer';
+          const label = profile ? '画像提议' : goal ? '目标变更' : '规划提议';
+          const button = profile ? '同意更新画像' : goal ? '确认创建' : '同意出草案';
+          const preview = Array.isArray(card.preview) ? card.preview : [];
           return `<section class="zc-card" aria-label="${label}"><strong>${label}</strong>
             <p>${UI.esc(card.summary)}</p>
+            ${preview.map((p) => `<div class="zc-detail"><b>${UI.esc(p.label)}</b>
+              <p>修改前：${UI.esc(p.before || '无')}</p><p>修改后：${UI.esc(p.after || '无')}</p>
+              ${p.reason ? `<p>原因：${UI.esc(p.reason)}</p>` : ''}${p.evidence ? `<p>依据：${UI.esc(p.evidence)}</p>` : ''}</div>`).join('')}
             ${accepted ? '<p class="zc-detail">已同意</p>' : actionButton(button, {
-              type: 'offer', id: card.id, profile, modelWork: !profile && card.modelWork !== false,
+              type: 'offer', id: card.id, revision: card.revision, profile, goal, modelWork: !profile && card.modelWork !== false,
             })}
           </section>`;
         }
-        if (card.type === 'profile_applied') {
-          return `<section class="zc-card" aria-label="画像已更新"><strong>画像已更新</strong>
+        if (card.type === 'profile_applied' || card.type === 'goal_applied') {
+          return `<section class="zc-card"><strong>${card.type === 'goal_applied' ? '目标已更新' : '画像已更新'}</strong>
             <p>${UI.esc(card.summary)}</p>
           </section>`;
         }
@@ -135,6 +153,12 @@ const ZoowyChat = {
           changes.length ? `<div class="zc-profile">📝 更新了画像：${changes.map(UI.esc).join('；')}</div>` : '',
           m.degraded ? `<div class="zc-degraded">⚠️ 上下文已精简，回复可能不够完整${m.reason ? `（${UI.esc(m.reason)}）` : ''}</div>` : '',
           m.failed ? '<div class="zc-failed">⚠️ 本轮未完成，可以再问一次</div>' : '',
+          m.report ? `<details class="zc-detail"><summary>本轮运行详情</summary>
+            <p>状态：${UI.esc(m.report.state)} · 耗时 ${UI.esc(Math.round((m.report.durationMs || 0) / 1000))} 秒 · 模型调用 ${UI.esc(m.report.modelCalls || 0)} 次</p>
+            <p>${m.report.usageReported ? `已报告用量 ${UI.esc(m.report.totalTokens || 0)} token` : '模型未提供用量'}</p>
+            ${(m.report.tools || []).map((t) => `<p>${UI.esc(t.name)} · ${UI.esc(t.status)} ${UI.esc(t.reason || '')}</p>`).join('')}
+            ${(m.report.committedChanges || []).map((c) => `<p>已提交：${UI.esc(c.summary || '')}</p>`).join('')}
+            ${m.report.reason ? `<p>${UI.esc(m.report.reason)}</p>` : ''}</details>` : '',
         ].join('');
       }
 
@@ -178,7 +202,7 @@ const ZoowyChat = {
     // requestId 非空时这一轮可被「停止本轮」取消（服务端按编号中断任务）。
     // 本项目 api.post 只收 (url, body)，客户端不做 fetch abort，靠服务端中断 + 409 收尾。
     async function run(pending, fn, requestId = null) {
-      if (busy) return;
+      if (busy || !current()) return;
       busy = true;
       const operation = requestId ? { requestId, stopping: false, cancelled: false } : null;
       activeOperation = operation;
@@ -188,11 +212,22 @@ const ZoowyChat = {
       syncControls();
       try { await fn(operation); }
       catch (e) {
+        if (!current()) return;
         const stopped = operation && (operation.cancelled || e.code === 'turn_cancelled' ||
           (e.status === 409 && /停止/.test(e.message)));
         if (stopped) {
           setError();
           setStatus('已停止本轮。');
+        } else if (operation && (!e.status || e.code === 'outcome_unknown')) {
+          try {
+            const status = await api.get(`/api/zoowy/turns/${encodeURIComponent(operation.requestId)}`);
+            if (!current()) return;
+            if (status.state === 'done' && status.result) {
+              if (status.result.reply !== undefined) messages.push(assistantFromResponse(status.result));
+              else if (status.result.card || status.result.type) messages.push({ role: 'assistant', content: '', cards: [status.result.card || status.result], report: status.report });
+              setStatus('已取回本轮结果。');
+            } else setError('本轮结果尚未确认，请稍后重新打开聊天查看。');
+          } catch (_) { if (current()) setError('本轮结果尚未确认，请稍后重新打开聊天查看。'); }
         } else setError(e.message);
       }
       finally {
@@ -205,18 +240,18 @@ const ZoowyChat = {
 
     async function applyCard(action) {
       if (!action || busy) return;
-      const pending = action.type === 'draft' ? '正在应用这版…' : (action.profile ? '正在更新画像…' : 'zoowy 正在准备草案…');
+      const pending = action.type === 'draft' ? '正在应用这版…' : (action.profile ? '正在更新画像…' : action.goal ? '正在确认目标…' : 'zoowy 正在准备草案…');
       const requestId = action.type === 'offer' ? ZoowyChat.newRequestId() : null;
       await run(pending, async (operation) => {
         const id = encodeURIComponent(action.id);
         const r = action.type === 'offer'
-          ? await api.post(`/api/zoowy/offers/${id}/accept`, { requestId })
+          ? await api.post(`/api/zoowy/offers/${id}/accept`, { requestId, revision: action.revision })
           : await api.post(`/api/zoowy/drafts/${id}/confirm`, { revision: action.revision });
-        if (operation && operation.cancelled) return;
+        if (!current() || (operation && operation.cancelled)) return;
         if (!r || !r.card) throw new Error('服务没有返回操作状态，请重新打开聊天查看');
         messages.push({ role: 'assistant', content: '', cards: [r.card] });
         if (r.card.type === 'profile_applied') UI.toast('画像已更新', 'ok');
-        if (r.card.draft && r.card.draft.status === 'applied') {
+        if (r.card.type === 'goal_applied' || (r.card.draft && r.card.draft.status === 'applied')) {
           UI.toast('已应用到目标', 'ok');
           onApplied && onApplied();
         }
@@ -237,7 +272,7 @@ const ZoowyChat = {
           requestId,
           big_goal_id: bigGoalId || undefined,
         });
-        if (operation && operation.cancelled) return;
+        if (!current() || (operation && operation.cancelled)) return;
         if (!r) throw new Error('服务没有返回内容');
         messages.push(assistantFromResponse(r));
       }, requestId);
@@ -251,12 +286,17 @@ const ZoowyChat = {
       syncControls();
       try {
         const r = await api.post(`/api/zoowy/turns/${encodeURIComponent(operation.requestId)}/cancel`, {});
-        if (activeOperation !== operation) return;
-        if (r && r.cancelled === true) {
-          operation.cancelled = true;
-          setError();
-          setStatus('已停止本轮。');
-        } else setStatus('当前运行已结束或尚未开始。');
+        if (!current() || activeOperation !== operation) return;
+        let state = r?.state;
+        setStatus('正在停止，请等待服务端确认…');
+        for (let i = 0; i < 120 && ['running', 'cancelling'].includes(state); i++) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          if (!current() || activeOperation !== operation) return;
+          const status = await api.get(`/api/zoowy/turns/${encodeURIComponent(operation.requestId)}`);
+          state = status.state;
+        }
+        operation.cancelled = state === 'cancelled';
+        setStatus(state === 'cancelled' ? '已停止本轮，已提交的变更保留在记录中。' : state === 'done' ? '本轮已完成，可查看结果。' : ['failed', 'expired'].includes(state) ? '本轮已结束，可查看运行详情。' : '停止结果尚未确认，请稍后查看。');
       } catch (e) {
         if (activeOperation === operation) setError(e.message);
       } finally {
@@ -266,6 +306,17 @@ const ZoowyChat = {
     });
 
     form.addEventListener('submit', send);
+    body.querySelector('[data-clear]').addEventListener('click', async () => {
+      if (busy || !current()) return;
+      const yes = await UI.confirm('清空本人 AI 聊天与摘要？未确认提议会失效，已确认目标和画像仍保留。', { okLabel: '清空聊天' });
+      if (!yes || !current()) return;
+      await run('正在清空聊天…', async () => {
+        await api.delete('/api/zoowy/history');
+        if (!current()) return;
+        api.clearHistoryViews();
+        ZoowyChat.open({ bigGoalId, title, onApplied, surface });
+      });
+    });
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
         e.preventDefault();
@@ -277,6 +328,7 @@ const ZoowyChat = {
     else UI.sheet({ title: UI.esc(title), body, actions: [{ label: '关闭' }] });
     run('正在加载聊天记录…', async () => {
       const d = await api.get('/api/zoowy/messages?limit=40');
+      if (!current()) return;
       messages = (d && d.messages) || [];
       loaded = true;
     });
@@ -291,3 +343,5 @@ const ZoowyChat = {
     return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join('-');
   },
 };
+window.addEventListener('footprint:auth-change', () => ZoowyChat.reset());
+window.addEventListener('footprint:history-cleared', () => ZoowyChat.reset());

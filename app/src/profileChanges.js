@@ -2,6 +2,7 @@
 // 铁律：reportChanges 只控制「告不告诉」，不控制「留不留痕」——日志与版本快照无条件写。
 const { nowIso } = require('./tz');
 const { getUserSettings } = require('./settings');
+const { tx } = require('./db');
 
 const BLOCK_LABELS = {
   basic: '基本情况', resume: '简历', skills: '能力',
@@ -76,6 +77,8 @@ async function listVersions(db, userId, limit = 20) {
 
 // 回滚：先给「当前状态」存一份快照，再按目标快照重建。回滚本身也记一条变更。
 async function rollback(db, userId, versionId) {
+  if (!db.inTransaction) return tx(db, (c) => rollback(c, userId, versionId));
+  await db.get('SELECT pg_advisory_xact_lock(7395, ?)', [userId]);
   const v = await db.get('SELECT * FROM profile_versions WHERE id = ? AND user_id = ?', [Number(versionId), userId]);
   if (!v) throw new Error('版本不存在或不是你的');
   let snap;

@@ -777,6 +777,7 @@
   async function loadAll() {
     if (isGuest() || !store.loggedIn) return;
     const uid = store.currentUser;
+    const generation = API.generation;
 
     try {
       const [
@@ -806,6 +807,7 @@
       ]);
 
       // 账号与搭档
+      if (generation !== API.generation || uid !== store.currentUser || isGuest()) return;
       if (home) {
         store.me = home.me || store.me;
         store.partnerUser = home.partner || null;
@@ -2753,8 +2755,131 @@
   /* ═══════════════════════════════════════════════════════
      zoowy 常驻助手：右下角悬浮球，所有页面都能点开
      ═══════════════════════════════════════════════════════ */
+  let zoowyBusy = false;
+  let zoowyRequestId = null;
+  let zoowyStatus = '';
+  let zoowyHistoryGeneration = 0;
+  window.addEventListener('footprint:auth-change', (event) => {
+    store.zoowyMsgs = [];
+    store.zoowyOpen = false;
+    zoowyBusy = false;
+    zoowyRequestId = null;
+    zoowyStatus = '';
+    zoowyHistoryGeneration += 1;
+    document.getElementById('zoowyHost')?.replaceChildren();
+    if (event.detail?.remote) {
+      store.loggedIn = false;
+      store.currentUser = '';
+      store.me = null;
+      store.guest = true;
+      renderAll();
+    }
+  });
+  window.addEventListener('footprint:history-cleared', () => {
+    store.zoowyMsgs = [];
+    zoowyHistoryGeneration += 1;
+    zoowyBusy = false;
+    zoowyRequestId = null;
+    zoowyStatus = '聊天与摘要已清空。';
+    mountZoowyDock();
+  });
+
+  function renderZoowyReport(report) {
+    if (!report) return '';
+    return `<details><summary>本轮运行详情</summary><p>${esc(report.state)} · ${Math.round((report.durationMs || 0) / 1000)} 秒 · 模型调用 ${Number(report.modelCalls || 0)} 次</p>
+      <p>${report.usageReported ? `已报告用量 ${Number(report.totalTokens || 0)} token` : '模型未提供用量'}</p>
+      ${(report.tools || []).map((t) => `<p>${esc(t.name)} · ${esc(t.status)} ${esc(t.reason || '')}</p>`).join('')}
+      ${(report.committedChanges || []).map((c) => `<p>已提交：${esc(c.summary || '')}</p>`).join('')}
+      ${report.reason ? `<p>${esc(report.reason)}</p>` : ''}</details>`;
+  }
+
+  function renderZoowyCards(cards) {
+    const all = store.zoowyMsgs.flatMap((m) => m.cards || []);
+    const accepted = new Set(all.map((c) => c.offerId).filter((id) => id != null).map(String));
+    return cards.map((card) => {
+      if (['plan_offer', 'profile_offer', 'goal_offer'].includes(card.type)) {
+        const label = card.type === 'profile_offer' ? '同意更新画像' : card.type === 'goal_offer' ? '确认创建' : '同意出草案';
+        return `<section class="zc-card"><p>${esc(card.summary || '')}</p>
+          ${(card.preview || []).map((p) => `<div><b>${esc(p.label)}</b><p>修改前：${esc(p.before || '无')}</p><p>修改后：${esc(p.after || '无')}</p>${p.reason ? `<p>原因：${esc(p.reason)}</p>` : ''}${p.evidence ? `<p>依据：${esc(p.evidence)}</p>` : ''}</div>`).join('')}
+          ${accepted.has(String(card.id)) ? '<p>已同意</p>' : `<button type="button" class="wood-btn wood-btn-sm" data-zoowy-offer="${Number(card.id)}" data-revision="${Number(card.revision)}" ${zoowyBusy ? 'disabled' : ''}>${label}</button>`}</section>`;
+      }
+      if (card.type === 'goal_applied' || card.type === 'profile_applied') return `<section class="zc-card"><p>${esc(card.summary || '变更已保存')}</p></section>`;
+      if (card.type !== 'plan_draft' || !card.draft) return '';
+      const draft = card.draft;
+      const latest = all.filter((c) => c.draft?.id === draft.id).map((c) => c.draft)
+        .reduce((a, b) => b.revision > a.revision || (b.revision === a.revision && b.status === 'applied') ? b : a, draft);
+      return `<section class="zc-card"><b>${esc(draft.goal)} · v${Number(draft.revision)}</b>
+        ${(draft.steps || []).map((s) => `<p>${esc(s.title)}<br>${esc(s.doneWhen || '')}</p>`).join('')}
+        ${draft.status === 'ready' && latest === draft ? `<button type="button" class="wood-btn wood-btn-sm" data-zoowy-draft="${Number(draft.id)}" data-revision="${Number(draft.revision)}" ${zoowyBusy ? 'disabled' : ''}>应用这版</button>` : `<p>${latest.status === 'applied' ? '已应用到目标' : '已有新版本'}</p>`}</section>`;
+    }).join('');
+  }
+
+  async function applyZoowyCard(id, revision, draft) {
+    if (zoowyBusy || isGuest()) return;
+    const generation = API.generation;
+    const historyGeneration = zoowyHistoryGeneration;
+    const source = store.zoowyMsgs.flatMap((m) => m.cards || []).find((c) => String(c.id) === String(id));
+    const requestId = crypto.randomUUID();
+    zoowyBusy = true;
+    zoowyRequestId = !draft && source?.modelWork ? requestId : null;
+    zoowyStatus = '正在处理确认…';
+    mountZoowyDock();
+    try {
+      const path = draft ? `/zoowy/drafts/${encodeURIComponent(id)}/confirm` : `/zoowy/offers/${encodeURIComponent(id)}/accept`;
+      const body = draft ? { revision } : { requestId, revision };
+      let res;
+      try { res = await API.post(path, body); }
+      catch (e) {
+        // 短确认按提议编号幂等，断线后重发仍是同一次确认。
+        if (!e.status && !zoowyRequestId && generation === API.generation && historyGeneration === zoowyHistoryGeneration) res = await API.post(path, body);
+        else throw e;
+      }
+      if (generation !== API.generation || historyGeneration !== zoowyHistoryGeneration || isGuest()) return;
+      store.zoowyMsgs.push({ role: 'assistant', content: '', cards: [res.card], report: res.report });
+      zoowyStatus = '确认结果已保存。';
+      await loadAll();
+    } catch (e) {
+      if (generation === API.generation && historyGeneration === zoowyHistoryGeneration) zoowyStatus = e.status ? e.message : '结果尚未确认，请稍后重新打开聊天查看。';
+    } finally {
+      if (generation === API.generation && historyGeneration === zoowyHistoryGeneration) { zoowyBusy = false; zoowyRequestId = null; mountZoowyDock(); }
+    }
+  }
+
+  async function clearZoowy() {
+    if (zoowyBusy || isGuest()) return;
+    if (!await confirmSheet({ title: '清空 AI 聊天', text: '清空聊天与摘要，未确认提议会失效。已确认目标和画像仍保留。', confirmText: '清空聊天', danger: true })) return;
+    const generation = API.generation;
+    zoowyBusy = true;
+    zoowyHistoryGeneration += 1;
+    try {
+      await API.del('/zoowy/history');
+      if (generation !== API.generation) return;
+      API.clearHistoryViews();
+    } catch (e) { if (generation === API.generation) zoowyStatus = e.message; }
+    finally { if (generation === API.generation) { zoowyBusy = false; mountZoowyDock(); } }
+  }
+
+  async function stopZoowy() {
+    const requestId = zoowyRequestId;
+    if (!requestId || isGuest()) return;
+    const generation = API.generation;
+    zoowyStatus = '正在停止，请等待确认…';
+    mountZoowyDock();
+    try {
+      let result = await API.post(`/zoowy/turns/${encodeURIComponent(requestId)}/cancel`);
+      for (let n = 0; n < 120 && ['running', 'cancelling'].includes(result.state); n++) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        if (generation !== API.generation || requestId !== zoowyRequestId) return;
+        result = await API.get(`/zoowy/turns/${encodeURIComponent(requestId)}`);
+      }
+      if (generation !== API.generation) return;
+      zoowyStatus = result.state === 'cancelled' ? '已停止本轮，已提交变更仍保留。' : result.state === 'done' ? '本轮已完成。' : '停止结果尚未确认，请稍后查看。';
+    } catch (e) { if (generation === API.generation) zoowyStatus = e.message; }
+    if (generation === API.generation) mountZoowyDock();
+  }
+
   function renderZoowyDock() {
-    const open = !!store.zoowyOpen;
+    const open = !!store.zoowyOpen && !isGuest();
     const msgs = store.zoowyMsgs || [];
     return `
       <div class="zoowy-dock${open ? ' is-open' : ''}" id="zoowyDock">
@@ -2770,7 +2895,7 @@
             ${msgs.length ? msgs.map((m) => `
               <div class="zoowy-msg is-${m.role}">
                 ${m.role === 'assistant' ? '<span class="zoowy-av">🐭</span>' : ''}
-                <div class="zoowy-bubble">${esc(m.content)}</div>
+                <div class="zoowy-bubble">${esc(m.content)}${renderZoowyCards(m.cards || [])}${renderZoowyReport(m.report)}</div>
               </div>`).join('')
               : `<div class="zoowy-msg is-assistant">
                    <span class="zoowy-av">🐭</span>
@@ -2779,9 +2904,11 @@
           </div>
           <div class="zoowy-input">
             <input id="zoowyDockInput" type="text" maxlength="500" placeholder="说点什么…"/>
-            <button class="zoowy-send" type="button" data-zoowy-send aria-label="发送">↵</button>
+            <button class="zoowy-send" type="button" data-zoowy-send aria-label="发送" ${zoowyBusy ? 'disabled' : ''}>↵</button>
           </div>
-          <p class="zoowy-tip" id="zoowyTip"></p>
+          <div><button class="text-btn" type="button" data-zoowy-stop ${!zoowyRequestId ? 'disabled' : ''}>停止本轮</button>
+            <button class="text-btn" type="button" data-zoowy-clear ${zoowyBusy ? 'disabled' : ''}>清空聊天</button></div>
+          <p class="zoowy-tip" id="zoowyTip">${esc(zoowyStatus)}</p>
         </div>` : ''}
         <button class="zoowy-fab" type="button" data-zoowy-toggle aria-label="zoowy 助手">
           <span class="zoowy-fab-ico">🐭</span>
@@ -2798,6 +2925,10 @@
       document.body.appendChild(host);
     }
     host.innerHTML = renderZoowyDock();
+    host.querySelector('[data-zoowy-stop]')?.addEventListener('click', stopZoowy);
+    host.querySelector('[data-zoowy-clear]')?.addEventListener('click', clearZoowy);
+    host.querySelectorAll('[data-zoowy-offer]').forEach((button) => button.addEventListener('click', () => applyZoowyCard(button.dataset.zoowyOffer, Number(button.dataset.revision), false)));
+    host.querySelectorAll('[data-zoowy-draft]').forEach((button) => button.addEventListener('click', () => applyZoowyCard(button.dataset.zoowyDraft, Number(button.dataset.revision), true)));
     const msgsEl = document.getElementById('zoowyMsgs');
     if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
 
@@ -2929,11 +3060,13 @@
 
   /* 拉历史 */
   async function loadZoowyHistory() {
+    const generation = API.generation;
+    const historyGeneration = zoowyHistoryGeneration;
     try {
       const res = await API.get('/zoowy/messages?limit=40');
       const list = (res && res.messages) || [];
-      if (!list.length) return;
-      store.zoowyMsgs = list.map((m) => ({ role: m.role || 'assistant', content: m.content || '' }));
+      if (generation !== API.generation || historyGeneration !== zoowyHistoryGeneration || isGuest()) return;
+      store.zoowyMsgs = list;
       mountZoowyDock();
     } catch (e) { /* 没历史就算了 */ }
   }
@@ -2941,7 +3074,11 @@
   /* 发消息 */
   async function sendZoowy(raw) {
     const text = String(raw || '').trim();
-    if (!text) return;
+    if (!text || zoowyBusy || isGuest()) return;
+    const generation = API.generation;
+    const historyGeneration = zoowyHistoryGeneration;
+    zoowyBusy = true;
+    zoowyStatus = 'zoowy 在想…';
     const tip = document.getElementById('zoowyTip');
     const input = document.getElementById('zoowyDockInput');
 
@@ -2952,20 +3089,41 @@
     if (tip) { tip.textContent = 'zoowy 在想…'; tip.classList.remove('is-err'); }
 
     const requestId = 'r' + Date.now() + Math.random().toString(36).slice(2, 8);
+    zoowyRequestId = requestId;
+    mountZoowyDock();
     try {
       const res = await API.post('/zoowy/chat', { message: text, requestId });
-      const reply = (res && (res.reply || res.content || (res.message && res.message.content))) || '（它没说话）';
-      store.zoowyMsgs.push({ role: 'assistant', content: reply });
+      if (generation !== API.generation || historyGeneration !== zoowyHistoryGeneration || isGuest()) return;
+      store.zoowyMsgs.push({ role: 'assistant', content: res.reply || '', cards: res.cards || [], report: res.report });
+      zoowyStatus = '';
       if (tip) tip.textContent = '';
       mountZoowyDock();
       if (res && (res.bigGoal || res.draft)) await loadAll();
     } catch (e) {
+      if (generation !== API.generation || historyGeneration !== zoowyHistoryGeneration || isGuest()) return;
+      if (!e.status) {
+        try {
+          const status = await API.get(`/zoowy/turns/${encodeURIComponent(requestId)}`);
+          if (generation !== API.generation || historyGeneration !== zoowyHistoryGeneration || isGuest()) return;
+          if (status.state === 'done' && status.result) {
+            store.zoowyMsgs.push({ role: 'assistant', content: status.result.reply || '', cards: status.result.cards || [], report: status.report });
+            zoowyStatus = '已取回本轮结果。';
+            return;
+          }
+        } catch (_) { /* 状态仍待确认，保留错误提示 */ }
+      }
       const msg = e && e.status === 503
         ? 'AI 还没配置密钥，暂时聊不了。可以先用「让 zoowy 拆」的本地建议。'
         : (e.message || '发送失败');
       if (tip) { tip.textContent = msg; tip.classList.add('is-err'); }
       store.zoowyMsgs.push({ role: 'assistant', content: msg });
       mountZoowyDock();
+    } finally {
+      if (generation === API.generation && historyGeneration === zoowyHistoryGeneration) {
+        zoowyBusy = false;
+        zoowyRequestId = null;
+        mountZoowyDock();
+      }
     }
   }
 
@@ -4071,14 +4229,14 @@
         <div class="cfg-row"><span>改用户名 / 改密码</span><button class="text-btn" type="button" data-account>去改</button></div>
       </section>
 <section class="wood-panel sub-panel">
-        <div class="panel-head"><h2><span class="wood-tag">数据备份</span></h2><p>${store.backups.length} 份快照</p></div>
-        <p class="fg-note">把两个人的目标、打卡、积分都存一份，换设备时可以导回来。</p>
+        <div class="panel-head"><h2><span class="wood-tag">我的数据</span></h2></div>
+        <p class="fg-note">导出本人的业务记录与 AI 数据，附件为元数据。个人导出不能用于全库恢复。</p>
         <div class="ng-actions" style="margin-top:12px">
-          <button class="wood-btn wood-btn-sm" type="button" data-backup>立即备份</button>
-          <button class="text-btn" type="button" data-export>导出文件</button>
+          <a class="text-btn" href="/api/export">导出本人数据</a>
+          ${Number(store.me?.is_admin) ? '<button class="wood-btn wood-btn-sm" type="button" data-backup>管理员备份</button><a class="text-btn" href="/api/admin/export">全库导出</a>' : ''}
         </div>
-        ${store.backups.length ? `<p class="fg-label" style="margin-top:12px">最近备份</p>
-          ${store.backups.slice(-3).reverse().map((b) => `<div class="hist-row">${new Date(b.at).toLocaleString('zh-CN')}<small>${(b.size / 1024).toFixed(1)} KB</small></div>`).join('')}` : ''}
+        ${Number(store.me?.is_admin) && store.backups.length ? `<p class="fg-label" style="margin-top:12px">最近备份</p>
+          ${store.backups.slice(-3).reverse().map((b) => `<div class="hist-row"><a href="/api/backups/${encodeURIComponent(b.name)}">${esc(b.name)}</a><small>${(b.size / 1024).toFixed(1)} KB</small></div>`).join('')}` : ''}
       </section>`;
 
     return `${head('我的', '', `本月完成 ${monthChecks(uid)} 次 · 连续 ${bestStreak(uid)} 天`)}
@@ -4637,20 +4795,14 @@
 
     // ── 备份 ──
     if (t.closest('[data-backup]')) {
-      const payload = JSON.stringify({ goals: store.goals, checks: store.checks, ledger: store.ledger });
-      store.backups.push({ at: Date.now(), size: payload.length });
-      renderView('data'); toast('已备份一份快照');
+      API.createBackup().then(() => API.backups()).then((response) => {
+        store.backups = response.backups || [];
+        renderView('data'); toast('备份已完成');
+      }).catch((e) => toast(e.message || '备份失败'));
       return;
     }
     if (t.closest('[data-export]')) {
-      const data = JSON.stringify({ goals: store.goals, checks: store.checks, ledger: store.ledger, wishes: store.wishes }, null, 2);
-      const blob = new Blob([data], { type: 'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `footprint-${todayKey()}.json`;
-      a.click();
-      URL.revokeObjectURL(a.href);
-      toast('已导出数据文件');
+      location.assign('/api/export');
       return;
     }
 
@@ -5023,13 +5175,15 @@
 
   /* 退出登录 */
   async function logout() {
-    try { await API.logout(); } catch (e) { /* 后端没起也允许本地登出 */ }
+    const request = API.logout();
     store.loggedIn = false;
     store.currentUser = '';
     store.guest = true;
+    store.me = null;
     closeSheet();
     document.body.classList.remove('is-logged-in');
     renderAll();
+    try { await request; } catch (e) { /* 本地身份和私有缓存已经清除 */ }
     toast('已退出，现在是访客模式');
   }
 

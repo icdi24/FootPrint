@@ -871,8 +871,15 @@ const MePage = {
       actions: [{ label: '关闭', onClick: (c) => c() }],
     });
     try {
-      const d = await api.get('/api/backups');
+      const admin = Boolean(Number(App.state.me?.is_admin));
+      const d = admin ? await api.get('/api/backups') : { backups: [] };
       body.innerHTML = `
+        <div class="data-sec">
+          <div class="data-sec-title">我的数据（JSON + CSV）</div>
+          <a class="btn outline block" href="/api/export">导出本人数据</a>
+          <p class="dr-note">包含本人的业务记录与 AI 数据，附件为元数据。个人导出不能用于全库恢复。</p>
+        </div>
+        ${admin ? `
         <div class="data-sec">
           <div class="data-sec-title">每日自动快照（凌晨 3 点，保留 30 天）</div>
           <button class="btn outline block" id="bk-now">立即快照一份</button>
@@ -887,7 +894,7 @@ const MePage = {
         </div>
         <div class="data-sec">
           <div class="data-sec-title">全量导出（JSON + 各表 CSV，一个 zip）</div>
-          <a class="btn outline block" href="/api/export">导出数据</a>
+          <a class="btn outline block" href="/api/admin/export">管理员全库导出</a>
         </div>
         <div class="data-sec">
           <div class="data-sec-title">灾难恢复（三步）</div>
@@ -897,9 +904,9 @@ const MePage = {
             <li>执行 <code>node scripts/restore.js data.json</code></li>
           </ol>
           <p class="dr-note">恢复前会自动给当前库做一份快照；忘记密码用 <code>node scripts/reset-password.js 用户名</code>。</p>
-        </div>
+        </div>` : ''}
       `;
-      body.querySelector('#bk-now').addEventListener('click', async () => {
+      body.querySelector('#bk-now')?.addEventListener('click', async () => {
         try {
           const b = await api.post('/api/backups');
           UI.toast(`快照完成：${b.name}`, 'ok');

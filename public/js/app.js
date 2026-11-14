@@ -132,7 +132,11 @@ const App = (() => {
   }
 
   // mode: 'login' | 'register'
-  function showAuth(mode = 'login') {
+  function showAuth(mode = 'login', invalidate = true) {
+    state.me = null;
+    state.partner = null;
+    state.chatUnread = 0;
+    if (invalidate) api.invalidateSession();
     document.getElementById('app-shell').classList.add('hidden');
     document.getElementById('auth-screen').classList.remove('hidden');
     if (typeof Chat !== 'undefined') Chat.disconnect();
@@ -175,3 +179,6 @@ const App = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', () => App.boot());
+window.addEventListener('footprint:auth-change', (event) => {
+  if (event.detail?.remote) App.showAuth('login', false);
+});

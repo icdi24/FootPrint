@@ -41,7 +41,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -73,6 +75,8 @@ fun ZoovyScreen(onBack: () -> Unit, bigGoalId: Long? = null, floating: Boolean =
     var operationStatus by remember { mutableStateOf<String?>(null) }
     var runningTurn by remember { mutableStateOf<RunningZoovyTurn?>(null) }
     var stoppingRequestId by remember { mutableStateOf<String?>(null) }
+    var showClear by remember { mutableStateOf(false) }
+    val sessionGeneration = remember { Session.generation }
 
     fun markCancelled(turn: RunningZoovyTurn) {
         turn.cancelled = true
@@ -93,8 +97,19 @@ fun ZoovyScreen(onBack: () -> Unit, bigGoalId: Long? = null, floating: Boolean =
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            if (sessionGeneration != Session.generation) return
             if (turn != null && (turn.cancelled || (e as? ApiException)?.serverCode == "turn_cancelled")) {
                 markCancelled(turn)
+            } else if (turn != null && (e as? ApiException)?.code == 0) {
+                try {
+                    val token = Session.token(context) ?: throw ApiException("请先登录")
+                    val status = Api.zoovyTurn(token, turn.requestId)
+                    if (status.state == "done") {
+                        messages = Api.zoovyMessages(token).messages
+                        pending = null
+                        operationStatus = "已取回本轮结果。"
+                    } else operationStatus = "本轮结果尚未确认，请稍后重新打开聊天查看。"
+                } catch (_: Exception) { operationStatus = "本轮结果尚未确认，请稍后重新打开聊天查看。" }
             } else error = e.message ?: "请求失败，请重试"
         } finally {
             runningTurn = null
@@ -111,7 +126,16 @@ fun ZoovyScreen(onBack: () -> Unit, bigGoalId: Long? = null, floating: Boolean =
                 val token = Session.token(context) ?: throw ApiException("请先登录")
                 val stopped = Api.cancelZoovyTurn(token, turn.requestId)
                 if (runningTurn === turn) {
-                    if (stopped) markCancelled(turn) else operationStatus = "当前运行已结束或尚未开始。"
+                    var state = stopped.state
+                    operationStatus = "正在停止，请等待服务端确认…"
+                    var checks = 0
+                    while (state in listOf("running", "cancelling") && checks++ < 120) {
+                        delay(500)
+                        if (runningTurn !== turn || sessionGeneration != Session.generation) return@launch
+                        state = Api.zoovyTurn(token, turn.requestId).state
+                    }
+                    if (state == "cancelled") markCancelled(turn)
+                    else operationStatus = if (state == "done") "本轮已完成，请查看结果。" else "停止结果尚未确认，请稍后查看。"
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -152,7 +176,7 @@ fun ZoovyScreen(onBack: () -> Unit, bigGoalId: Long? = null, floating: Boolean =
                 if (turn.cancelled) return@runCall
                 messages = messages + listOf(
                     ZoovyMessage(role = "user", content = request.message),
-                    ZoovyMessage(role = "assistant", content = reply.reply, cards = reply.cards),
+                    ZoovyMessage(role = "assistant", content = reply.reply, cards = reply.cards, report = reply.report),
                 )
                 if (text.trim() == outgoingText) text = ""
                 pending = null
@@ -202,7 +226,9 @@ fun ZoovyScreen(onBack: () -> Unit, bigGoalId: Long? = null, floating: Boolean =
                     text = "停止本轮",
                     filled = false,
                     onClick = ::stopRunning,
+                    enabled = runningTurn != null && stoppingRequestId == null,
                 )
+                PixelSmallButton("清空聊天", onClick = { showClear = true }, filled = false, enabled = !busy)
             }
             error?.let { Text(it, style = PixelType.Small, color = PixelColors.RedDeep) }
             operationStatus?.let { Text(it, style = PixelType.Small, color = PixelColors.Ink2) }
@@ -212,13 +238,13 @@ fun ZoovyScreen(onBack: () -> Unit, bigGoalId: Long? = null, floating: Boolean =
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(messages) { message ->
-                    ZoovyBubble(message, accepted, latestDrafts, busy, onAccept = { id, modelWork ->
+                    ZoovyBubble(message, accepted, latestDrafts, busy, onAccept = { id, revision, modelWork ->
                         val requestId = UUID.randomUUID().toString()
                         // 出草案要跑模型，单独记一轮，方便「停止本轮」取消
                         val turn = if (modelWork) RunningZoovyTurn(requestId) else null
                         scope.launch {
                             runCall(turn) { token ->
-                                val card = Api.acceptZoovyOffer(token, id, requestId)
+                                val card = Api.acceptZoovyOffer(token, id, requestId, revision)
                                 if (turn?.cancelled != true) appendCard(card)
                             }
                         }
@@ -248,6 +274,24 @@ fun ZoovyScreen(onBack: () -> Unit, bigGoalId: Long? = null, floating: Boolean =
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.Center,
             )
+        }
+    }
+
+    if (showClear) Dialog(onDismissRequest = { showClear = false }) {
+        PixelPanel {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("清空本人 AI 聊天与摘要？未确认提议会失效，已确认目标和画像仍保留。", style = PixelType.Body)
+                PixelButton("清空聊天", onClick = {
+                    showClear = false
+                    scope.launch { runCall { token ->
+                        Api.clearZoovyHistory(token)
+                        messages = emptyList()
+                        pending = null
+                        operationStatus = "聊天与摘要已清空。"
+                    } }
+                })
+                PixelSmallButton("取消", onClick = { showClear = false }, filled = false)
+            }
         }
     }
 
@@ -324,7 +368,7 @@ private fun ZoovyBubble(
     accepted: Set<Long>,
     latestDrafts: Map<Long, ZoovyDraft>,
     busy: Boolean,
-    onAccept: (Long, Boolean) -> Unit,
+    onAccept: (Long, Int, Boolean) -> Unit,
     onConfirm: (Long, Int) -> Unit,
 ) {
     val mine = message.role == "user"
@@ -348,16 +392,38 @@ private fun ZoovyBubble(
                 Text("画像改动：${it.joinToString("、")}", style = PixelType.Small, color = PixelColors.Ink2)
             }
             if (message.failed == true) Text("这轮没答上来，可以再问一次。", style = PixelType.Small, color = PixelColors.Ink3)
+            message.report?.let { report ->
+                var expanded by remember(report) { mutableStateOf(false) }
+                PixelSmallButton(if (expanded) "收起运行详情" else "本轮运行详情", { expanded = !expanded }, filled = false)
+                if (expanded) {
+                    Text("${report.state} · ${report.durationMs / 1000} 秒 · 模型调用 ${report.modelCalls} 次", style = PixelType.Small)
+                    Text(if (report.usageReported) "已报告用量 ${report.totalTokens} token" else "模型未提供用量", style = PixelType.Small)
+                    for (tool in report.tools) Text("${tool.name} · ${tool.status} ${tool.reason.orEmpty()}", style = PixelType.Small)
+                    for (change in report.committedChanges) Text("已提交：${change.summary}", style = PixelType.Small)
+                    report.reason?.let { Text(it, style = PixelType.Small) }
+                }
+            }
             for (card in message.cards) when (card.type) {
                 "plan_offer" -> card.id?.let { id ->
                     Text(card.summary.orEmpty(), style = PixelType.Body, color = PixelColors.Ink)
                     if (id in accepted) Text("已同意生成草案", style = PixelType.Small, color = PixelColors.Ink2)
-                    else PixelButton("同意出草案", { onAccept(id, card.modelWork != false) }, enabled = !busy)
+                    else PixelButton("同意出草案", { onAccept(id, card.revision ?: 0, card.modelWork != false) }, enabled = !busy)
                 }
                 "profile_offer" -> card.id?.let { id ->
                     Text(card.summary.orEmpty(), style = PixelType.Body, color = PixelColors.Ink)
+                    for (preview in card.preview) {
+                        Text("${preview.label}\n修改前：${preview.before.ifBlank { "无" }}\n修改后：${preview.after.ifBlank { "无" }}", style = PixelType.Small)
+                        preview.reason?.let { Text("原因：$it", style = PixelType.Small) }
+                        preview.evidence?.let { Text("依据：$it", style = PixelType.Small) }
+                    }
                     if (id in accepted) Text("已同意更新画像", style = PixelType.Small, color = PixelColors.Ink2)
-                    else PixelButton("同意更新画像", { onAccept(id, card.modelWork != false) }, enabled = !busy)
+                    else PixelButton("同意更新画像", { onAccept(id, card.revision ?: 0, false) }, enabled = !busy)
+                }
+                "goal_offer" -> card.id?.let { id ->
+                    Text(card.summary.orEmpty(), style = PixelType.Body)
+                    for (preview in card.preview) Text("${preview.label}\n修改前：${preview.before.ifBlank { "无" }}\n修改后：${preview.after.ifBlank { "无" }}", style = PixelType.Small)
+                    if (id in accepted) Text("已确认", style = PixelType.Small)
+                    else PixelButton("确认创建", { onAccept(id, card.revision ?: 0, false) }, enabled = !busy)
                 }
                 "plan_draft" -> card.draft?.let { draft ->
                     val latest = latestDrafts[draft.id]
@@ -377,6 +443,7 @@ private fun ZoovyBubble(
                     }
                 }
                 "profile_applied" -> Text("画像已更新 · ${card.summary.orEmpty()}", style = PixelType.Small, color = PixelColors.GreenDeep)
+                "goal_applied" -> Text("目标已更新 · ${card.summary.orEmpty()}", style = PixelType.Small, color = PixelColors.GreenDeep)
                 else -> Unit
             }
         }
