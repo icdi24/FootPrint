@@ -167,6 +167,7 @@ fun BigGoalDetailDialog(
     var showShift by remember { mutableStateOf(false) }
     var showAddChain by remember { mutableStateOf(false) }
     var unbindTarget by remember { mutableStateOf<ChainGoalDto?>(null) }
+    var showDelete by remember { mutableStateOf(false) }
 
     fun reload() {
         val token = Session.token(context) ?: return
@@ -298,6 +299,13 @@ fun BigGoalDetailDialog(
                             Spacer(Modifier.width(8.dp))
                             PixelButton(text = "关掉", onClick = onDismiss, modifier = Modifier.weight(1f))
                         }
+                        Spacer(Modifier.height(8.dp))
+                        PixelSmallButton(
+                            text = "删除大目标",
+                            onClick = { showDelete = true },
+                            filled = false,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
                     toast?.let {
                         Spacer(Modifier.height(8.dp))
@@ -333,6 +341,31 @@ fun BigGoalDetailDialog(
                 reload()
                 onChanged()
             },
+        )
+    }
+
+    // 删除大目标（软删除：归档大目标 + 链上未达成的小目标一起归档，历史积分保留）
+    if (showDelete) {
+        PixelConfirmDialog(
+            title = "删除大目标",
+            message = "删除「${detail?.bigGoal?.title ?: "这个大目标"}」？链上还没达成的小目标会一起归档，历史积分和打卡记录保留。",
+            okLabel = "删除",
+            onOk = {
+                showDelete = false
+                val token = Session.token(context)
+                if (token != null) {
+                    scope.launch {
+                        try {
+                            Api.deleteBigGoal(token, bigGoalId)
+                            onChanged()
+                            onDismiss()
+                        } catch (e: Exception) {
+                            toast = e.message ?: "删除失败"
+                        }
+                    }
+                }
+            },
+            onCancel = { showDelete = false },
         )
     }
 

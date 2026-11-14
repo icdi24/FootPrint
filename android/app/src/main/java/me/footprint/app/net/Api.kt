@@ -853,7 +853,39 @@ object Api {
             json.encodeToString(DiarySharePayload.serializer(), DiarySharePayload(shared)), token,
         )
     }
+
+    // ---- 与 Web 对齐的新增能力（2026-11-14 那批提交）----
+
+    /** GET /api/wish?user=N —— 只看搭档的愿望单（只读，无余额/兑换入口） */
+    suspend fun getPartnerWish(token: String, userId: Long): WishListResponse {
+        val text = send("GET", "api/wish?user=$userId", null, token)
+        return json.decodeFromString(WishListResponse.serializer(), text)
+    }
+
+    /** DELETE /api/wish/:id —— 删除自己的愿望（后端会处理相关兑换记录） */
+    suspend fun deleteWish(token: String, wishId: Long) {
+        send("DELETE", "api/wish/$wishId", null, token)
+    }
+
+    /** DELETE /api/biggoals/:id —— 删除大目标（软删除：归档大目标 + 链上未达成的小目标） */
+    suspend fun deleteBigGoal(token: String, bigGoalId: Long) {
+        send("DELETE", "api/biggoals/$bigGoalId", null, token)
+    }
+
+    /** POST /api/demo-login —— 演示账号一键登录（只接受 lizi / abai 两个槽位） */
+    suspend fun demoLogin(slot: String, onToken: (String) -> Unit): LoginResponse {
+        val body = json.encodeToString(DemoLoginRequest.serializer(), DemoLoginRequest(slot))
+        var fromHeader: String? = null
+        val text = send("POST", "api/demo-login", body) { cookies ->
+            fromHeader = cookies[COOKIE_NAME]
+        }
+        fromHeader?.takeIf { it.isNotBlank() }?.let(onToken)
+        return json.decodeFromString(LoginResponse.serializer(), text)
+    }
 }
+
+@Serializable
+data class DemoLoginRequest(val slot: String)
 
 // ---------------- 打卡 / 积分相关数据类 ----------------
 
@@ -1253,6 +1285,9 @@ data class WishListResponse(
     val items: List<WishItem> = emptyList(),
     val redemptions: List<Redemption> = emptyList(),
     val balance: Int = 0,
+    /** GET /api/wish?user=N 的只读视角标记（看搭档的愿望单时 true） */
+    val readonly: Boolean = false,
+    val ownerId: Long? = null,
 )
 
 @Serializable

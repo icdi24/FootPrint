@@ -45,7 +45,12 @@ import me.footprint.app.ui.theme.PixelType
 /**
  * 愿望单页：余额横幅 + 愿望列表 + 新建/编辑 + 兑换 + 撤回 + 标记兑现。
  *
- * 与 Web 版 wish 页对齐。页面自己用 remember 管理状态、直接调 Api，
+ * 页头下方是「🎁 我的 / 🤝 ta 的」双 tab（没搭档就只有「我的」），对齐 Web wish.js。
+ * 「ta 的」走 GET /api/wish?user=N，是只读视角 —— 接口不返回 balance/redemptions，
+ * 所以那边没有余额横幅、没有新建/兑换/编辑/删除，也没有兑换记录区块。
+ * 自己的卡片点一下进编辑，编辑框底部左侧可删除（DELETE /api/wish/:id）。
+ *
+ * 页面自己用 remember 管理状态、直接调 Api，
  * token 走 Session.token(context)，context 用 LocalContext.current。
  *
  * 积分与价格换算：1 元 = 10 分（后端默认 price_cny × 10 = points_cost）。
@@ -60,6 +65,10 @@ private val WISH_EMOJIS = listOf(
   "🎁", "🎧", "⌚", "👟", "🎮", "📱", "💄", "👜",
   "🍰", "🎬", "🛹", "📷", "✈️", "🍲", "🪑", "🌷",
 )
+
+/** 愿望单视角：我的 / ta 的（对齐 Web wish.js 的 'mine' | 'partner'） */
+private const val TAB_MINE = "mine"
+private const val TAB_PARTNER = "partner"
 
 /** 价格格式化：去掉无意义的小数（10.0 → 10），最多保留两位 */
 private fun fmtPrice(p: Double): String {
@@ -107,10 +116,21 @@ fun WishScreen(vm: AppViewModel) {
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
 
-  // 列表数据与加载状态
-  var data by remember { mutableStateOf<WishListResponse?>(null) }
+  // 当前看谁的愿望单：'mine' | 'partner'（对齐 Web wish.js 的 WishPage.view）
+  var tab by remember { mutableStateOf(TAB_MINE) }
+
+  // 列表数据与加载状态：我的 / ta 的分开存，切回来不用等重新拉
+  var mineData by remember { mutableStateOf<WishListResponse?>(null) }
+  var partnerData by remember { mutableStateOf<WishListResponse?>(null) }
   var loading by remember { mutableStateOf(true) }
   var error by remember { mutableStateOf<String?>(null) }
+
+  // 搭档 id：首页 → 聊天 → 配对状态，按优先级取第一个拿到的。
+  // 聊天/配对里的 id 可能是 0（还没加载完），takeIf 掉，别把 0 当搭档。
+  val homePartnerId = vm.home.collectAsStateWithLifecycle().value?.partner?.id
+  val chatPartnerId = vm.chatPartner.collectAsStateWithLifecycle().value?.id?.takeIf { it > 0L }
+  val pairPartnerId = vm.pairStatus.collectAsStateWithLifecycle().value?.partner?.id?.takeIf { it > 0L }
+  val partnerId = homePartnerId ?: chatPartnerId ?: pairPartnerId
 
   // 弹层状态：null = 关闭；否则携带要编辑的愿望（null 表示新建）
   var editing: WishItem? by remember { mutableStateOf<WishItem?>(null) }
@@ -126,13 +146,22 @@ fun WishScreen(vm: AppViewModel) {
   var busyWishId by remember { mutableStateOf<Long?>(null) }
   var busyRedemptionId by remember { mutableStateOf<Long?>(null) }
 
-  // 拉取列表
-  suspend fun load() {
+  /**
+   * 拉当前 tab 的列表：
+   *  - mine → Api.listWish（有 balance / redemptions）
+   *  - partner → Api.getPartnerWish（只读视角，**没有 balance / redemptions**）
+   */
+  suspend fun load(target: String) {
     val token = Session.token(context) ?: return
     loading = true
     error = null
     try {
-      data = Api.listWish(token)
+      if (target == TAB_PARTNER) {
+        // 搭档还没加载出来就先不请求，等 partnerId 变化再触发
+        partnerId?.let { partnerData = Api.getPartnerWish(token, it) }
+      } else {
+        mineData = Api.listWish(token)
+      }
     } catch (e: Exception) {
       error = (e as? ApiException)?.message ?: e.message ?: "加载失败"
     } finally {
@@ -140,11 +169,13 @@ fun WishScreen(vm: AppViewModel) {
     }
   }
 
-  LaunchedEffect(Unit) {
-    load()
+  // tab 切换、或者搭档 id 终于拿到时重新拉
+  LaunchedEffect(tab, partnerId) {
+    load(tab)
   }
 
-  val balance = data?.balance ?: 0
+  val isPartner = tab == TAB_PARTNER
+  val balance = mineData?.balance ?: 0
 
   Screen {
     Column(
@@ -152,15 +183,42 @@ fun WishScreen(vm: AppViewModel) {
         .fillMaxWidth()
         .verticalScroll(rememberScrollState()),
     ) {
-      // ---- 顶栏 ----
-      WishHeader(onNew = { editing = null; showEditor = true })
+      // ---- 顶栏（ta 的视图没有「新建」，对齐 Web）----
+      WishHeader(
+        onNew = { editing = null; showEditor = true },
+        showNew = !isPartner,
+      )
 
       Spacer(Modifier.height(12.dp))
 
-      // ---- 余额横幅 ----
-      BalanceBanner(balance = balance)
+      // ---- 🎁 我的 / 🤝 ta 的 双 tab（没搭档就只有「我的」）----
+      WishTabs(
+        selected = tab,
+        showPartner = partnerId != null,
+        onSelect = { next ->
+          if (next != tab) {
+            // 切换时收起弹层，避免在看 ta 的视图时还挂着「我的」编辑框
+            tab = next
+            editing = null
+            showEditor = false
+            // 目标 tab 还没数据时先立起「加载中」，别闪一下空态
+            if (next == TAB_PARTNER && partnerData == null) loading = true
+            if (next == TAB_MINE && mineData == null) loading = true
+          }
+        },
+      )
 
-      Spacer(Modifier.height(16.dp))
+      Spacer(Modifier.height(12.dp))
+
+      if (isPartner) {
+        // ta 的：只读。接口不返回 balance，所以没有余额横幅、没有兑换记录
+        PartnerWishNote()
+        Spacer(Modifier.height(12.dp))
+      } else {
+        // ---- 余额横幅（只有自己的视图有）----
+        BalanceBanner(balance = balance)
+        Spacer(Modifier.height(16.dp))
+      }
 
       if (loading) {
         Text("加载中…", style = PixelType.Body, color = PixelColors.Ink3)
@@ -171,13 +229,45 @@ fun WishScreen(vm: AppViewModel) {
       if (error != null) {
         Text("加载出错：$error", style = PixelType.Small, color = PixelColors.RedDeep)
         Spacer(Modifier.height(8.dp))
-        PixelSmallButton(text = "重试", onClick = { scope.launch { load() } }, filled = false)
+        PixelSmallButton(text = "重试", onClick = { scope.launch { load(tab) } }, filled = false)
         Spacer(Modifier.height(24.dp))
         return@Column
       }
 
-      val items = data?.items ?: emptyList()
-      val redemptions = data?.redemptions ?: emptyList()
+      // ---- ta 的：只读视图（无兑换 / 编辑 / 删除 / 兑换记录）----
+      if (isPartner) {
+        val items = partnerData?.items ?: emptyList()
+        // 与自己的列表一致：只列 active（下架的不显示、也不计件数）
+        val activeItems = items.filter { it.status == "active" }
+
+        WishSectionTitle(count = activeItems.size, title = "ta 想要的东西")
+        Spacer(Modifier.height(8.dp))
+
+        if (partnerId == null) {
+          WishEmpty(
+            title = "还没有搭档",
+            subtitle = "到「我的 → 我的搭档」用邀请码配对，就能看到 ta 的愿望单",
+            emoji = "🤝",
+          )
+        } else if (activeItems.isEmpty()) {
+          WishEmpty(
+            title = "ta 的愿望单还是空的",
+            subtitle = "等 ta 放上第一件想要的东西",
+          )
+        } else {
+          for (item in activeItems) {
+            // 只读卡片：整卡不可点，也没有任何写操作入口
+            PartnerWishCard(item = item)
+            Spacer(Modifier.height(12.dp))
+          }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        return@Column
+      }
+
+      val items = mineData?.items ?: emptyList()
+      val redemptions = mineData?.redemptions ?: emptyList()
 
       // 下架的不进列表、也不计件数（对齐 Web active）
       val activeItems = items.filter { it.status == "active" }
@@ -216,7 +306,7 @@ fun WishScreen(vm: AppViewModel) {
                   try {
                     Api.doneRedemption(token, r.id)
                     Toast.makeText(context, "记好了，去把它买回来吧 🛍️", Toast.LENGTH_SHORT).show()
-                    load()
+                    load(tab)
                   } catch (e: Exception) {
                     Toast.makeText(context, (e as? ApiException)?.message ?: "操作失败", Toast.LENGTH_SHORT).show()
                   } finally {
@@ -242,7 +332,7 @@ fun WishScreen(vm: AppViewModel) {
               try {
                 Api.cancelRedemption(token, r.id)
                 Toast.makeText(context, "已撤回，积分退回", Toast.LENGTH_SHORT).show()
-                load()
+                load(tab)
               } catch (e: Exception) {
                 Toast.makeText(context, (e as? ApiException)?.message ?: "撤销失败", Toast.LENGTH_SHORT).show()
               } finally {
@@ -257,7 +347,7 @@ fun WishScreen(vm: AppViewModel) {
               try {
                 Api.doneRedemption(token, r.id)
                 Toast.makeText(context, "记好了，去把它买回来吧 🛍️", Toast.LENGTH_SHORT).show()
-                load()
+                load(tab)
               } catch (e: Exception) {
                 Toast.makeText(context, (e as? ApiException)?.message ?: "操作失败", Toast.LENGTH_SHORT).show()
               } finally {
@@ -305,9 +395,28 @@ fun WishScreen(vm: AppViewModel) {
               Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
             }
             showEditor = false
-            load()
+            load(tab)
           } catch (e: Exception) {
             Toast.makeText(context, (e as? ApiException)?.message ?: "保存失败", Toast.LENGTH_SHORT).show()
+          }
+        }
+      },
+      // 编辑态底部的「删除这个愿望」：确认后 DELETE /api/wish/:id
+      onDelete = {
+        val target = editing
+        if (target == null) {
+          showEditor = false
+        } else {
+          scope.launch {
+            val token = Session.token(context) ?: return@launch
+            try {
+              Api.deleteWish(token, target.id)
+              showEditor = false
+              Toast.makeText(context, "已删除", Toast.LENGTH_SHORT).show()
+              load(TAB_MINE)
+            } catch (e: Exception) {
+              Toast.makeText(context, (e as? ApiException)?.message ?: "删除失败", Toast.LENGTH_SHORT).show()
+            }
           }
         }
       },
@@ -329,7 +438,7 @@ fun WishScreen(vm: AppViewModel) {
           try {
             Api.cancelRedemption(token, r.id)
             Toast.makeText(context, "已撤回，积分退回", Toast.LENGTH_SHORT).show()
-            load()
+            load(tab)
           } catch (e: Exception) {
             Toast.makeText(context, (e as? ApiException)?.message ?: "撤销失败", Toast.LENGTH_SHORT).show()
           } finally {
@@ -356,7 +465,7 @@ fun WishScreen(vm: AppViewModel) {
             val result = Api.redeemWish(token, target.id)
             Toast.makeText(context, "兑换成功，余额 ${fmtNum(result.balance)} 分", Toast.LENGTH_SHORT).show()
             redeemTarget = null
-            load()
+            load(tab)
           } catch (e: Exception) {
             Toast.makeText(context, (e as? ApiException)?.message ?: "兑换失败", Toast.LENGTH_SHORT).show()
           } finally {
@@ -368,9 +477,9 @@ fun WishScreen(vm: AppViewModel) {
   }
 }
 
-/** 页头：标题 + 「＋ 新建」（游客态点了跳登录，对齐 Web guestGate） */
+/** 页头：标题 + 「＋ 新建」（游客态点了跳登录，对齐 Web guestGate）；ta 的视图不显示新建 */
 @Composable
-private fun WishHeader(onNew: () -> Unit) {
+private fun WishHeader(onNew: () -> Unit, showNew: Boolean = true) {
   Row(
     modifier = Modifier.fillMaxWidth(),
     verticalAlignment = Alignment.CenterVertically,
@@ -380,13 +489,61 @@ private fun WishHeader(onNew: () -> Unit) {
       Text("愿望单", style = PixelType.Big, color = PixelColors.Ink)
       Text("攒够分，换点真的", style = PixelType.Small, color = PixelColors.Ink3)
     }
-    PixelSmallButton(text = "＋ 新建", filled = true, onClick = onNew)
+    if (showNew) {
+      PixelSmallButton(text = "＋ 新建", filled = true, onClick = onNew)
+    }
   }
 }
 
-/** 「想要的东西」小节标题，count > 0 才显示件数（对齐 Web sec-count） */
+/** 「🎁 我的 / 🤝 ta 的」分段切换（对齐 Web wish.js 的 .wish-tabs freq-seg） */
 @Composable
-private fun WishSectionTitle(count: Int?) {
+private fun WishTabs(selected: String, showPartner: Boolean, onSelect: (String) -> Unit) {
+  Row(modifier = Modifier.fillMaxWidth()) {
+    WishTabButton(
+      text = "🎁 我的",
+      selected = selected == TAB_MINE,
+      modifier = Modifier.weight(1f),
+      onClick = { onSelect(TAB_MINE) },
+    )
+    if (showPartner) {
+      Spacer(Modifier.width(8.dp))
+      WishTabButton(
+        text = "🤝 ta 的",
+        selected = selected == TAB_PARTNER,
+        modifier = Modifier.weight(1f),
+        onClick = { onSelect(TAB_PARTNER) },
+      )
+    }
+  }
+}
+
+/** 单个 tab 按钮：选中绿底、未选白底，像素描边 */
+@Composable
+private fun WishTabButton(
+  text: String,
+  selected: Boolean,
+  modifier: Modifier = Modifier,
+  onClick: () -> Unit,
+) {
+  Box(
+    modifier = modifier
+      .background(if (selected) PixelColors.GreenSoft else PixelColors.Card)
+      .pixelBorder(2.dp, if (selected) PixelColors.GreenDeep else PixelColors.Outline)
+      .clickable(interactionSource = null, indication = null, onClick = onClick)
+      .padding(vertical = 10.dp),
+    contentAlignment = Alignment.Center,
+  ) {
+    Text(
+      text = text,
+      style = PixelType.Body,
+      color = if (selected) PixelColors.GreenDeep else PixelColors.Ink2,
+    )
+  }
+}
+
+/** 小节标题（对齐 Web sec-head）：默认「想要的东西」，ta 的视图换成「ta 想要的东西」 */
+@Composable
+private fun WishSectionTitle(count: Int?, title: String = "想要的东西") {
   Row(
     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
     horizontalArrangement = Arrangement.SpaceBetween,
@@ -395,7 +552,7 @@ private fun WishSectionTitle(count: Int?) {
     Row(verticalAlignment = Alignment.CenterVertically) {
       Box(modifier = Modifier.size(10.dp).background(PixelColors.Ink))
       Spacer(Modifier.width(8.dp))
-      Text("想要的东西", style = PixelType.Title, color = PixelColors.Ink)
+      Text(title, style = PixelType.Title, color = PixelColors.Ink)
     }
     if (count != null && count > 0) {
       Text("${fmtNum(count)} 件", style = PixelType.Small, color = PixelColors.Ink2)
@@ -403,23 +560,107 @@ private fun WishSectionTitle(count: Int?) {
   }
 }
 
-/** 🎁 两行空态（对齐 Web .empty：愿望单还是空的 / 换算说明） */
+/** 🎁 两行空态（对齐 Web .empty），标题/说明可换（我的 / ta 的） */
 @Composable
-private fun WishEmpty() {
+private fun WishEmpty(
+  title: String = "愿望单还是空的",
+  subtitle: String = "把想买的东西放进来，填上真实价格，系统按 1 元 = 10 分换算",
+  emoji: String = "🎁",
+) {
   Column(
     modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
     horizontalAlignment = Alignment.CenterHorizontally,
   ) {
-    Text("🎁", style = PixelType.Huge)
+    Text(emoji, style = PixelType.Huge)
     Spacer(Modifier.height(12.dp))
-    Text("愿望单还是空的", style = PixelType.Title, color = PixelColors.Ink)
+    Text(title, style = PixelType.Title, color = PixelColors.Ink)
     Spacer(Modifier.height(8.dp))
     Text(
-      text = "把想买的东西放进来，填上真实价格，系统按 1 元 = 10 分换算",
+      text = subtitle,
       style = PixelType.Small,
       color = PixelColors.Ink2,
       textAlign = TextAlign.Center,
     )
+  }
+}
+
+/** ta 的视图顶部只读提示（接口不给 balance，所以这里不展示分数） */
+@Composable
+private fun PartnerWishNote() {
+  PixelPanel(
+    modifier = Modifier.fillMaxWidth(),
+    background = PixelColors.OrangeSoft,
+    borderColor = PixelColors.OrangeDeep,
+  ) {
+    Column(modifier = Modifier.padding(14.dp)) {
+      Text("ta 的愿望单（只读）", style = PixelType.Body, color = PixelColors.OrangeDeep)
+      Spacer(Modifier.height(4.dp))
+      Text(
+        text = "只能看，不能改。帮 ta 攒分，或者悄悄挑一件当惊喜。",
+        style = PixelType.Small,
+        color = PixelColors.Ink2,
+      )
+    }
+  }
+}
+
+/** ta 的愿望卡片：只读，整卡不可点，没有兑换 / 编辑 / 删除 / 余额进度条 */
+@Composable
+private fun PartnerWishCard(item: WishItem) {
+  PixelPanel(modifier = Modifier.fillMaxWidth()) {
+    Column(modifier = Modifier.padding(16.dp)) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(item.emoji, style = PixelType.Big)
+        Spacer(Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+          Text(item.title, style = PixelType.Title, color = PixelColors.Ink)
+          if (item.description.isNotBlank()) {
+            Spacer(Modifier.height(2.dp))
+            Text(item.description, style = PixelType.Small, color = PixelColors.Ink2)
+          }
+        }
+        PixelChip(
+          text = if (item.status == "active") "上架" else "下架",
+          bg = if (item.status == "active") PixelColors.GreenSoft else PixelColors.Bg2,
+          fg = if (item.status == "active") PixelColors.GreenDeep else PixelColors.Ink3,
+        )
+      }
+
+      Spacer(Modifier.height(10.dp))
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text("积分", style = PixelType.Small, color = PixelColors.Ink3)
+        Spacer(Modifier.width(6.dp))
+        Text(
+          text = fmtNum(item.points_cost),
+          style = PixelType.Mono,
+          color = PixelColors.GreenDeep,
+        )
+        Spacer(Modifier.width(12.dp))
+        Text("≈", style = PixelType.Small, color = PixelColors.Ink3)
+        Spacer(Modifier.width(6.dp))
+        Text(
+          text = "¥${fmtPrice(item.price_cny)}",
+          style = PixelType.Mono,
+          color = PixelColors.OrangeDeep,
+        )
+      }
+
+      if (!item.cooldownMsg.isNullOrBlank()) {
+        Spacer(Modifier.height(6.dp))
+        Text(
+          text = item.cooldownMsg!!,
+          style = PixelType.Small,
+          color = PixelColors.RedDeep,
+        )
+      }
+    }
   }
 }
 
@@ -481,7 +722,7 @@ private fun BalanceBanner(balance: Int) {
   }
 }
 
-/** 单个愿望卡片：emoji + 标题 + 描述 + 积分价 + 参考价 + 进度条 + 操作按钮 */
+/** 单个愿望卡片：emoji + 标题 + 描述 + 积分价 + 参考价 + 进度条 + 操作按钮（整卡可点 = 编辑） */
 @Composable
 private fun WishCard(
   item: WishItem,
@@ -493,7 +734,12 @@ private fun WishCard(
   onCancel: () -> Unit,
   onDone: () -> Unit,
 ) {
-  PixelPanel(modifier = Modifier.fillMaxWidth()) {
+  PixelPanel(
+    modifier = Modifier
+      .fillMaxWidth()
+      // 整卡点按打开编辑（对齐 Web 点卡片开 WishForm）；卡内按钮各自消费点击，不会误触
+      .clickable(interactionSource = null, indication = null, onClick = onEdit),
+  ) {
     Column(modifier = Modifier.padding(16.dp)) {
       // 标题行
       Row(
@@ -719,8 +965,11 @@ private fun WishEditor(
   editing: WishItem?,
   onDismiss: () -> Unit,
   onSave: (WishForm) -> Unit,
+  onDelete: () -> Unit = {},
 ) {
   val context = LocalContext.current
+  // 「删除这个愿望」的二次确认（只在编辑已有愿望时有用）
+  var confirmingDelete by remember { mutableStateOf(false) }
   // 用 editing 初始化表单；editing 变化时重置
   var form by remember {
     mutableStateOf(
@@ -904,9 +1153,22 @@ private fun WishEditor(
 
         Row(
           modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
         ) {
+          // 左侧：删除（只在编辑已有愿望时出现），红色文字按钮
+          if (editing != null) {
+            Text(
+              text = "删除这个愿望",
+              style = PixelType.Small,
+              color = PixelColors.RedDeep,
+              modifier = Modifier
+                .clickable(interactionSource = null, indication = null) { confirmingDelete = true }
+                .padding(vertical = 10.dp, horizontal = 2.dp),
+            )
+          }
+          Spacer(Modifier.weight(1f))
           PixelSmallButton(text = "取消", onClick = onDismiss, filled = false)
+          Spacer(Modifier.width(8.dp))
           PixelSmallButton(
             text = if (editing == null) "放上愿望单" else "保存",
             filled = true,
@@ -931,6 +1193,21 @@ private fun WishEditor(
                 )
               }
             },
+          )
+        }
+
+        // 删除二次确认（对齐 Web wish.js deleteWish 的 UI.confirm）
+        if (confirmingDelete) {
+          PixelConfirmDialog(
+            title = "删除愿望",
+            message = "删除「${editing?.title.orEmpty()}」？删除后不可恢复。",
+            okLabel = "删除",
+            cancelLabel = "再想想",
+            onOk = {
+              confirmingDelete = false
+              onDelete()
+            },
+            onCancel = { confirmingDelete = false },
           )
         }
       }

@@ -239,6 +239,26 @@ fun AuthScreen(vm: AppViewModel) {
                 enabled = !busy,
             )
 
+            // 演示账号一键登录（对齐 Web 手机端的演示账号按钮）
+            Spacer(Modifier.height(12.dp))
+            Text("或者直接用演示账号看看", style = PixelType.Small, color = PixelColors.Ink3)
+            Spacer(Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth()) {
+                PixelSmallButton(
+                    text = "🌰 栗子",
+                    onClick = { vm.demoLogin("lizi") },
+                    filled = false,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(10.dp))
+                PixelSmallButton(
+                    text = "🐻 阿白",
+                    onClick = { vm.demoLogin("abai") },
+                    filled = false,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
             Spacer(Modifier.height(16.dp))
 
             // 登录 / 注册切换
