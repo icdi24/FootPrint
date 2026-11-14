@@ -1424,7 +1424,7 @@ textarea:focus-visible { outline: none; }
 
 /* ── 中间：某天目标 ─────────────────────────────────── */
 .day-row {
-  display: grid; grid-template-columns: 30px minmax(0, 1fr) auto auto;
+  display: grid; grid-template-columns: 30px minmax(0, 1fr) auto auto auto;
   align-items: center; gap: 10px;
   padding: 9px 2px; border-bottom: 2px dashed var(--line);
 }
@@ -1437,6 +1437,41 @@ textarea:focus-visible { outline: none; }
 .day-state.is-ok { color: var(--leaf-ink); border-color: var(--leaf-ink); }
 .day-state.is-pend { color: var(--gold-ink); border-color: var(--gold-ink); }
 .day-state.is-miss { color: var(--berry-ink); border-color: var(--berry-ink); }
+
+/* ── 行内「⋯」更多操作 + 弹出菜单 ─────────────────────── */
+.row-more {
+  display: grid; place-items: center;
+  width: 26px; height: 24px; padding: 0;
+  font: 16px/1 var(--font-px); letter-spacing: 1px;
+  color: var(--wood-deep); background: transparent;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: color .16s var(--ease), border-color .16s var(--ease), background .16s var(--ease);
+}
+.row-more:hover { color: var(--btn); border-color: var(--btn); background: var(--wood-light); }
+.row-more:focus-visible { outline: 2px solid var(--wood-dark); outline-offset: 1px; }
+.row-menu {
+  position: fixed; z-index: 60;
+  min-width: 112px; padding: 4px;
+  display: flex; flex-direction: column;
+  background: var(--paper);
+  border: 2px solid var(--wood-deep);
+  box-shadow: 0 4px 0 var(--wood-dark);
+  animation: row-menu-in .12s var(--ease) both;
+}
+@keyframes row-menu-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: none; }
+}
+.row-menu-item {
+  padding: 8px 12px; text-align: left;
+  font: 13px var(--font-px); color: var(--wood-deep);
+  background: transparent; border: 0; cursor: pointer;
+  white-space: nowrap;
+}
+.row-menu-item:hover { background: var(--wood-light); }
+.row-menu-item.is-danger { color: var(--berry-ink); }
+.row-menu-item.is-danger:hover { background: rgba(196, 90, 76, .12); }
 
 /* ── 右栏：大目标路线 ───────────────────────────────── */
 .big-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
@@ -2702,6 +2737,43 @@ textarea:focus-visible { outline: none; }
 }
 
 /* ── 愿望单金色积分卡（学手机端）────────────────────── */
+/* ── 愿望单：我的 / ta 的 双 tab ─────────────────────── */
+.wish-tabs {
+  display: flex; margin-bottom: 16px;
+  border: 2px solid var(--wood-deep);
+  box-shadow: 0 3px 0 var(--wood-dark);
+}
+.wish-tab {
+  position: relative; flex: 1;
+  display: flex; align-items: center; justify-content: center;
+  padding: 10px 0;
+  font: 14px var(--font-px); color: var(--wood-dark);
+  background: var(--paper); border: 0; cursor: pointer;
+  transition: background .16s var(--ease), color .16s var(--ease);
+}
+.wish-tab + .wish-tab { border-left: 2px solid var(--wood-deep); }
+.wish-tab:hover { background: var(--wood-light); }
+.wish-tab.is-on { color: var(--paper); background: var(--wood-dark); }
+.wish-tab.is-on:hover { background: var(--wood-dark); }
+.wish-tab.is-disabled,
+.wish-tab:disabled { color: var(--ink-3); cursor: not-allowed; background: var(--bg); }
+.wish-tab.is-disabled:hover,
+.wish-tab:disabled:hover { background: var(--bg); }
+
+/* ta 的愿望单：只读视角 */
+.wish-ro-hint {
+  font: 12px var(--font-px); color: var(--ink-3);
+  padding: 2px 8px; border: 2px dashed var(--line-strong);
+}
+.wish-card.is-readonly { grid-template-columns: 40px 1fr auto; }
+.wish-card.is-readonly .wc-body b { color: var(--ink-2); }
+.wish-ro-state {
+  font: 12px var(--font-px); padding: 5px 10px; white-space: nowrap;
+  color: var(--ink-3);
+  background: var(--bg-2); border: 2px solid var(--line-strong);
+}
+.wish-ro-state.is-done { color: var(--leaf-ink); border-color: var(--leaf-ink); background: rgba(90, 138, 74, .1); }
+
 .wish-banner {
   position: relative;
   padding: 16px 20px 15px;

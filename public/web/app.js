@@ -410,6 +410,76 @@
     });
   }
 
+  /* 行内「⋯」菜单：点按钮在它旁边弹出，点别处或按 Esc 关闭。
+     items: [{ label, danger, onClick }] */
+  let rowMenuEl = null;
+  function closeRowMenu() {
+    if (!rowMenuEl) return;
+    const { el, cleanup } = rowMenuEl;
+    el.remove();
+    cleanup();
+    rowMenuEl = null;
+  }
+  function openRowMenu(anchor, items) {
+    closeRowMenu();
+    const menu = document.createElement('div');
+    menu.className = 'row-menu';
+    menu.setAttribute('role', 'menu');
+    menu.innerHTML = items.map((it, i) =>
+      `<button class="row-menu-item${it.danger ? ' is-danger' : ''}" type="button" role="menuitem" data-mi="${i}">${esc(it.label)}</button>`
+    ).join('');
+    document.body.appendChild(menu);
+
+    // 定位到按钮右下方，贴边时自动翻到上方 / 收进视口
+    const r = anchor.getBoundingClientRect();
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    let left = r.right - mw;
+    let top = r.bottom + 6;
+    if (left < 8) left = 8;
+    if (left + mw > window.innerWidth - 8) left = window.innerWidth - 8 - mw;
+    if (top + mh > window.innerHeight - 8) top = r.top - mh - 6;
+    menu.style.left = `${left}px`;
+    menu.style.top = `${Math.max(8, top)}px`;
+
+    menu.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-mi]');
+      if (!b) return;
+      const it = items[Number(b.dataset.mi)];
+      closeRowMenu();
+      if (it && it.onClick) it.onClick();
+    });
+    const onDoc = (e) => { if (!menu.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) closeRowMenu(); };
+    const onKey = (e) => { if (e.key === 'Escape') closeRowMenu(); };
+    setTimeout(() => document.addEventListener('pointerdown', onDoc), 0);
+    document.addEventListener('keydown', onKey);
+    rowMenuEl = { el: menu, cleanup: () => { document.removeEventListener('pointerdown', onDoc); document.removeEventListener('keydown', onKey); } };
+  }
+
+  /* 删除目标（软删除）：二次确认后走 abandon；大目标走 DELETE /biggoals/:id */
+  async function deleteGoal(goal) {
+    if (!goal) return;
+    const yes = await confirmSheet({
+      title: '删除这个目标',
+      text: `确定删除「${esc(goal.title)}」吗？已经攒下的积分和打卡记录会保留，但它不再出现在列表里。`,
+      confirmText: '删除', danger: true,
+    });
+    if (!yes) return;
+    try { await API.abandonGoal(goal.id); await loadAll(); renderAll(); toast('已删除'); }
+    catch (e) { toast(e.message || '删除失败'); }
+  }
+  async function deleteBigGoal(bid) {
+    const b = store.biggoals.find((x) => String(x.id) === String(bid));
+    if (!b) return;
+    const yes = await confirmSheet({
+      title: '删除这个大目标',
+      text: `确定删除「${esc(b.title)}」吗？路线里还没完成的小目标会一并归档，记录仍会保留。`,
+      confirmText: '删除', danger: true,
+    });
+    if (!yes) return;
+    try { await API.deleteBigGoal(bid); await loadAll(); renderAll(); toast('已删除'); }
+    catch (e) { toast(e.message || '删除失败'); }
+  }
+
   /* ═══════════════════════════════════════════════════════
      内存 store：账号 / 目标 / 打卡 / 流水 / 验收 / 兑换
      ═══════════════════════════════════════════════════════ */
@@ -505,6 +575,8 @@
     ledger: [],       // {id, userId, delta, type, note, ref, at, date, balanceAfter}
     verifications: [],// {id, goalId, userId, selfStatement, evidence, submitCount, status, reason, at, decidedAt}
     wishes: [],
+    partnerWishes: null,   // 搭档的愿望单（懒加载，null=未加载）
+    wishTab: 'mine',       // 愿望单页子 tab：mine | partner
     redemptions: [],
     diary: [],
     dailyReports: [],   // { date, userId, text, shared, edited }
@@ -1814,7 +1886,7 @@
 
       <div id="fgStage" ${g.type !== 'stage' ? 'hidden' : ''}>
         <p class="fg-label">完成标准（要能答「是 / 否」）</p>
-        <input id="fgCriteria" class="fg-input" type="text" maxlength="100" placeholder="比如：初稿全文 ≥ 8000 字，导出 PDF" value=""/>
+        <input id="fgCriteria" class="fg-input" type="text" maxlength="100" placeholder="比如：初稿全文 ≥ 8000 字，导出 PDF" value="${esc(g.criteria || '')}"/>
         <p class="fg-label">预估总时长（分钟）</p>
         <div class="fg-chips">
           ${[60, 120, 240, 600, 1200].map((m) => `<button class="chip-btn" type="button" data-est="${m}">${m < 60 ? m + ' 分' : (m / 60) + ' 小时'}</button>`).join('')}
@@ -2335,6 +2407,7 @@
         <span class="day-emoji">${g.emoji || '🌱'}</span>
         <span class="day-main"><b>${esc(g.title)}</b><small>${g.durationMin} 分钟 · +${pts} 分</small></span>
         ${state}
+        <button class="row-more" type="button" data-row-menu="${g.id}" aria-label="更多操作" title="更多操作">⋯</button>
       </div>`;
     }).join('');
 
@@ -2364,6 +2437,7 @@
         <span class="day-emoji">${g.emoji || '🏁'}</span>
         <span class="day-main"><b>${esc(g.title)}</b><small>${(g.estTotalMin / 60).toFixed(0)} 小时 · +${stagePoints(g)} 分</small></span>
         <span class="day-state ${cls}">${st}</span>${act}
+        <button class="row-more" type="button" data-row-menu="${g.id}" aria-label="更多操作" title="更多操作">⋯</button>
       </div>`;
     }).join('');
 
@@ -2482,7 +2556,7 @@
       const pct = b.total ? Math.round((b.done / b.total) * 100) : 0;
       return `<section class="wood-panel goals-col goals-big">
         <div class="panel-head"><h2><span class="wood-tag">大目标</span></h2>
-          <button class="text-btn" type="button" data-edit-biggoal="${b.id}">编辑</button></div>
+          <button class="row-more" type="button" data-big-menu="${b.id}" aria-label="更多操作" title="更多操作">⋯</button></div>
         <button class="big-head" type="button" data-big-open="${b.id}">
           <span class="big-emoji">${b.emoji || '🎯'}</span>
           <div class="big-title"><b>${esc(b.title)}</b><small>${esc(b.note || '')}</small></div>
@@ -3054,56 +3128,96 @@
 
   function renderWishView() {
     const uid = store.currentUser;
+    const pid = partnerId();
+    const tab = pid ? (store.wishTab === 'partner' ? 'partner' : 'mine') : 'mine';
     const bal = balanceOf(uid);
-    const items = store.wishes.filter((w) => w.ownerId === uid && w.status === 'active');
-    const reds = store.redemptions.filter((r) => r.userId === uid).sort((a, b) => b.appliedAt - a.appliedAt);
     const label = { applied: '待对方确认', confirmed: '已扣分', done: '已完成', cancelled: '已取消', expired: '已过期' };
-    const doneCnt = reds.filter((r) => r.status === 'done').length;
-    // 金色积分卡（学手机端愿望单顶部）
-    const wishBanner = `
-      <div class="wish-banner">
-        <div class="wb-top">
-          <span class="wb-label">可用积分</span>
-          <span class="wb-yuan">≈ ¥${(bal / 10).toFixed(1)}</span>
-        </div>
-        <b class="wb-num">${fmt(bal)}</b>
-        <div class="wb-bottom">
-          <span class="wb-chip">1 元 = 10 分</span>
-          <span class="wb-chip wb-chip-light">已兑换 ${doneCnt} 件</span>
-          <span class="wb-spacer"></span>
-        </div>
-      </div>`;
 
-    return `${head('愿望单', '', `正在攒 ${items.length} 个 · 已兑换 ${doneCnt} 件`)}
-      ${wishBanner}
+    // ── 双 tab：我的 / ta 的 ──────────────────────────────
+    const tabsHtml = `<div class="wish-tabs" role="tablist">
+      <button class="wish-tab${tab === 'mine' ? ' is-on' : ''}" type="button" role="tab" data-wish-tab="mine">我的</button>
+      <button class="wish-tab${tab === 'partner' ? ' is-on' : ''}${pid ? '' : ' is-disabled'}" type="button" role="tab"
+        data-wish-tab="partner" ${pid ? `aria-selected="${tab === 'partner'}"` : 'disabled aria-disabled="true" title="未配对"'}
+        >ta 的</button>
+    </div>`;
+
+    /* ── 我的视角 ─────────────────────────────────────── */
+    if (tab === 'mine') {
+      const items = store.wishes.filter((w) => w.ownerId === uid && w.status === 'active');
+      const reds = store.redemptions.filter((r) => r.userId === uid).sort((a, b) => b.appliedAt - a.appliedAt);
+      const doneCnt = reds.filter((r) => r.status === 'done').length;
+      const wishBanner = `
+        <div class="wish-banner">
+          <div class="wb-top">
+            <span class="wb-label">可用积分</span>
+            <span class="wb-yuan">≈ ¥${(bal / 10).toFixed(1)}</span>
+          </div>
+          <b class="wb-num">${fmt(bal)}</b>
+          <div class="wb-bottom">
+            <span class="wb-chip">1 元 = 10 分</span>
+            <span class="wb-chip wb-chip-light">已兑换 ${doneCnt} 件</span>
+            <span class="wb-spacer"></span>
+          </div>
+        </div>`;
+
+      return `${head('愿望单', '', `正在攒 ${items.length} 个 · 已兑换 ${doneCnt} 件`)}
+        ${tabsHtml}
+        ${wishBanner}
+        <section class="wood-panel sub-panel">
+          <div class="panel-head"><h2><span class="wood-tag wood-tag-berry">正在攒</span></h2>
+            <button class="wood-btn wood-btn-sm" type="button" data-new-wish><span class="btn-ico" data-icon="plus" data-icon-kind="mono"></span>新愿望</button></div>
+          ${items.length ? items.map((w) => {
+            const st = wishState(w);
+            const pct = Math.min(100, Math.round((bal / w.pointsCost) * 100));
+            return `<div class="wish-card">
+              <span class="wish-emoji go-emoji">${w.emoji}</span>
+              <div class="wc-body"><b>${esc(w.title)}</b>
+                <small>${w.kind === 'goods' ? `¥${w.priceCny} · ` : '事件 · '}需要 ${fmt(w.pointsCost)} 分${w.kind === 'goods' ? '' : (w.needConfirm ? ' · 需对方确认' : ' · 自己就能用')}</small></div>
+              <div class="wc-bar"><i style="width:${pct}%"></i></div>
+              <button class="hold-btn" type="button"
+                data-redeem="${w.id}" ${st.ok ? '' : 'disabled'}
+                aria-label="${esc(w.title)}：${st.ok ? '按住一秒兑换' : st.label}">
+                <span class="hold-fill" aria-hidden="true"></span>
+                <span class="hold-label">${st.ok ? '按住兑换' : esc(st.label)}</span>
+              </button>
+            </div>`; }).join('') : emptyBlock('愿望单还是空的。加一个想换的东西，攒够分就能兑。', 'gift')}
+        </section>
+        <section class="wood-panel sub-panel">
+          <div class="panel-head"><h2><span class="wood-tag">兑换记录</span></h2></div>
+          ${reds.length ? reds.map((r) => `<div class="red-row">
+            <span class="red-title">${esc(r.title)}</span>
+            <span class="red-points">-${fmt(r.points)}</span>
+            <span class="chip chip-muted">${label[r.status] || r.status}</span>
+            <span class="goal-act">
+              ${r.status === 'confirmed' ? '<button class="text-btn" type="button" data-red-done="' + r.id + '">已收到</button><button class="text-btn" type="button" data-red-cancel="' + r.id + '">撤回</button>' : ''}
+            </span></div>`).join('') : emptyBlock('还没有兑换记录。')}
+        </section>`;
+    }
+
+    /* ── ta 的视角（只读）────────────────────────────── */
+    const pw = store.partnerWishes;   // null = 还没加载
+    const pName = (pid && userById(pid) && userById(pid).name) || 'ta';
+    const loaded = Array.isArray(pw);
+    const all = loaded ? pw : [];
+    const activeCnt = all.filter((w) => w.status === 'active').length;
+
+    return `${head('愿望单', '', loaded ? `${pName}正在攒 ${activeCnt} 个` : '正在加载…')}
+      ${tabsHtml}
       <section class="wood-panel sub-panel">
-        <div class="panel-head"><h2><span class="wood-tag wood-tag-berry">正在攒</span></h2>
-          <button class="wood-btn wood-btn-sm" type="button" data-new-wish><span class="btn-ico" data-icon="plus" data-icon-kind="mono"></span>新愿望</button></div>
-        ${items.length ? items.map((w) => {
-          const st = wishState(w);
-          const pct = Math.min(100, Math.round((bal / w.pointsCost) * 100));
-          return `<div class="wish-card">
-            <span class="wish-emoji go-emoji">${w.emoji}</span>
-            <div class="wc-body"><b>${esc(w.title)}</b>
-              <small>${w.kind === 'goods' ? `¥${w.priceCny} · ` : '事件 · '}需要 ${fmt(w.pointsCost)} 分${w.kind === 'goods' ? '' : (w.needConfirm ? ' · 需对方确认' : ' · 自己就能用')}</small></div>
-            <div class="wc-bar"><i style="width:${pct}%"></i></div>
-            <button class="hold-btn" type="button"
-              data-redeem="${w.id}" ${st.ok ? '' : 'disabled'}
-              aria-label="${esc(w.title)}：${st.ok ? '按住一秒兑换' : st.label}">
-              <span class="hold-fill" aria-hidden="true"></span>
-              <span class="hold-label">${st.ok ? '按住兑换' : esc(st.label)}</span>
-            </button>
-          </div>`; }).join('') : emptyBlock('愿望单还是空的。加一个想换的东西，攒够分就能兑。', 'gift')}
-      </section>
-      <section class="wood-panel sub-panel">
-        <div class="panel-head"><h2><span class="wood-tag">兑换记录</span></h2></div>
-        ${reds.length ? reds.map((r) => `<div class="red-row">
-          <span class="red-title">${esc(r.title)}</span>
-          <span class="red-points">-${fmt(r.points)}</span>
-          <span class="chip chip-muted">${label[r.status] || r.status}</span>
-          <span class="goal-act">
-            ${r.status === 'confirmed' ? '<button class="text-btn" type="button" data-red-done="' + r.id + '">已收到</button><button class="text-btn" type="button" data-red-cancel="' + r.id + '">撤回</button>' : ''}
-          </span></div>`).join('') : emptyBlock('还没有兑换记录。')}
+        <div class="panel-head"><h2><span class="wood-tag wood-tag-berry">ta 的愿望单</span></h2>
+          <span class="wish-ro-hint">只读</span></div>
+        ${!loaded
+          ? emptyBlock('正在加载 ta 的愿望单…')
+          : (all.length ? all.map((w) => {
+              const done = w.status !== 'active';
+              return `<div class="wish-card is-readonly">
+                <span class="wish-emoji go-emoji">${w.emoji}</span>
+                <div class="wc-body"><b>${esc(w.title)}</b>
+                  <small>${w.kind === 'goods' ? `¥${w.priceCny} · ` : '事件 · '}需要 ${fmt(w.pointsCost)} 分${w.kind === 'goods' ? '' : (w.needConfirm ? ' · 需对方确认' : ' · 自己就能用')}</small></div>
+                <span class="wish-ro-state ${done ? 'is-done' : ''}">${done ? '已兑换' : '攒着'}</span>
+              </div>`;
+            }).join('')
+            : emptyBlock(pName + '还没加愿望。', 'gift'))}
       </section>`;
   }
 
@@ -4306,6 +4420,29 @@
     const shiftBtn = t.closest('[data-big-shift]');
     if (shiftBtn) { openBigShift(shiftBtn.dataset.bigShift); return; }
     if (t.closest('[data-new-biggoal]')) { openBigGoalForm(null); return; }
+
+    /* 小目标/日常的「⋯」菜单：编辑 / 删除（软删除=放弃） */
+    const rowMenuBtn = t.closest('[data-row-menu]');
+    if (rowMenuBtn) {
+      const gid = rowMenuBtn.dataset.rowMenu;
+      const goal = goalOf(gid);
+      openRowMenu(rowMenuBtn, [
+        { label: '编辑', onClick: () => openGoalForm(gid) },
+        { label: '删除', danger: true, onClick: () => deleteGoal(goal) },
+      ]);
+      return;
+    }
+    /* 大目标的「⋯」菜单：编辑 / 删除 */
+    const bigMenuBtn = t.closest('[data-big-menu]');
+    if (bigMenuBtn) {
+      const bid = bigMenuBtn.dataset.bigMenu;
+      openRowMenu(bigMenuBtn, [
+        { label: '编辑', onClick: () => openBigGoalForm(bid) },
+        { label: '删除', danger: true, onClick: () => deleteBigGoal(bid) },
+      ]);
+      return;
+    }
+
     if (t.closest('[data-edit-biggoal]')) { openBigGoalForm(t.closest('[data-edit-biggoal]').dataset.editBiggoal); return; }
 
     const mkBtn = t.closest('[data-makeup]');
@@ -4333,6 +4470,30 @@
     const reviewBtn = t.closest('[data-review]');
     if (reviewBtn) { openCheckReview(reviewBtn.dataset.review); return; }
     if (t.closest('[data-new-wish]')) { openWishForm(null); return; }
+    /* 愿望单子 tab：我的 / ta 的（首次切到 ta 的时懒加载对方数据） */
+    const wishTabBtn = t.closest('[data-wish-tab]');
+    if (wishTabBtn) {
+      const which = wishTabBtn.dataset.wishTab;
+      if (which === 'partner' && !partnerId()) { toast('还没配对，看不到 ta 的愿望单'); return; }
+      store.wishTab = which;
+      if (which === 'partner' && !Array.isArray(store.partnerWishes)) {
+        store.partnerWishes = null;
+        renderView('wish');
+        API.partnerWishes(partnerId())
+          .then((res) => {
+            store.partnerWishes = ((res && res.items) || []).map(AD.adaptWish);
+            if (store.wishTab === 'partner') renderView('wish');
+          })
+          .catch((e) => {
+            store.partnerWishes = [];
+            if (store.wishTab === 'partner') renderView('wish');
+            toast(e.message || '加载失败');
+          });
+        return;
+      }
+      renderView('wish');
+      return;
+    }
     if (t.closest('[data-redeem]')) return; // 兑换走长按，见 bindHoldToRedeem
     const rc = t.closest('[data-red-cancel]');
     if (rc) {
