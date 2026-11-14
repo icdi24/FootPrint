@@ -2774,6 +2774,16 @@ textarea:focus-visible { outline: none; }
 }
 .wish-ro-state.is-done { color: var(--leaf-ink); border-color: var(--leaf-ink); background: rgba(90, 138, 74, .1); }
 
+/* 可编辑的愿望卡片：点空白处打开编辑 */
+.wish-card.is-editable { cursor: pointer; transition: background .16s var(--ease); }
+.wish-card.is-editable:hover { background: var(--wood-light); }
+.wish-card.is-editable:focus-visible { outline: 2px solid var(--wood-dark); outline-offset: 1px; }
+.wish-card.is-editable .hold-btn { cursor: default; }
+.wish-card.is-editable .hold-btn:not(:disabled) { cursor: pointer; }
+/* 编辑弹窗里的删除按钮：走 danger 色 */
+.wish-del-btn { color: var(--berry-ink); }
+.wish-del-btn:hover { color: var(--berry-deep); }
+
 .wish-banner {
   position: relative;
   padding: 16px 20px 15px;

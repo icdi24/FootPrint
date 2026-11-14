@@ -2176,7 +2176,7 @@
 
   function openWishForm(wid) {
     if (!guard('加愿望要先登录。')) return;
-    const w = wid ? store.wishes.find((x) => x.id === wid) : null;
+    const w = wid ? store.wishes.find((x) => String(x.id) === String(wid)) : null;
     const base = w || { kind: 'goods', title: '', emoji: '🎁', priceCny: 100, pointsCost: 1000, cooldown: 0, status: 'active', desc: '' };
     const s = openSheet({
       title: w ? '编辑愿望' : '新的愿望',
@@ -2214,7 +2214,7 @@
           </div>
           <p class="fg-note">事件类要占用对方的时间，需要对方确认才扣分。</p>
         </div>`,
-      actions: `<button class="text-btn" type="button" data-cancel>取消</button>
+      actions: `<button class="text-btn" type="button" data-cancel>取消</button>${w ? '<button class="text-btn wish-del-btn" type="button" data-wish-del>删除</button>' : ''}
         <button class="wood-btn" type="button" data-ok>${w ? '保存' : '加进愿望单'}</button>`,
     });
     let kind = base.kind;
@@ -2232,6 +2232,22 @@
     $('#wfPrice', s.el).addEventListener('input', (e) => {
       const v = Number(e.target.value);
       if (v > 0) $('#wfPoints', s.el).value = v * 10;
+    });
+    const delBtn = $('[data-wish-del]', s.el);
+    if (delBtn) delBtn.addEventListener('click', async () => {
+      const yes = await confirmSheet({
+        title: '删除这个愿望',
+        text: `确定删除「${esc(w.title)}」吗？兑换记录会保留，它不再出现在愿望单里。`,
+        confirmText: '删除', danger: true,
+      });
+      if (!yes) return;
+      try {
+        await API.deleteWish(w.id);
+        s.close();
+        await loadAll();
+        renderAll();
+        toast('已删除');
+      } catch (e) { toast(e.message || '删除失败'); }
     });
     $('[data-cancel]', s.el).addEventListener('click', () => s.close());
     $('[data-ok]', s.el).addEventListener('click', async () => {
@@ -3169,7 +3185,8 @@
           ${items.length ? items.map((w) => {
             const st = wishState(w);
             const pct = Math.min(100, Math.round((bal / w.pointsCost) * 100));
-            return `<div class="wish-card">
+            return `<div class="wish-card is-editable" data-edit-wish="${w.id}" role="button" tabindex="0"
+              aria-label="编辑愿望：${esc(w.title)}" title="点空白处编辑">
               <span class="wish-emoji go-emoji">${w.emoji}</span>
               <div class="wc-body"><b>${esc(w.title)}</b>
                 <small>${w.kind === 'goods' ? `¥${w.priceCny} · ` : '事件 · '}需要 ${fmt(w.pointsCost)} 分${w.kind === 'goods' ? '' : (w.needConfirm ? ' · 需对方确认' : ' · 自己就能用')}</small></div>
@@ -4291,6 +4308,14 @@
     }));
 
   /* 视图内事件委托 */
+  /* 愿望卡片支持键盘：聚焦后按回车/空格也打开编辑 */
+  mount.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const card = e.target.closest && e.target.closest('[data-edit-wish]');
+    if (!card || e.target.closest('[data-redeem]')) return;
+    e.preventDefault();
+    openWishForm(card.dataset.editWish);
+  });
   mount.addEventListener('click', (e) => {
     const t = e.target;
     const drawerBtn = t.closest('[data-us-drawer]');
@@ -4495,6 +4520,9 @@
       return;
     }
     if (t.closest('[data-redeem]')) return; // 兑换走长按，见 bindHoldToRedeem
+    /* 点愿望卡片空白处 → 打开编辑（兑换按钮已在上方拦截） */
+    const wishCard = t.closest('[data-edit-wish]');
+    if (wishCard) { openWishForm(wishCard.dataset.editWish); return; }
     const rc = t.closest('[data-red-cancel]');
     if (rc) {
       const r = store.redemptions.find((x) => x.id === rc.dataset.redCancel);

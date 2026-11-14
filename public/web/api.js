@@ -110,6 +110,7 @@
     partnerWishes: (uid) => api.get(`/wish?user=${encodeURIComponent(uid)}`),
     createWish: (payload) => api.post('/wish', payload),
     updateWish: (id, payload) => api.put(`/wish/${id}`, payload),
+    deleteWish: (id) => api.del(`/wish/${id}`),
     redeem: (id) => api.post(`/wish/${id}/redeem`),
     cancelRedemption: (id) => api.post(`/redemptions/${id}/cancel`),
     doneRedemption: (id) => api.post(`/redemptions/${id}/done`),
