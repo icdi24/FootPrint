@@ -28,6 +28,9 @@ const WEAK = new Set([
   'footprint', 'footprint123', 'letmein', 'welcome1',
 ]);
 const DEMO_ACCOUNTS = Object.freeze({ lizi: '栗子', abai: '阿白' });
+// 演示账号的固定 id：按 id 查找比按名字稳（名字被改也能登进来）
+const DEMO_IDS = Object.freeze({ lizi: 1, abai: 2 });
+const DEMO_ID_SET = new Set(Object.values(DEMO_IDS));
 
 module.exports = function authRoutes(db) {
   const r = express.Router();
@@ -177,7 +180,9 @@ module.exports = function authRoutes(db) {
       const slot = String((req.body && req.body.slot) || '').trim();
       const username = DEMO_ACCOUNTS[slot];
       if (!username) return res.status(400).json({ error: '无效的演示账号' });
-      const user = await db.get('SELECT * FROM users WHERE login_name = ?', [username]);
+      // 先按固定 id 找（改名也不影响），再退回按名字找（兼容 id 变动的情况）
+      let user = await db.get('SELECT * FROM users WHERE id = ?', [DEMO_IDS[slot]]);
+      if (!user) user = await db.get('SELECT * FROM users WHERE login_name = ?', [username]);
       if (!user) return res.status(404).json({ error: '演示账号尚未初始化' });
       const s = await createSession(db, user.id);
       setCookie(res, s.token, s.expiresAt);
@@ -213,6 +218,10 @@ module.exports = function authRoutes(db) {
   // 改用户名：全局唯一；两列一起更新，会话保持有效
   r.patch('/me', requireUser, async (req, res, next) => {
     try {
+      // 演示账号禁止改名：一改名「演示账号一键登录」就会失效（2026-11-24 被改成「小陈」的事故）
+      if (DEMO_ID_SET.has(Number(req.user.id))) {
+        return res.status(403).json({ error: '演示账号不支持改名' });
+      }
       const raw = req.body && req.body.username;
       if (typeof raw !== 'string' || !raw.trim()) return res.status(400).json({ error: '用户名不能为空' });
       const name = raw.trim();
