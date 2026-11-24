@@ -161,6 +161,12 @@ module.exports = function authRoutes(db) {
         return res.status(429).json({ error: `失败次数过多，请 ${secs} 秒后再试` });
       }
       const user = await db.get('SELECT * FROM users WHERE login_name = ?', [username]);
+      // 演示账号禁止密码登录：密码 12345678 是公开的，谁都能登进来删数据 / 改密码。
+      // 演示入口只保留 demo-login（按固定 id 签发会话，不校验密码）。
+      if (user && DEMO_ID_SET.has(Number(user.id))) {
+        log.log('login_blocked_demo', `${username} (${user.id}) 试图用密码登录演示账号`);
+        return res.status(403).json({ error: '演示账号请用「一键登录」，不支持密码登录' });
+      }
       if (!user || !verifyPassword(password, user.password_hash)) {
         await recordLoginFail(db, username, ip);
         log.log('login_fail', username);
